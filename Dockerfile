@@ -2,6 +2,8 @@ FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 COPY package.json package-lock.json ./
+COPY scripts/prisma-generate.mjs ./scripts/prisma-generate.mjs
+COPY prisma ./prisma
 RUN npm ci
 
 FROM node:22-bookworm-slim AS builder

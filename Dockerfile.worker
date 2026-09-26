@@ -4,6 +4,8 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
+COPY scripts/prisma-generate.mjs ./scripts/prisma-generate.mjs
+COPY prisma ./prisma
 RUN npm ci
 COPY . .
 RUN npx prisma generate && npx playwright install --with-deps chromium

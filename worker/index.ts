@@ -88,11 +88,13 @@ followUps.on("failed", (job, error) => {
   logInfo("worker.job_failed", { queue: "follow-up", jobId: job?.id, message: error.message });
 });
 
-await getQueue("follow-up").add(
-  "scan",
-  {},
-  { repeat: { every: 15 * 60 * 1000 }, jobId: "follow-up-scan" },
-);
+void getQueue("follow-up")
+  .add("scan", {}, { repeat: { every: 15 * 60 * 1000 }, jobId: "follow-up-scan" })
+  .catch((error: unknown) => {
+    logInfo("worker.follow_up_schedule_failed", {
+      message: error instanceof Error ? error.message : "unknown",
+    });
+  });
 
 function readPayload(data: Record<string, string>, key: string) {
   if (data[key]) return data[key];

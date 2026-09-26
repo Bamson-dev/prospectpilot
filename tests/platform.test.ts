@@ -7,6 +7,7 @@ import { redact } from "@/lib/logger";
 import { isBlockedIp } from "@/lib/network";
 import { classifyProviderFailure, isPermanentProviderFailure } from "@/lib/provider-errors";
 import { buildDiscoveryQueries } from "@/lib/search/queries";
+import { googleNeedsBrowser, rejectAllConsent } from "@/lib/search/consent";
 import { parseGoogleResults } from "@/lib/search/parse-google";
 import { extractPage } from "@/lib/research/extract";
 import { roleAtLeast } from "@/lib/roles";
@@ -34,6 +35,14 @@ describe("google results", () => {
     expect(hits).toHaveLength(1);
     expect(hits[0]?.url).toContain("northwind.example");
     expect(hits[0]?.title).toBe("Northwind Realty");
+  });
+
+  it("selects the essential-only Google consent form", () => {
+    const html = `<form action="https://consent.google.com/save" method="POST"><input name="set_eom" value="true"><input name="continue" value="https://www.google.com/search?q=acme"><input type="submit" value="Reject all"></form>`;
+    const form = rejectAllConsent(html);
+    expect(form?.action).toBe("https://consent.google.com/save");
+    expect(form?.body).toContain("set_eom=true");
+    expect(googleNeedsBrowser("Please click enablejs SG_REL")).toBe(true);
   });
 });
 

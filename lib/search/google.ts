@@ -1,4 +1,5 @@
 import { AppError } from "@/lib/errors";
+import { allowedGoogleUrl, googleBlocked, googleNeedsBrowser, rejectAllConsent } from "@/lib/search/consent";
 import { parseGoogleResults } from "@/lib/search/parse-google";
 import type { SearchHit, SearchProvider } from "@/lib/search/types";
 
@@ -40,29 +41,65 @@ export class GoogleSearchProvider implements SearchProvider {
     url.searchParams.set("num", String(limit));
     url.searchParams.set("gbv", "1");
     url.searchParams.set("hl", "en");
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(15000),
-      headers: {
-        "User-Agent": "ProspectPilot/0.1 (+https://leadpilot.live)",
-        Accept: "text/html",
-      },
-      redirect: "manual",
-    });
+    const cookies = new Map<string, string>();
+    let response = await googleFetch(url.toString(), cookies);
+    if (response.status >= 300 && response.status < 400) {
+      response = await acceptEssentialConsent(response, cookies);
+    }
+    for (let hop = 0; hop < 3 && response.status >= 300 && response.status < 400; hop += 1) {
+      const location = response.headers.get("location");
+      if (!location || !allowedGoogleUrl(new URL(location, url).toString())) {
+        throw new AppError("Google did not return search results. Discovery stopped.");
+      }
+      response = await googleFetch(new URL(location, url).toString(), cookies);
+    }
     if (response.status === 429 || response.status === 503) {
       throw new AppError("Google asked us to slow down. Discovery stopped instead of retrying around the limit.");
     }
-    if (response.status >= 300 && response.status < 400) {
-      throw new AppError("Google did not return search results. Discovery stopped.");
-    }
     if (!response.ok) throw new AppError(`Google search failed with status ${response.status}.`);
     const html = await response.text();
-    if (/unusual traffic|detected unusual traffic|recaptcha/i.test(html)) {
-      throw new AppError("Google blocked automated search. Discovery stopped.");
-    }
+    if (googleBlocked(html)) throw new AppError("Google blocked automated search. Discovery stopped.");
     const hits = parseGoogleResults(html, limit);
+    if (hits.length === 0 && googleNeedsBrowser(html)) {
+      throw new AppError("Google did not return HTML results from this server. Add GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX, or discovery stays stopped.");
+    }
     if (hits.length === 0) throw new AppError("Google returned no company results for that query.");
     return hits;
   }
+}
+
+const USER_AGENT = "ProspectPilot/0.1 (+https://leadpilot.live)";
+
+async function googleFetch(target: string, cookies: Map<string, string>, init?: RequestInit) {
+  const headers = new Headers(init?.headers);
+  headers.set("User-Agent", USER_AGENT);
+  headers.set("Accept", "text/html");
+  if (cookies.size > 0) headers.set("Cookie", [...cookies].map(([key, value]) => `${key}=${value}`).join("; "));
+  const response = await fetch(target, { ...init, headers, redirect: "manual", signal: AbortSignal.timeout(20000) });
+  const setCookies = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
+  for (const cookie of setCookies) {
+    const pair = cookie.split(";", 1)[0] ?? "";
+    const eq = pair.indexOf("=");
+    if (eq > 0) cookies.set(pair.slice(0, eq), pair.slice(eq + 1));
+  }
+  return response;
+}
+
+async function acceptEssentialConsent(response: Response, cookies: Map<string, string>) {
+  const location = response.headers.get("location");
+  const consentUrl = location ? new URL(location, "https://www.google.com").toString() : "";
+  if (!consentUrl.startsWith("https://consent.google.com/")) {
+    throw new AppError("Google did not return search results. Discovery stopped.");
+  }
+  const page = await googleFetch(consentUrl, cookies);
+  if (!page.ok) throw new AppError("Google did not return search results. Discovery stopped.");
+  const form = rejectAllConsent(await page.text());
+  if (!form) throw new AppError("Google did not return search results. Discovery stopped.");
+  return googleFetch(form.action, cookies, {
+    method: "POST",
+    body: form.body,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
 }
 
 export function getSearchProvider(): SearchProvider {

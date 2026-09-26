@@ -16,10 +16,15 @@ export default async function CampaignPage({ params, searchParams }: { params: P
     include: { activity: { orderBy: { createdAt: "desc" }, take: 12 }, prospects: { orderBy: { createdAt: "desc" }, take: 8 } },
   });
   if (!campaign) notFound();
+  const failedJobs = await prisma.backgroundJob.findMany({
+    where: { campaignId: campaign.id, organizationId: organization.id, state: "FAILED" },
+    orderBy: { finishedAt: "desc" },
+    take: 3,
+  });
   return (
     <div>
       <PageHeader title={campaign.name} detail={campaign.description || campaign.searchTerms} />
-      <Flash error={query.error} notice={query.notice} />
+      <Flash error={query.error ?? failedJobs[0]?.error ?? undefined} notice={query.notice} />
       <div className="mb-4 flex flex-wrap gap-2">
         <Pill>{campaign.status}</Pill>
         <Pill>{campaign.opportunityFocus}</Pill>

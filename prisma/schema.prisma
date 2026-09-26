@@ -1,0 +1,508 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum CampaignStatus {
+  DRAFT
+  DISCOVERY
+  RESEARCHING
+  READY
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum OpportunityFocus {
+  SOFTWARE
+  ADVERTISING
+  SOFTWARE_AND_ADVERTISING
+  AUTOMATION
+  OTHER
+}
+
+enum EmailProviderKind {
+  RESEND
+  GMAIL
+}
+
+enum DiscoveryStatus {
+  NEW
+  QUEUED
+  FOUND
+  FAILED
+}
+
+enum ResearchStatus {
+  PENDING
+  QUEUED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum QualificationStatus {
+  UNREVIEWED
+  QUALIFIED
+  REJECTED
+  APPROVED
+  SKIPPED
+}
+
+enum OutreachState {
+  NONE
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  OPENED
+  FAILED
+  REPLIED
+  SUPPRESSED
+}
+
+enum ReplyClass {
+  UNCLASSIFIED
+  INTERESTED
+  NOT_INTERESTED
+  QUESTION
+  PRICING_REQUEST
+  MEETING_REQUEST
+  NOT_NOW
+  WRONG_PERSON
+  UNSUBSCRIBE
+  OUT_OF_OFFICE
+  OTHER
+}
+
+enum FollowUpState {
+  PENDING_APPROVAL
+  SCHEDULED
+  QUEUED
+  SENT
+  SKIPPED
+  CANCELLED
+  FAILED
+}
+
+enum AccountStatus {
+  ACTIVE
+  ERROR
+  RESTRICTED
+}
+
+enum JobState {
+  QUEUED
+  ACTIVE
+  COMPLETED
+  FAILED
+  DELAYED
+}
+
+enum OpportunityKind {
+  SOFTWARE
+  ADVERTISING
+  AUTOMATION
+  OTHER
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  memberships  Membership[]
+}
+
+model Organization {
+  id            String          @id @default(cuid())
+  name          String
+  slug          String          @unique
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  memberships   Membership[]
+  campaigns     Campaign[]
+  prospects     Prospect[]
+  contacts      Contact[]
+  emailAccounts EmailAccount[]
+  suppressions  Suppression[]
+  jobs          BackgroundJob[]
+  activity      ActivityLog[]
+  settings      Setting[]
+  aiRequests    AIRequest[]
+  conversations Conversation[]
+}
+
+model Membership {
+  id             String         @id @default(cuid())
+  userId         String
+  organizationId String
+  role           MembershipRole @default(MEMBER)
+  createdAt      DateTime       @default(now())
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+}
+
+model Campaign {
+  id                   String           @id @default(cuid())
+  organizationId       String
+  name                 String
+  description          String?
+  industry             String?
+  country              String?
+  city                 String?
+  searchTerms          String
+  opportunityFocus     OpportunityFocus @default(SOFTWARE_AND_ADVERTISING)
+  targetCompanySize    String?
+  dailyDiscoveryLimit  Int              @default(25)
+  dailyResearchLimit   Int              @default(25)
+  dailyOutreachLimit   Int              @default(25)
+  provider             EmailProviderKind?
+  emailAccountId       String?
+  requireApproval      Boolean          @default(true)
+  autoFollowUp         Boolean          @default(false)
+  followUpSteps        Json
+  status               CampaignStatus   @default(DRAFT)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  organization         Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  emailAccount         EmailAccount?    @relation(fields: [emailAccountId], references: [id])
+  prospects            Prospect[]
+  jobs                 BackgroundJob[]
+  activity             ActivityLog[]
+  messages             OutreachMessage[]
+  followUps            FollowUp[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, updatedAt])
+}
+
+model Prospect {
+  id                      String                @id @default(cuid())
+  organizationId          String
+  campaignId              String?
+  companyName             String
+  domain                  String?
+  website                 String?
+  industry                String?
+  country                 String?
+  city                    String?
+  address                 String?
+  phone                   String?
+  linkedinUrl             String?
+  facebookUrl             String?
+  instagramUrl            String?
+  description             String?
+  companySize             String?
+  source                  String
+  sourceUrl               String?
+  discoveryStatus         DiscoveryStatus       @default(NEW)
+  researchStatus          ResearchStatus        @default(PENDING)
+  qualificationStatus     QualificationStatus   @default(UNREVIEWED)
+  outreachState           OutreachState         @default(NONE)
+  softwareOpportunity     Int?
+  advertisingOpportunity  Int?
+  automationOpportunity   Int?
+  opportunityScore        Int?
+  opportunityReason       String?
+  researchSummary         String?
+  painPoints              String[]
+  recommendedService      String?
+  personalizationAngle    String?
+  suggestedOpening        String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  organization            Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaign                Campaign?             @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  contacts                Contact[]
+  research                ResearchRecord[]
+  opportunities           OpportunityAssessment[]
+  messages                OutreachMessage[]
+  conversations           Conversation[]
+  activity                ActivityLog[]
+  jobs                    BackgroundJob[]
+  aiRequests              AIRequest[]
+
+  @@unique([organizationId, domain])
+  @@index([organizationId, qualificationStatus])
+  @@index([organizationId, outreachState])
+  @@index([organizationId, updatedAt])
+  @@index([campaignId, createdAt])
+}
+
+model Contact {
+  id             String       @id @default(cuid())
+  organizationId String
+  prospectId     String
+  firstName      String?
+  lastName       String?
+  fullName       String?
+  jobTitle       String?
+  email          String?
+  phone          String?
+  linkedinUrl    String?
+  source         String
+  sourceUrl      String?
+  confidence     Int          @default(0)
+  isPrimary      Boolean      @default(false)
+  suppressed     Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospect       Prospect     @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  messages       OutreachMessage[]
+  replies        Reply[]
+
+  @@index([organizationId, email])
+  @@index([prospectId, isPrimary])
+}
+
+model ResearchRecord {
+  id              String   @id @default(cuid())
+  prospectId      String
+  url             String
+  fetchMethod     String
+  title           String?
+  metaDescription String?
+  excerpt         String?
+  headings        String[]
+  signals         Json
+  createdAt       DateTime @default(now())
+  prospect        Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId, createdAt])
+}
+
+model OpportunityAssessment {
+  id                 String          @id @default(cuid())
+  prospectId         String
+  kind               OpportunityKind
+  evidence           Json
+  interpretation     String
+  recommendedService String?
+  confidence         Int
+  createdAt          DateTime        @default(now())
+  prospect           Prospect        @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId, kind])
+}
+
+model EmailAccount {
+  id                    String            @id @default(cuid())
+  organizationId        String
+  provider              EmailProviderKind
+  fromEmail             String
+  fromName              String?
+  refreshTokenEncrypted String?
+  status                AccountStatus     @default(ACTIVE)
+  lastError             String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  organization          Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaigns             Campaign[]
+
+  @@index([organizationId, provider])
+}
+
+model Conversation {
+  id             String            @id @default(cuid())
+  organizationId String
+  prospectId     String
+  subject        String
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospect       Prospect          @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  messages       OutreachMessage[]
+  replies        Reply[]
+  notes          ConversationNote[]
+
+  @@index([organizationId, updatedAt])
+}
+
+model ConversationNote {
+  id             String       @id @default(cuid())
+  conversationId String
+  body           String
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model OutreachMessage {
+  id             String         @id @default(cuid())
+  organizationId String
+  campaignId     String?
+  prospectId     String
+  contactId      String?
+  conversationId String?
+  subject        String
+  body           String
+  state          OutreachState  @default(DRAFT)
+  provider       EmailProviderKind?
+  providerMessageId String?
+  error          String?
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  openedAt       DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  campaign       Campaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  prospect       Prospect       @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  contact        Contact?       @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  conversation   Conversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  followUps      FollowUp[]
+
+  @@index([prospectId, state])
+  @@index([campaignId, state])
+  @@index([providerMessageId])
+}
+
+model Reply {
+  id                 String      @id @default(cuid())
+  organizationId     String
+  conversationId     String
+  prospectId         String
+  contactId          String?
+  fromEmail          String?
+  subject            String?
+  body               String
+  receivedAt         DateTime    @default(now())
+  classification     ReplyClass  @default(UNCLASSIFIED)
+  classificationNote String?
+  suggestedSubject   String?
+  suggestedBody      String?
+  confidence         Int?
+  createdAt          DateTime    @default(now())
+  conversation       Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contact            Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, receivedAt])
+  @@index([prospectId, classification])
+}
+
+model FollowUp {
+  id             String        @id @default(cuid())
+  organizationId String
+  campaignId     String
+  prospectId     String
+  messageId      String?
+  dayOffset      Int
+  subject        String
+  body           String
+  state          FollowUpState @default(PENDING_APPROVAL)
+  runAt          DateTime?
+  error          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  campaign       Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  message        OutreachMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([state, runAt])
+  @@index([campaignId, state])
+  @@index([prospectId])
+}
+
+model Suppression {
+  id             String       @id @default(cuid())
+  organizationId String
+  email          String
+  reason         String
+  source         String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([organizationId, email])
+}
+
+model BackgroundJob {
+  id             String       @id @default(cuid())
+  organizationId String
+  campaignId     String?
+  prospectId     String?
+  queue          String
+  name           String
+  state          JobState     @default(QUEUED)
+  attempts       Int          @default(0)
+  maxAttempts    Int          @default(3)
+  error          String?
+  payload        Json?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  prospect       Prospect?    @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, state])
+  @@index([queue, state])
+  @@index([campaignId])
+}
+
+model ActivityLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  campaignId     String?
+  prospectId     String?
+  action         String
+  detail         String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  prospect       Prospect?    @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([prospectId, createdAt])
+  @@index([campaignId, createdAt])
+}
+
+model AIRequest {
+  id             String       @id @default(cuid())
+  organizationId String
+  prospectId     String?
+  purpose        String
+  promptVersion  String
+  model          String
+  inputHash      String
+  status         String
+  error          String?
+  durationMs     Int?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospect       Prospect?    @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, purpose, inputHash])
+  @@index([prospectId, createdAt])
+}
+
+model Setting {
+  id             String       @id @default(cuid())
+  organizationId String
+  key            String
+  value          String
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+}

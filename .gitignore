@@ -1,0 +1,17 @@
+node_modules
+.next
+out
+build
+coverage
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+*.pem
+npm-debug.log*
+.env
+.env.*
+!.env.example
+.vercel
+playwright-report
+test-results
+/tmp

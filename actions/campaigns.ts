@@ -1,0 +1,107 @@
+"use server";
+
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import { requireOrganization } from "@/lib/current-user";
+import { prisma } from "@/lib/db";
+import { errorMessage } from "@/lib/errors";
+import { stepsFromText } from "@/lib/follow-ups";
+import { queueJob, recordActivity } from "@/lib/jobs";
+
+const campaignSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  description: z.string().trim().max(1000).optional(),
+  industry: z.string().trim().max(120).optional(),
+  country: z.string().trim().max(80).optional(),
+  city: z.string().trim().max(80).optional(),
+  searchTerms: z.string().trim().min(2).max(1000),
+  opportunityFocus: z.enum(["SOFTWARE", "ADVERTISING", "SOFTWARE_AND_ADVERTISING", "AUTOMATION", "OTHER"]),
+  targetCompanySize: z.string().trim().max(80).optional(),
+  dailyDiscoveryLimit: z.coerce.number().int().min(1).max(1000),
+  dailyResearchLimit: z.coerce.number().int().min(1).max(500),
+  dailyOutreachLimit: z.coerce.number().int().min(1).max(500),
+  provider: z.enum(["RESEND", "GMAIL", ""]).optional(),
+  emailAccountId: z.string().optional(),
+  followUps: z.string().trim().max(80).optional(),
+});
+
+function optional(value: FormDataEntryValue | null) {
+  const text = String(value ?? "").trim();
+  return text || undefined;
+}
+
+export async function createCampaign(formData: FormData) {
+  const { organization } = await requireOrganization();
+  const parsed = campaignSchema.safeParse({
+    name: formData.get("name"),
+    description: optional(formData.get("description")),
+    industry: optional(formData.get("industry")),
+    country: optional(formData.get("country")),
+    city: optional(formData.get("city")),
+    searchTerms: formData.get("searchTerms"),
+    opportunityFocus: formData.get("opportunityFocus"),
+    targetCompanySize: optional(formData.get("targetCompanySize")),
+    dailyDiscoveryLimit: formData.get("dailyDiscoveryLimit") || 25,
+    dailyResearchLimit: formData.get("dailyResearchLimit") || 25,
+    dailyOutreachLimit: formData.get("dailyOutreachLimit") || 25,
+    provider: formData.get("provider") || "",
+    emailAccountId: optional(formData.get("emailAccountId")),
+    followUps: optional(formData.get("followUps")),
+  });
+  if (!parsed.success) redirect(`/campaigns/new?error=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Check the campaign.")}`);
+  const campaign = await prisma.campaign.create({
+    data: {
+      organizationId: organization.id,
+      name: parsed.data.name,
+      description: parsed.data.description,
+      industry: parsed.data.industry,
+      country: parsed.data.country,
+      city: parsed.data.city,
+      searchTerms: parsed.data.searchTerms,
+      opportunityFocus: parsed.data.opportunityFocus,
+      targetCompanySize: parsed.data.targetCompanySize,
+      dailyDiscoveryLimit: parsed.data.dailyDiscoveryLimit,
+      dailyResearchLimit: parsed.data.dailyResearchLimit,
+      dailyOutreachLimit: parsed.data.dailyOutreachLimit,
+      provider: parsed.data.provider ? parsed.data.provider : null,
+      emailAccountId: parsed.data.emailAccountId || null,
+      followUpSteps: stepsFromText(parsed.data.followUps || "3,7,14"),
+      requireApproval: true,
+      autoFollowUp: false,
+    },
+  });
+  await recordActivity({ organizationId: organization.id, campaignId: campaign.id, action: "campaign.created", detail: campaign.name });
+  redirect(`/campaigns/${campaign.id}?notice=Campaign+saved.`);
+}
+
+async function setStatus(id: string, status: "DISCOVERY" | "PAUSED" | "ACTIVE" | "ARCHIVED", enqueueDiscovery: boolean) {
+  const { organization } = await requireOrganization();
+  const campaign = await prisma.campaign.findFirst({ where: { id, organizationId: organization.id } });
+  if (!campaign) redirect("/campaigns?error=Campaign+not+found.");
+  try {
+    await prisma.campaign.update({ where: { id }, data: { status } });
+    await recordActivity({ organizationId: organization.id, campaignId: id, action: `campaign.${status.toLowerCase()}` });
+    if (enqueueDiscovery) {
+      await queueJob({ organizationId: organization.id, campaignId: id, queue: "discovery", name: "discovery.search" });
+    }
+  } catch (error) {
+    redirect(`/campaigns/${id}?error=${encodeURIComponent(errorMessage(error))}`);
+  }
+  redirect(`/campaigns/${id}?notice=Campaign+updated.`);
+}
+
+export async function startCampaign(formData: FormData) {
+  await setStatus(String(formData.get("id")), "DISCOVERY", true);
+}
+
+export async function pauseCampaign(formData: FormData) {
+  await setStatus(String(formData.get("id")), "PAUSED", false);
+}
+
+export async function resumeCampaign(formData: FormData) {
+  await setStatus(String(formData.get("id")), "ACTIVE", true);
+}
+
+export async function archiveCampaign(formData: FormData) {
+  await setStatus(String(formData.get("id")), "ARCHIVED", false);
+}

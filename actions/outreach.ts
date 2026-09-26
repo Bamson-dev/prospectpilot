@@ -17,6 +17,13 @@ export async function approveOutreach(formData: FormData) {
   const id = String(formData.get("id"));
   try {
     const message = await ownedMessage(id, organization.id);
+    const contact = message.contactId
+      ? await prisma.contact.findFirst({ where: { id: message.contactId, organizationId: organization.id } })
+      : null;
+    if (contact?.suppressed || (contact?.email && await prisma.suppression.findUnique({ where: { organizationId_email: { organizationId: organization.id, email: contact.email } } }))) {
+      await prisma.outreachMessage.update({ where: { id }, data: { state: "SUPPRESSED", error: "Suppressed before sending." } });
+      throw new AppError("This contact is suppressed and cannot enter the outreach queue.");
+    }
     const subject = String(formData.get("subject") ?? message.subject).trim().slice(0, 160);
     const body = String(formData.get("body") ?? message.body).trim().slice(0, 4000);
     if (!subject || !body) throw new AppError("Subject and body are required.");
@@ -42,8 +49,8 @@ export async function rejectOutreach(formData: FormData) {
   const id = String(formData.get("id"));
   const message = await prisma.outreachMessage.findFirst({ where: { id, organizationId: organization.id } });
   if (!message) redirect("/outreach?error=Message+not+found.");
-  await prisma.outreachMessage.update({ where: { id }, data: { state: "FAILED", error: "Rejected by a reviewer." } });
-  await prisma.prospect.update({ where: { id: message.prospectId }, data: { qualificationStatus: "REJECTED", outreachState: "FAILED" } });
+  await prisma.outreachMessage.update({ where: { id }, data: { state: "CANCELLED", error: "Rejected by a reviewer." } });
+  await prisma.prospect.update({ where: { id: message.prospectId }, data: { qualificationStatus: "REJECTED", outreachState: "CANCELLED" } });
   await recordActivity({ organizationId: organization.id, prospectId: message.prospectId, action: "outreach.rejected" });
   redirect("/outreach?notice=Prospect+rejected.");
 }
@@ -87,6 +94,49 @@ export async function queueSuggestedReply(formData: FormData) {
   });
   await recordActivity({ organizationId: organization.id, prospectId: reply.prospectId, action: "reply.drafted", detail: message.id });
   redirect(`/outreach?notice=Suggested+reply+is+waiting+for+approval.`);
+}
+
+export async function saveOutreachDraft(formData: FormData) {
+  const { organization, user } = await requireOrganization();
+  const prospectId = String(formData.get("prospectId") ?? "");
+  const prospect = await prisma.prospect.findFirst({ where: { id: prospectId, organizationId: organization.id }, include: { contacts: { where: { isPrimary: true }, take: 1 } } });
+  if (!prospect) redirect("/outreach?error=Prospect+not+found.");
+  const subject = String(formData.get("subject") ?? "").trim().slice(0, 160);
+  const body = String(formData.get("body") ?? "").trim().slice(0, 4000);
+  if (!subject || !body) redirect(`/prospects/${prospectId}?section=outreach&error=Subject+and+body+are+required.`);
+  const contact = prospect.contacts[0] ?? null;
+  if (contact?.email) {
+    const suppressed = contact.suppressed || await prisma.suppression.findUnique({ where: { organizationId_email: { organizationId: organization.id, email: contact.email } } });
+    if (suppressed) redirect(`/prospects/${prospectId}?section=outreach&error=That+contact+is+suppressed.+The+draft+was+not+queued.`);
+  }
+  const message = await prisma.outreachMessage.create({
+    data: {
+      organizationId: organization.id,
+      campaignId: prospect.campaignId,
+      prospectId: prospect.id,
+      contactId: contact?.id,
+      subject,
+      body,
+      state: "DRAFT",
+    },
+  });
+  await prisma.prospect.update({ where: { id: prospect.id }, data: { outreachState: "DRAFT" } });
+  await recordActivity({ organizationId: organization.id, campaignId: prospect.campaignId, prospectId: prospect.id, contactId: contact?.id, userId: user.id, action: "email.drafted", detail: message.id });
+  redirect(`/outreach?status=DRAFT&notice=Draft+saved.+It+will+not+send+until+someone+approves+it.`);
+}
+
+export async function submitDraftForApproval(formData: FormData) {
+  const { organization, user } = await requireOrganization();
+  const id = String(formData.get("id"));
+  const message = await prisma.outreachMessage.findFirst({ where: { id, organizationId: organization.id }, include: { contact: true } });
+  if (!message || message.state !== "DRAFT") redirect("/outreach?error=Only+a+saved+draft+can+be+submitted.");
+  if (message.contact?.suppressed) redirect("/outreach?error=That+contact+is+suppressed.");
+  const subject = String(formData.get("subject") ?? message.subject).trim().slice(0, 160);
+  const body = String(formData.get("body") ?? message.body).trim().slice(0, 4000);
+  await prisma.outreachMessage.update({ where: { id }, data: { subject, body, state: "PENDING_APPROVAL" } });
+  await prisma.prospect.update({ where: { id: message.prospectId }, data: { outreachState: "PENDING_APPROVAL" } });
+  await recordActivity({ organizationId: organization.id, prospectId: message.prospectId, userId: user.id, action: "email.submitted", detail: id });
+  redirect("/outreach?status=PENDING_APPROVAL&notice=Draft+is+waiting+for+approval.+Nothing+has+been+sent.");
 }
 
 export async function syncInbox() {

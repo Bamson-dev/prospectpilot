@@ -11,9 +11,18 @@ export type SendResult = {
   providerMessageId: string;
 };
 
+export type ProviderMessage = {
+  id: string;
+  status: string;
+};
+
 export interface EmailProvider {
   readonly name: "resend" | "gmail";
   sendEmail(message: OutboundEmail): Promise<SendResult>;
+  getMessage(id: string): Promise<ProviderMessage>;
+  getThread(id: string): Promise<ProviderMessage[]>;
+  getDeliveryStatus(id: string): Promise<string>;
+  syncInbox(): Promise<ProviderMessage[]>;
 }
 
 export function sanitizeOutbound(message: OutboundEmail): OutboundEmail {

@@ -4,12 +4,16 @@ import { Empty, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
+import { credentialStatus } from "@/lib/integrations/status";
 
 export const metadata = { title: "Inbox" };
 
 export default async function InboxPage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string }> }) {
   const { organization } = await requireOrganization();
   const query = await searchParams;
+  const accounts = await prisma.emailAccount.findMany({ where: { organizationId: organization.id }, select: { provider: true, status: true } });
+  const providers = credentialStatus(accounts);
+  const providerConnected = providers.gmail === "connected" || providers.resend === "connected";
   const conversations = await prisma.conversation.findMany({
     where: { organizationId: organization.id },
     orderBy: { updatedAt: "desc" },
@@ -21,7 +25,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
       <PageHeader title="Inbox" detail="Conversations are created from outreach and from synced replies. Gmail sync is manual until a connected account exists." />
       <Flash error={query.error} notice={query.notice} />
       <form action={syncInbox} className="mb-4"><SubmitButton pendingLabel="Queuing">Sync Gmail</SubmitButton></form>
-      {conversations.length === 0 ? <Empty title="No conversations" detail="Approving outreach creates the first thread. Replies are added by Gmail sync or the Resend webhook." /> : (
+      {conversations.length === 0 ? <Empty title={providerConnected ? "No conversations" : "No email provider connected."} detail={providerConnected ? "Approving outreach creates the first thread." : "Connect Gmail or save a Resend sender before replies can sync. Local conversations still appear here after a draft is approved."} /> : (
         <div className="overflow-x-auto rounded-2xl border border-line">
           <table>
             <thead><tr><th>Company</th><th>Subject</th><th>Latest</th><th>Classification</th></tr></thead>

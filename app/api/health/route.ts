@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { healthDecision } from "@/lib/health";
 import { getRedis } from "@/lib/queues";
 
 export const dynamic = "force-dynamic";
@@ -21,9 +22,6 @@ export async function GET(request: Request) {
       redis = "down";
     }
   }
-  const degraded = database !== "up" || (ready && redis === "down");
-  return NextResponse.json(
-    { ok: !degraded, service: "prospectpilot", database, redis },
-    { status: degraded ? 503 : 200, headers: { "Cache-Control": "no-store" } },
-  );
+  const decision = healthDecision(database, redis, ready);
+  return NextResponse.json(decision.body, { status: decision.status, headers: { "Cache-Control": "no-store" } });
 }

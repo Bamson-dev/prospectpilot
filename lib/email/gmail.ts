@@ -42,6 +42,30 @@ export class GmailProvider implements EmailProvider {
     return { providerMessageId: payload.id };
   }
 
+  async getMessage(id: string) {
+    this.requireOAuth();
+    return { id, status: "NOT_AVAILABLE" };
+  }
+
+  async getThread(id: string) {
+    return [await this.getMessage(id)];
+  }
+
+  async getDeliveryStatus(id: string) {
+    return (await this.getMessage(id)).status;
+  }
+
+  async syncInbox() {
+    this.requireOAuth();
+    return [];
+  }
+
+  private requireOAuth() {
+    if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_CLIENT_SECRET) {
+      throw new AppError("Gmail is not configured.");
+    }
+  }
+
   private async accessToken() {
     const clientId = process.env.GMAIL_CLIENT_ID;
     const clientSecret = process.env.GMAIL_CLIENT_SECRET;

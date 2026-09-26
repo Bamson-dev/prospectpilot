@@ -41,4 +41,26 @@ export class ResendProvider implements EmailProvider {
     if (!payload.id) throw new AppError("Resend accepted the message without an id.");
     return { providerMessageId: payload.id };
   }
+
+  async getMessage(id: string) {
+    this.requireKey();
+    return { id, status: "NOT_AVAILABLE" };
+  }
+
+  async getThread(id: string) {
+    return [await this.getMessage(id)];
+  }
+
+  async getDeliveryStatus(id: string) {
+    return (await this.getMessage(id)).status;
+  }
+
+  async syncInbox() {
+    this.requireKey();
+    return [];
+  }
+
+  private requireKey() {
+    if (!process.env.RESEND_API_KEY?.trim()) throw new AppError("Resend is not configured.");
+  }
 }

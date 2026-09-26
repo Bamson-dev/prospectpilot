@@ -3,6 +3,7 @@ import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
+import { credentialStatus, integrationLabel } from "@/lib/integrations/status";
 
 export const metadata = { title: "Integrations" };
 
@@ -10,19 +11,19 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const { organization, membership } = await requireOrganization();
   const query = await searchParams;
   const accounts = await prisma.emailAccount.findMany({ where: { organizationId: organization.id }, orderBy: { createdAt: "desc" } });
+  const status = credentialStatus(accounts.map((account) => ({ provider: account.provider, status: account.status })));
   const flags = [
-    ["DeepSeek", Boolean(process.env.DEEPSEEK_API_KEY)],
-    ["Resend", Boolean(process.env.RESEND_API_KEY)],
-    ["Gmail OAuth", Boolean(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REDIRECT_URI)],
-    ["Google Custom Search", Boolean(process.env.GOOGLE_CSE_API_KEY && process.env.GOOGLE_CSE_CX)],
-    ["Redis", Boolean(process.env.REDIS_URL)],
+    ["Google Search", integrationLabel(status.googleSearch)],
+    ["DeepSeek", integrationLabel(status.deepseek)],
+    ["Resend", integrationLabel(status.resend)],
+    ["Gmail", integrationLabel(status.gmail)],
   ];
   return (
     <div>
       <PageHeader title="Integrations" detail="Status shows whether the server has a credential. Values are never displayed." />
       <Flash error={query.error} notice={query.notice} />
       <div className="mb-4 grid gap-3 md:grid-cols-3">
-        {flags.map(([label, enabled]) => <Panel key={String(label)}><p>{label}</p><p className="text-sm text-muted">{enabled ? "Configured" : "Not configured"}</p></Panel>)}
+        {flags.map(([label, state]) => <Panel key={label}><p>{label}</p><p className="text-sm text-muted">Status: {state}</p></Panel>)}
       </div>
       <Panel className="mb-4">
         <h2 className="font-display text-2xl">Saved senders</h2>

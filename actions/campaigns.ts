@@ -105,3 +105,34 @@ export async function resumeCampaign(formData: FormData) {
 export async function archiveCampaign(formData: FormData) {
   await setStatus(String(formData.get("id")), "ARCHIVED", false);
 }
+
+export async function saveSequence(formData: FormData) {
+  const { organization, user } = await requireOrganization("ADMIN");
+  const campaignId = String(formData.get("campaignId") ?? "");
+  const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, organizationId: organization.id } });
+  if (!campaign) redirect("/follow-ups?error=Campaign+not+found.");
+  const steps = stepsFromText(String(formData.get("days") ?? ""));
+  const name = String(formData.get("name") ?? "Follow-up sequence").trim().slice(0, 80) || "Follow-up sequence";
+  await prisma.sequence.deleteMany({ where: { campaignId, organizationId: organization.id } });
+  await prisma.sequence.create({
+    data: {
+      organizationId: organization.id,
+      campaignId,
+      name,
+      steps: {
+        create: [
+          { position: 0, dayOffset: 0, subject: "Initial email", body: "Sent from the approved outreach draft." },
+          ...steps.map((step, index) => ({
+            position: index + 1,
+            dayOffset: step.dayOffset,
+            subject: `Follow-up ${index + 1}`,
+            body: "Written when the earlier message is approved. Nothing sends while the provider is not configured.",
+          })),
+        ],
+      },
+    },
+  });
+  await prisma.campaign.update({ where: { id: campaignId }, data: { followUpSteps: steps } });
+  await recordActivity({ organizationId: organization.id, campaignId, userId: user.id, action: "followup.sequence_saved", detail: name });
+  redirect("/follow-ups?notice=Sequence+saved.+Follow-ups+still+wait+for+approval+and+a+configured+provider.");
+}

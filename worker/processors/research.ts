@@ -47,6 +47,17 @@ export async function processResearch(prospectId: string) {
       excerpt: extracted.excerpt,
       headings: extracted.headings,
       signals: extracted.signals,
+      sourceType: "website",
+      content: extracted.excerpt,
+      technologies: extracted.signals.technology,
+      services: extracted.signals.services,
+      contactSignals: { emails: extracted.signals.emails, phones: extracted.signals.phones },
+      advertisingSignals: { observed: extracted.signals.advertising },
+      softwareSignals: { observedTechnology: extracted.signals.technology },
+      socialLinks: extracted.signals.socialUrls,
+      bookingSignals: { forms: extracted.signals.forms, callsToAction: extracted.signals.callsToAction },
+      trackingSignals: { observed: extracted.signals.technology.filter((item) => /analytics|pixel|tag manager/i.test(item)) },
+      confidence: extracted.excerpt.length > 280 ? 70 : 40,
     },
   });
   await storeObservedContacts(prospect.organizationId, prospect.id, finalUrl, extracted.signals);

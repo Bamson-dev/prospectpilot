@@ -66,6 +66,7 @@ enum OutreachState {
   DRAFT
   PENDING_APPROVAL
   APPROVED
+  SCHEDULED
   QUEUED
   SENDING
   SENT
@@ -73,6 +74,7 @@ enum OutreachState {
   OPENED
   FAILED
   REPLIED
+  CANCELLED
   SUPPRESSED
 }
 
@@ -112,6 +114,7 @@ enum JobState {
   COMPLETED
   FAILED
   DELAYED
+  CANCELLED
 }
 
 enum OpportunityKind {
@@ -119,6 +122,15 @@ enum OpportunityKind {
   ADVERTISING
   AUTOMATION
   OTHER
+  CUSTOM_SOFTWARE
+  SOFTWARE_REPLACEMENT
+  ADVERTISING_MANAGEMENT
+  ADVERTISING_OPTIMIZATION
+}
+
+enum OpportunityStatus {
+  OPEN
+  DISMISSED
 }
 
 model User {
@@ -129,6 +141,7 @@ model User {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   memberships  Membership[]
+  activity     ActivityLog[]
 }
 
 model Organization {
@@ -148,6 +161,8 @@ model Organization {
   settings      Setting[]
   aiRequests    AIRequest[]
   conversations Conversation[]
+  tags          Tag[]
+  sequences     Sequence[]
 }
 
 model Membership {
@@ -192,6 +207,7 @@ model Campaign {
   activity             ActivityLog[]
   messages             OutreachMessage[]
   followUps            FollowUp[]
+  sequences            Sequence[]
 
   @@index([organizationId, status])
   @@index([organizationId, updatedAt])
@@ -230,6 +246,7 @@ model Prospect {
   recommendedService      String?
   personalizationAngle    String?
   suggestedOpening        String?
+  notes                   String?
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
   organization            Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -242,6 +259,7 @@ model Prospect {
   activity                ActivityLog[]
   jobs                    BackgroundJob[]
   aiRequests              AIRequest[]
+  tags                    ProspectTag[]
 
   @@unique([organizationId, domain])
   @@index([organizationId, qualificationStatus])
@@ -266,12 +284,14 @@ model Contact {
   confidence     Int          @default(0)
   isPrimary      Boolean      @default(false)
   suppressed     Boolean      @default(false)
+  notes          String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   prospect       Prospect     @relation(fields: [prospectId], references: [id], onDelete: Cascade)
   messages       OutreachMessage[]
   replies        Reply[]
+  activity       ActivityLog[]
 
   @@index([organizationId, email])
   @@index([prospectId, isPrimary])
@@ -287,6 +307,18 @@ model ResearchRecord {
   excerpt         String?
   headings        String[]
   signals         Json
+  sourceType      String   @default("website")
+  content         String?  @db.Text
+  technologies    String[] @default([])
+  services        String[] @default([])
+  products        String[] @default([])
+  contactSignals  Json?
+  advertisingSignals Json?
+  softwareSignals Json?
+  socialLinks     Json?
+  bookingSignals  Json?
+  trackingSignals Json?
+  confidence      Int?
   createdAt       DateTime @default(now())
   prospect        Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
 
@@ -301,6 +333,10 @@ model OpportunityAssessment {
   interpretation     String
   recommendedService String?
   confidence         Int
+  title              String?
+  description        String?
+  potentialValue     String?
+  status             OpportunityStatus @default(OPEN)
   createdAt          DateTime        @default(now())
   prospect           Prospect        @relation(fields: [prospectId], references: [id], onDelete: Cascade)
 
@@ -364,6 +400,7 @@ model OutreachMessage {
   sentAt         DateTime?
   deliveredAt    DateTime?
   openedAt       DateTime?
+  scheduledAt    DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   campaign       Campaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
@@ -428,6 +465,7 @@ model Suppression {
   email          String
   reason         String
   source         String
+  notes          String?
   createdAt      DateTime     @default(now())
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -467,12 +505,17 @@ model ActivityLog {
   prospectId     String?
   action         String
   detail         String?
+  userId         String?
+  contactId      String?
   createdAt      DateTime     @default(now())
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   prospect       Prospect?    @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, createdAt])
+  @@index([userId])
   @@index([prospectId, createdAt])
   @@index([campaignId, createdAt])
 }
@@ -505,4 +548,51 @@ model Setting {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, key])
+}
+
+model Tag {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospects      ProspectTag[]
+
+  @@unique([organizationId, name])
+}
+
+model ProspectTag {
+  prospectId String
+  tagId      String
+  prospect   Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([prospectId, tagId])
+  @@index([tagId])
+}
+
+model Sequence {
+  id             String         @id @default(cuid())
+  organizationId String
+  campaignId     String
+  name           String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaign       Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  steps          SequenceStep[]
+
+  @@index([organizationId, campaignId])
+}
+
+model SequenceStep {
+  id         String   @id @default(cuid())
+  sequenceId String
+  position   Int
+  dayOffset  Int
+  subject    String
+  body       String
+  sequence   Sequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, position])
 }

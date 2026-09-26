@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createProspect } from "@/actions/prospects";
+import { createProspect, tagProspects } from "@/actions/prospects";
 import { Empty, Flash, PageHeader, Pill } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { requireOrganization } from "@/lib/current-user";
@@ -9,6 +9,15 @@ import type { OutreachState, Prisma, QualificationStatus, ResearchStatus } from 
 const RESEARCH: ResearchStatus[] = ["PENDING", "QUEUED", "IN_PROGRESS", "COMPLETED", "FAILED", "SKIPPED"];
 const QUALIFICATION: QualificationStatus[] = ["UNREVIEWED", "QUALIFIED", "REJECTED", "APPROVED", "SKIPPED"];
 const OUTREACH: OutreachState[] = ["NONE", "PENDING_APPROVAL", "QUEUED", "SENT", "REPLIED", "FAILED", "SUPPRESSED"];
+
+function pageHref(query: Record<string, string | undefined>, page: number) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value && key !== "page" && key !== "notice" && key !== "error") params.set(key, value);
+  }
+  params.set("page", String(page));
+  return `/prospects?${params.toString()}`;
+}
 
 function oneOf<T extends string>(value: string | undefined, allowed: readonly T[]) {
   return value && (allowed as readonly string[]).includes(value) ? (value as T) : undefined;
@@ -35,7 +44,7 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Pr
   const orderBy: Prisma.ProspectOrderByWithRelationInput =
     query.sort === "company" ? { companyName: "asc" } : query.sort === "score" ? { opportunityScore: "desc" } : query.sort === "activity" ? { updatedAt: "desc" } : { createdAt: "desc" };
   const [prospects, total, campaigns] = await Promise.all([
-    prisma.prospect.findMany({ where, orderBy, skip: (page - 1) * 25, take: 25, include: { contacts: { where: { isPrimary: true }, take: 1 } } }),
+    prisma.prospect.findMany({ where, orderBy, skip: (page - 1) * 25, take: 25, include: { contacts: { where: { isPrimary: true }, take: 1 }, tags: { include: { tag: true } } } }),
     prisma.prospect.count({ where }),
     prisma.campaign.findMany({ where: { organizationId: organization.id }, select: { id: true, name: true } }),
   ]);
@@ -63,30 +72,37 @@ export default async function ProspectsPage({ searchParams }: { searchParams: Pr
         <div className="md:col-span-4"><SubmitButton pendingLabel="Saving">Add prospect</SubmitButton></div>
       </form>
       {prospects.length === 0 ? <Empty title="No prospects" detail="Start a campaign or add a company with a public website." /> : (
-        <div className="overflow-x-auto rounded-2xl border border-line">
-          <table>
-            <thead><tr><th>Company</th><th>Location</th><th>Industry</th><th>Opportunity</th><th>Contact</th><th>Research</th><th>Qualification</th><th>Outreach</th></tr></thead>
-            <tbody>
-              {prospects.map((prospect) => (
-                <tr key={prospect.id}>
-                  <td><Link href={`/prospects/${prospect.id}`}>{prospect.companyName}</Link><div className="text-xs text-muted">{prospect.domain}</div></td>
-                  <td>{[prospect.city, prospect.country].filter(Boolean).join(", ") || "—"}</td>
-                  <td>{prospect.industry || "—"}</td>
-                  <td>{prospect.opportunityScore ?? "—"}</td>
-                  <td>{prospect.contacts[0]?.email || "—"}</td>
-                  <td><Pill>{prospect.researchStatus}</Pill></td>
-                  <td><Pill>{prospect.qualificationStatus}</Pill></td>
-                  <td><Pill>{prospect.outreachState}</Pill></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <form action={tagProspects}>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <input className="max-w-xs" name="tag" placeholder="Tag for selected rows" />
+            <SubmitButton variant="secondary" pendingLabel="Tagging">Tag selected</SubmitButton>
+          </div>
+          <div className="overflow-x-auto rounded-2xl border border-line">
+            <table>
+              <thead><tr><th></th><th>Company</th><th>Location</th><th>Industry</th><th>Opportunity</th><th>Contact</th><th>Research</th><th>Qualification</th><th>Outreach</th></tr></thead>
+              <tbody>
+                {prospects.map((prospect) => (
+                  <tr key={prospect.id}>
+                    <td><input className="w-auto" type="checkbox" name="ids" value={prospect.id} aria-label={`Select ${prospect.companyName}`} /></td>
+                    <td><Link href={`/prospects/${prospect.id}`}>{prospect.companyName}</Link><div className="text-xs text-muted">{prospect.domain}{prospect.tags.length ? ` · ${prospect.tags.map((item) => item.tag.name).join(", ")}` : ""}</div></td>
+                    <td>{[prospect.city, prospect.country].filter(Boolean).join(", ") || "—"}</td>
+                    <td>{prospect.industry || "—"}</td>
+                    <td>{prospect.opportunityScore ?? "—"}</td>
+                    <td>{prospect.contacts[0]?.email || "—"}</td>
+                    <td><Pill>{prospect.researchStatus}</Pill></td>
+                    <td><Pill>{prospect.qualificationStatus}</Pill></td>
+                    <td><Pill>{prospect.outreachState}</Pill></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </form>
       )}
       <p className="mt-3 text-sm text-muted">{total} companies · page {page}</p>
       <div className="mt-2 flex gap-3 text-sm">
-        {page > 1 ? <Link href={`/prospects?page=${page - 1}`}>Previous</Link> : null}
-        {page * 25 < total ? <Link href={`/prospects?page=${page + 1}`}>Next</Link> : null}
+        {page > 1 ? <Link href={pageHref(query, page - 1)}>Previous</Link> : null}
+        {page * 25 < total ? <Link href={pageHref(query, page + 1)}>Next</Link> : null}
       </div>
     </div>
   );

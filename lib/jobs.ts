@@ -8,6 +8,8 @@ export async function recordActivity(input: {
   organizationId: string;
   campaignId?: string | null;
   prospectId?: string | null;
+  contactId?: string | null;
+  userId?: string | null;
   action: string;
   detail?: string | null;
 }) {
@@ -16,6 +18,8 @@ export async function recordActivity(input: {
       organizationId: input.organizationId,
       campaignId: input.campaignId ?? null,
       prospectId: input.prospectId ?? null,
+      contactId: input.contactId ?? null,
+      userId: input.userId ?? null,
       action: input.action,
       detail: input.detail ?? null,
     },

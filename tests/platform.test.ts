@@ -10,6 +10,12 @@ import { buildDiscoveryQueries } from "@/lib/search/queries";
 import { googleNeedsBrowser, rejectAllConsent } from "@/lib/search/consent";
 import { parseGoogleResults } from "@/lib/search/parse-google";
 import { extractPage } from "@/lib/research/extract";
+import { healthDecision } from "@/lib/health";
+import { aiConfigured } from "@/lib/ai/service";
+import { credentialStatus, integrationLabel } from "@/lib/integrations/status";
+import { belongsToOrganization } from "@/lib/ownership";
+import { ResendProvider } from "@/lib/email/resend";
+import { QUEUE_NAMES } from "@/lib/queues";
 import { roleAtLeast } from "@/lib/roles";
 import { isSuppressionRequest } from "@/lib/suppression";
 import { sanitizeOutbound } from "@/lib/email/types";
@@ -115,5 +121,52 @@ describe("research and ai parsing", () => {
       \`\`\``),
     );
     expect(parsed.opportunityScore).toBe(61);
+  });
+});
+
+function restore(key: string, value: string | undefined) {
+  if (value == null) delete process.env[key];
+  else process.env[key] = value;
+}
+
+describe("product layers", () => {
+  it("reports unconfigured providers and refuses to call them", async () => {
+    const saved = {
+      deepseek: process.env.DEEPSEEK_API_KEY,
+      resend: process.env.RESEND_API_KEY,
+      google: process.env.GOOGLE_CSE_API_KEY,
+      gmail: process.env.GMAIL_CLIENT_ID,
+    };
+    delete process.env.DEEPSEEK_API_KEY;
+    delete process.env.RESEND_API_KEY;
+    delete process.env.GOOGLE_CSE_API_KEY;
+    delete process.env.GMAIL_CLIENT_ID;
+    const status = credentialStatus();
+    expect(status.deepseek).toBe("not_configured");
+    expect(status.googleSearch).toBe("not_configured");
+    expect(integrationLabel(status.resend)).toBe("Not configured");
+    expect(aiConfigured()).toBe(false);
+    await expect(new ResendProvider().getDeliveryStatus("msg")).rejects.toThrow(/not configured/i);
+    restore("DEEPSEEK_API_KEY", saved.deepseek);
+    restore("RESEND_API_KEY", saved.resend);
+    restore("GOOGLE_CSE_API_KEY", saved.google);
+    restore("GMAIL_CLIENT_ID", saved.gmail);
+  });
+
+  it("keeps a record inside its organization", () => {
+    expect(belongsToOrganization({ organizationId: "org-a" }, "org-a")).toBe(true);
+    expect(belongsToOrganization({ organizationId: "org-a" }, "org-b")).toBe(false);
+    expect(belongsToOrganization(null, "org-a")).toBe(false);
+  });
+
+  it("marks the health check down when the database is down", () => {
+    expect(healthDecision("up", "up", false).status).toBe(200);
+    expect(healthDecision("down", "up", false).body.database).toBe("down");
+    expect(healthDecision("up", "down", true).status).toBe(503);
+  });
+
+  it("registers the worker queues", () => {
+    expect(QUEUE_NAMES).toContain("discovery");
+    expect(QUEUE_NAMES).toContain("outreach");
   });
 });

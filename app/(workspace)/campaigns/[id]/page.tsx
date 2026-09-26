@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { archiveCampaign, pauseCampaign, resumeCampaign, startCampaign } from "@/actions/campaigns";
 import { Flash, PageHeader, Panel, Pill } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
+import { campaignOverview } from "@/lib/campaign-stats";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
 
@@ -21,6 +22,17 @@ export default async function CampaignPage({ params, searchParams }: { params: P
     orderBy: { finishedAt: "desc" },
     take: 3,
   });
+  const stats = await campaignOverview(organization.id, campaign.id);
+  const counts = [
+    ["Prospects", stats.prospects],
+    ["Researched", stats.researched],
+    ["Qualified", stats.qualified],
+    ["Approved", stats.approved],
+    ["Sent", stats.sent],
+    ["Replies", stats.replies],
+    ["Interested", stats.interested],
+    ["Meetings", stats.meetings],
+  ] as const;
   return (
     <div>
       <PageHeader title={campaign.name} detail={campaign.description || campaign.searchTerms} />
@@ -29,6 +41,9 @@ export default async function CampaignPage({ params, searchParams }: { params: P
         <Pill>{campaign.status}</Pill>
         <Pill>{campaign.opportunityFocus}</Pill>
         <Pill>{campaign.dailyDiscoveryLimit}/day discovery</Pill>
+      </div>
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {counts.map(([label, value]) => <Panel key={label}><p className="text-xs uppercase tracking-wider text-muted">{label}</p><p className="mt-2 font-display text-3xl">{value}</p></Panel>)}
       </div>
       <div className="mb-6 flex flex-wrap gap-2">
         <form action={startCampaign}><input type="hidden" name="id" value={campaign.id} /><SubmitButton pendingLabel="Starting">Start discovery</SubmitButton></form>

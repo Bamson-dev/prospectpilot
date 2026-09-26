@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Empty, PageHeader, Panel } from "@/components/ui";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
+import { credentialStatus, integrationLabel } from "@/lib/integrations/status";
 import { workspaceMetrics } from "@/lib/metrics";
 import { getRedis } from "@/lib/queues";
 
@@ -24,12 +25,16 @@ const LABELS: Array<[keyof Awaited<ReturnType<typeof workspaceMetrics>>, string]
 export default async function DashboardPage() {
   const { organization } = await requireOrganization();
   const metrics = await workspaceMetrics(organization.id);
-  const [campaigns, replies, pending, failed] = await Promise.all([
+  const [campaigns, replies, pending, failed, activity, accounts, activeCampaigns] = await Promise.all([
     prisma.campaign.findMany({ where: { organizationId: organization.id }, orderBy: { updatedAt: "desc" }, take: 5 }),
     prisma.reply.findMany({ where: { organizationId: organization.id }, orderBy: { receivedAt: "desc" }, take: 5, include: { conversation: { include: { prospect: true } } } }),
     prisma.outreachMessage.findMany({ where: { organizationId: organization.id, state: "PENDING_APPROVAL" }, orderBy: { updatedAt: "desc" }, take: 5, include: { prospect: true } }),
     prisma.backgroundJob.findMany({ where: { organizationId: organization.id, state: "FAILED" }, orderBy: { finishedAt: "desc" }, take: 5 }),
+    prisma.activityLog.findMany({ where: { organizationId: organization.id }, orderBy: { createdAt: "desc" }, take: 6 }),
+    prisma.emailAccount.findMany({ where: { organizationId: organization.id }, select: { provider: true, status: true } }),
+    prisma.campaign.count({ where: { organizationId: organization.id, status: { in: ["DISCOVERY", "RESEARCHING", "ACTIVE"] } } }),
   ]);
+  const integrations = credentialStatus(accounts);
   const health = await systemHealth();
   return (
     <div>
@@ -38,6 +43,7 @@ export default async function DashboardPage() {
         {LABELS.map(([key, label]) => (
           <Panel key={key}><p className="text-xs uppercase tracking-wider text-muted">{label}</p><p className="mt-2 font-display text-3xl">{metrics[key]}</p></Panel>
         ))}
+        <Panel><p className="text-xs uppercase tracking-wider text-muted">Active campaigns</p><p className="mt-2 font-display text-3xl">{activeCampaigns}</p></Panel>
         <Panel><p className="text-xs uppercase tracking-wider text-muted">Pipeline value</p><p className="mt-2 text-sm text-muted">No deal values are stored yet.</p></Panel>
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
@@ -61,8 +67,16 @@ export default async function DashboardPage() {
         </Panel>
         <Panel>
           <h2 className="mb-3 font-display text-2xl">System</h2>
-          <p className="text-sm">Database: {health.database}</p>
-          <p className="text-sm">Redis: {health.redis}</p>
+          <p className="text-sm">Database: {health.database === "up" ? "connected" : "disconnected"}</p>
+          <p className="text-sm">Redis: {health.redis === "up" ? "connected" : health.redis === "not configured" ? "not configured" : "disconnected"}</p>
+          <p className="mt-2 text-sm">Google Search: {integrationLabel(integrations.googleSearch)}</p>
+          <p className="text-sm">DeepSeek: {integrationLabel(integrations.deepseek)}</p>
+          <p className="text-sm">Resend: {integrationLabel(integrations.resend)}</p>
+          <p className="text-sm">Gmail: {integrationLabel(integrations.gmail)}</p>
+          <h3 className="mt-4 text-sm text-muted">Recent activity</h3>
+          {activity.length === 0 ? <p className="mt-2 text-sm text-muted">No activity yet.</p> : activity.map((entry) => (
+            <p key={entry.id} className="mt-2 text-sm">{entry.action}{entry.detail ? ` · ${entry.detail}` : ""}</p>
+          ))}
           <h3 className="mt-4 text-sm text-muted">Failed jobs</h3>
           {failed.length === 0 ? <p className="mt-2 text-sm text-muted">No failed jobs.</p> : failed.map((job) => (
             <p key={job.id} className="mt-2 text-sm">{job.queue}: {job.error}</p>

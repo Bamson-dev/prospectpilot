@@ -1,7 +1,21 @@
 import { registrableHost, websiteFromUrl } from "@/lib/domains";
 
+const LISTING_PORTALS = [
+  "property24.com",
+  "privateproperty.co.za",
+  "gumtree.co.za",
+  "olx.co.za",
+  "yellowpages.co.za",
+  "yelp.com",
+];
+
 const EMAIL = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
 const PHONE = /(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]\d{3,4}/g;
+
+export function isListingPortal(domain: string) {
+  const host = domain.toLowerCase().replace(/^www\./, "");
+  return LISTING_PORTALS.some((portal) => host === portal || host.endsWith(`.${portal}`));
+}
 
 export function canonicalDomain(input: string | null | undefined) {
   return websiteFromUrl(input ?? "")?.domain ?? registrableHost(input);

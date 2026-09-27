@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanCompanyName, socialLinks, websiteFromUrl } from "@/lib/domains";
+import { isListingPortal } from "@/lib/discovery/normalize";
 import { discoveryProviders } from "@/lib/discovery/providers";
 import { recordSourceHealth } from "@/lib/discovery/health";
 import type { DiscoveryHit, DiscoveryProvider } from "@/lib/discovery/types";
@@ -28,7 +29,7 @@ export async function processDiscovery(campaignId: string) {
     social: campaign.enableSocial,
   });
   if (providers.length === 0) throw new AppError("SearXNG is not configured.");
-  const queries = buildDiscoveryQueries(campaign).slice(0, remaining <= 2 ? 2 : campaign.maxQueries);
+  const queries = buildDiscoveryQueries(campaign).slice(0, Math.min(campaign.maxQueries, remaining <= 2 ? 4 : campaign.maxQueries));
   if (queries.length === 0) throw new AppError("Add search terms before starting discovery.");
   logInfo("discovery.started", { campaignId, providers: providers.map((item) => item.getName()).join(","), queries: queries.length });
 
@@ -38,7 +39,7 @@ export async function processDiscovery(campaignId: string) {
     if (stored >= remaining) break;
     for (const provider of providers) {
       if (stored >= remaining || failed.has(provider.getName())) continue;
-      const found = await collect(provider, query, Math.min(10, remaining - stored));
+      const found = await collect(provider, query, 10);
       if (found === null) {
         failed.add(provider.getName());
         continue;
@@ -85,7 +86,10 @@ async function collect(provider: DiscoveryProvider, query: string, limit: number
 async function storeHit(campaign: { id: string; organizationId: string; industry: string | null }, hit: DiscoveryHit) {
   const website = websiteFromUrl(hit.url);
   const social = socialLinks([hit.url]);
-  if (website && AGGREGATORS.some((host) => website.domain.includes(host))) return false;
+  if (website && (AGGREGATORS.some((host) => website.domain.includes(host)) || isListingPortal(website.domain))) {
+    logInfo("discovery.result.skipped", { domain: website.domain, reason: "listing-portal" });
+    return false;
+  }
   if (!website && !social.linkedinUrl && !social.facebookUrl && !social.instagramUrl) return false;
   if (website) {
     const existing = await prisma.prospect.findUnique({

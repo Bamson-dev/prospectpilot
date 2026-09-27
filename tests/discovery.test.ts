@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { browserSearchBlocked, parseBrowserResults } from "@/lib/discovery/providers";
-import { canonicalDomain, dedupeQueries, extractEmails, extractPhones, normalizeEmail, sameCompany } from "@/lib/discovery/normalize";
+import { canonicalDomain, dedupeQueries, extractEmails, extractPhones, isListingPortal, normalizeEmail, sameCompany } from "@/lib/discovery/normalize";
 import { parseSearxngResults } from "@/lib/discovery/searxng";
 import { discoverySourceCatalog } from "@/lib/discovery/status";
 import { needsBrowserRender } from "@/lib/research/browser-decision";
@@ -29,6 +29,9 @@ describe("discovery providers", () => {
     expect(canonicalDomain("http://example.com")).toBe("example.com");
     expect(sameCompany({ website: "https://www.example.com/" }, { domain: "example.com" })).toBe(true);
     expect(sameCompany({ website: "https://abcproperties.co.za" }, { website: "https://other.co.za" })).toBe(false);
+    expect(isListingPortal("property24.com")).toBe(true);
+    expect(isListingPortal("www.privateproperty.co.za")).toBe(true);
+    expect(isListingPortal("agency.co.za")).toBe(false);
   });
 
   it("dedupes queries and keeps a Johannesburg real-estate set small", () => {

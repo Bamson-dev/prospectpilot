@@ -23,6 +23,7 @@ export type CrawlResult = {
   advertisingSignals: string[];
   contactPages: string[];
   teamPages: string[];
+  note?: string;
 };
 
 export function parseCrawlResult(value: unknown): CrawlResult | null {
@@ -42,6 +43,7 @@ export function parseCrawlResult(value: unknown): CrawlResult | null {
     advertisingSignals: strings(row.advertisingSignals),
     contactPages: strings(row.contactPages),
     teamPages: strings(row.teamPages),
+    note: typeof row.note === "string" ? row.note.slice(0, 80) : "",
   };
 }
 
@@ -72,7 +74,7 @@ export async function crawlCompanySite(input: { website: string; domain: string;
       logInfo("research.crawl.failed", { domain: input.domain, reason: "malformed" });
       return null;
     }
-    logInfo("research.crawl.completed", { domain: input.domain, pages: parsed.pages.length });
+    logInfo("research.crawl.completed", { domain: input.domain, pages: parsed.pages.length, note: parsed.note || "" });
     return parsed;
   } catch {
     logInfo("research.crawl.failed", { domain: input.domain, reason: "unreadable" });

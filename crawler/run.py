@@ -7,6 +7,7 @@ import sys
 from urllib.parse import urljoin, urlparse
 
 import scrapy
+from scrapy import signals
 from scrapy.crawler import CrawlerProcess
 
 EMAIL = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
@@ -25,6 +26,7 @@ RESULT = {
     "advertisingSignals": [],
     "contactPages": [],
     "teamPages": [],
+    "note": "",
 }
 
 
@@ -50,6 +52,16 @@ class CompanySpider(scrapy.Spider):
         self.allowed_domains = [allowed]
         self.max_pages = max_pages
         self.max_depth = max_depth
+
+    @classmethod
+    def from_crawler(cls, crawler, *args, **kwargs):
+        spider = cls(*args, **kwargs)
+        crawler.signals.connect(spider.closed, signal=signals.spider_closed)
+        return spider
+
+    def closed(self, spider, reason):
+        forbidden = spider.crawler.stats.get_value("robotstxt/forbidden") or 0
+        RESULT["note"] = "robots" if forbidden else str(reason)
 
     def parse(self, response, depth=0):
         if len(RESULT["pages"]) >= self.max_pages:

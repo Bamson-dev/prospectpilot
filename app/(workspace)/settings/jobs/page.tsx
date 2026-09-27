@@ -36,12 +36,13 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
       {jobs.length === 0 ? <Empty title="No jobs" detail="Starting a campaign creates the first discovery job." /> : (
         <div className="overflow-x-auto rounded-2xl border border-line">
           <table>
-            <thead><tr><th>Queue</th><th>Job</th><th>Campaign</th><th>Prospect</th><th>Status</th><th>Attempts</th><th>Created</th><th>Started</th><th>Completed</th><th>Error</th><th></th></tr></thead>
+            <thead><tr><th>Queue</th><th>Job</th><th>Provider</th><th>Campaign</th><th>Prospect</th><th>Status</th><th>Attempts</th><th>Created</th><th>Started</th><th>Completed</th><th>Error</th><th></th></tr></thead>
             <tbody>
               {jobs.map((job) => (
                 <tr key={job.id}>
                   <td>{job.queue}</td>
                   <td>{job.name}<div className="text-xs text-muted">{job.id}</div></td>
+                  <td>{providerOf(job.payload)}</td>
                   <td>{job.campaign ? <Link href={`/campaigns/${job.campaignId}`}>{job.campaign.name}</Link> : "—"}</td>
                   <td>{job.prospect ? <Link href={`/prospects/${job.prospectId}`}>{job.prospect.companyName}</Link> : "—"}</td>
                   <td>{job.state === "QUEUED" ? "WAITING" : job.state}</td>
@@ -61,4 +62,10 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
       )}
     </div>
   );
+}
+
+function providerOf(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "—";
+  const value = (payload as { provider?: unknown }).provider;
+  return typeof value === "string" ? value : "—";
 }

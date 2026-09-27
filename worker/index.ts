@@ -13,6 +13,20 @@ import { runJob } from "@/worker/runtime";
 
 const connection = getRedis();
 
+function concurrency(name: string) {
+  const configured = Number(
+    name === "discovery" ? process.env.DISCOVERY_CONCURRENCY
+      : name === "research" ? process.env.CRAWL_CONCURRENCY
+        : name === "playwright-research" ? process.env.PLAYWRIGHT_CONCURRENCY
+          : name === "qualification" || name === "ai" ? process.env.QUALIFICATION_CONCURRENCY
+            : 2,
+  );
+  const fallback = name === "playwright-research" ? 1 : 2;
+  const cap = name === "playwright-research" ? 3 : name === "research" ? 4 : 5;
+  if (!Number.isFinite(configured) || configured < 1) return fallback;
+  return Math.min(Math.floor(configured), cap);
+}
+
 function start(name: string, handler: (data: Record<string, string>) => Promise<void>) {
   const worker = new Worker(
     name,
@@ -20,7 +34,7 @@ function start(name: string, handler: (data: Record<string, string>) => Promise<
       const data = job.data as Record<string, string>;
       await runJob(data.jobId, () => handler(data));
     },
-    { connection, concurrency: name === "research" ? 1 : 2 },
+    { connection, concurrency: concurrency(name) },
   );
   worker.on("failed", (job, error) => {
     logInfo("worker.job_failed", { queue: name, jobId: job?.id, message: error.message });

@@ -163,6 +163,7 @@ model Organization {
   conversations Conversation[]
   tags          Tag[]
   sequences     Sequence[]
+  discoverySources DiscoverySource[]
 }
 
 model Membership {
@@ -191,7 +192,15 @@ model Campaign {
   targetCompanySize    String?
   dailyDiscoveryLimit  Int              @default(25)
   dailyResearchLimit   Int              @default(25)
+  dailyQualificationLimit Int           @default(25)
   dailyOutreachLimit   Int              @default(25)
+  excludedKeywords     String?
+  maxQueries           Int              @default(6)
+  maxPagesPerSite      Int              @default(10)
+  crawlDepth           Int              @default(2)
+  enableDirectory      Boolean          @default(false)
+  enableMap            Boolean          @default(false)
+  enableSocial         Boolean          @default(false)
   provider             EmailProviderKind?
   emailAccountId       String?
   requireApproval      Boolean          @default(true)
@@ -208,6 +217,7 @@ model Campaign {
   messages             OutreachMessage[]
   followUps            FollowUp[]
   sequences            Sequence[]
+  discoverySources     DiscoverySource[]
 
   @@index([organizationId, status])
   @@index([organizationId, updatedAt])
@@ -260,12 +270,48 @@ model Prospect {
   jobs                    BackgroundJob[]
   aiRequests              AIRequest[]
   tags                    ProspectTag[]
+  sources                 DiscoverySource[]
 
   @@unique([organizationId, domain])
   @@index([organizationId, qualificationStatus])
   @@index([organizationId, outreachState])
   @@index([organizationId, updatedAt])
   @@index([campaignId, createdAt])
+}
+
+model DiscoverySource {
+  id             String   @id @default(cuid())
+  organizationId String
+  prospectId     String
+  campaignId     String?
+  sourceType     String
+  sourceName     String
+  sourceUrl      String
+  query          String?
+  title          String?
+  snippet        String?
+  confidence     Int      @default(50)
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospect       Prospect     @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([prospectId, createdAt])
+  @@index([organizationId, sourceType])
+}
+
+model SourceHealth {
+  id            String    @id @default(cuid())
+  name          String    @unique
+  status        String
+  requests      Int       @default(0)
+  successes     Int       @default(0)
+  failures      Int       @default(0)
+  blocked       Int       @default(0)
+  emptyResults  Int       @default(0)
+  lastError     String?
+  lastSuccessAt DateTime?
+  updatedAt     DateTime  @updatedAt
 }
 
 model Contact {

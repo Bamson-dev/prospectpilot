@@ -6,6 +6,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { aiConfigured } from "@/lib/ai/service";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
+import { discoverySourceCatalog } from "@/lib/discovery/status";
 import { credentialStatus, integrationLabel } from "@/lib/integrations/status";
 
 const SECTIONS = ["general", "profile", "organization", "email", "ai", "search", "outreach", "notifications", "security"] as const;
@@ -29,7 +30,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       <PageHeader title="Settings" detail="Limits and preferences are stored for this workspace. API secrets stay in the server environment." />
       <Flash error={query.error} notice={query.notice} />
       <nav className="mb-6 flex gap-3 overflow-x-auto text-sm">
-        {SECTIONS.map((item) => <Link key={item} className={item === section ? "text-tide" : "text-muted"} href={`/settings?section=${item}`}>{item}</Link>)}
+        {SECTIONS.map((item) => <Link key={item} className={item === section ? "text-tide" : "text-muted"} href={`/settings?section=${item}`}>{item === "search" ? "discovery" : item}</Link>)}
       </nav>
       {section === "general" ? (
         <Panel>
@@ -61,7 +62,14 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <input type="hidden" name="section" value={section} />
           {section === "email" ? <p className="text-sm">Resend: {integrationLabel(flags.resend)}. Gmail: {integrationLabel(flags.gmail)}. Sender addresses are listed on Integrations. Keys are not shown.</p> : null}
           {section === "ai" ? <p className="text-sm">{aiConfigured() ? "DeepSeek is connected. The model name is configured on the server." : "AI integration not configured"}</p> : null}
-          {section === "search" ? <p className="text-sm">Google Search: {integrationLabel(flags.googleSearch)}. Without Custom Search credentials, discovery stops when Google does not return HTML results.</p> : null}
+          {section === "search" ? (
+            <div className="space-y-2 text-sm">
+              {discoverySourceCatalog().map((source) => (
+                <p key={source.name}>{source.name}: {source.state}. {source.detail}</p>
+              ))}
+              <p className="text-muted">Google CSE stays disabled unless GOOGLE_CSE_ENABLED is exactly true. Brave is not required.</p>
+            </div>
+          ) : null}
           {admin ? (
             <>
               <label className="text-sm text-muted">Default daily discovery limit<input name="defaultDiscoveryLimit" defaultValue={stored.defaultDiscoveryLimit ?? "25"} /></label>

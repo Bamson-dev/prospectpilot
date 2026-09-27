@@ -145,7 +145,8 @@ describe("product layers", () => {
     delete process.env.GMAIL_CLIENT_ID;
     const status = credentialStatus();
     expect(status.deepseek).toBe("not_configured");
-    expect(status.googleSearch).toBe("not_configured");
+    expect(status.googleSearch).toBe("disabled");
+    expect(integrationLabel(status.googleSearch)).toBe("Disabled");
     expect(integrationLabel(status.resend)).toBe("Not configured");
     expect(aiConfigured()).toBe(false);
     await expect(new ResendProvider().getDeliveryStatus("msg")).rejects.toThrow(/not configured/i);
@@ -189,6 +190,7 @@ describe("product layers", () => {
       resend: process.env.RESEND_API_KEY,
       googleKey: process.env.GOOGLE_CSE_API_KEY,
       googleCx: process.env.GOOGLE_CSE_CX,
+      googleEnabled: process.env.GOOGLE_CSE_ENABLED,
       gmailId: process.env.GMAIL_CLIENT_ID,
       gmailSecret: process.env.GMAIL_CLIENT_SECRET,
       gmailRedirect: process.env.GMAIL_REDIRECT_URI,
@@ -197,19 +199,21 @@ describe("product layers", () => {
     process.env.RESEND_API_KEY = "test-resend";
     process.env.GOOGLE_CSE_API_KEY = "test-google";
     process.env.GOOGLE_CSE_CX = "test-cx";
+    process.env.GOOGLE_CSE_ENABLED = "false";
     process.env.GMAIL_CLIENT_ID = "test-gmail-id";
     process.env.GMAIL_CLIENT_SECRET = "test-gmail-secret";
     process.env.GMAIL_REDIRECT_URI = "https://leadpilot.live/api/integrations/gmail/callback";
     const status = credentialStatus();
     expect(status.deepseek).toBe("connected");
     expect(status.resend).toBe("connected");
-    expect(status.googleSearch).toBe("connected");
+    expect(status.googleSearch).toBe("disabled");
     expect(status.gmail).toBe("needs_authentication");
     expect(aiConfigured()).toBe(true);
     restore("DEEPSEEK_API_KEY", saved.deepseek);
     restore("RESEND_API_KEY", saved.resend);
     restore("GOOGLE_CSE_API_KEY", saved.googleKey);
     restore("GOOGLE_CSE_CX", saved.googleCx);
+    restore("GOOGLE_CSE_ENABLED", saved.googleEnabled);
     restore("GMAIL_CLIENT_ID", saved.gmailId);
     restore("GMAIL_CLIENT_SECRET", saved.gmailSecret);
     restore("GMAIL_REDIRECT_URI", saved.gmailRedirect);
@@ -238,7 +242,8 @@ describe("product layers", () => {
       country: "South Africa",
       searchTerms: "real estate agencies",
     });
-    expect(queries.length).toBeLessThanOrEqual(2);
+    expect(queries.length).toBeGreaterThan(1);
+    expect(queries.length).toBeLessThanOrEqual(6);
     expect(queries[0]).toContain("Johannesburg");
     expect(queries[0]).toContain("South Africa");
   });

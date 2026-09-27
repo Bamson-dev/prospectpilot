@@ -12,7 +12,7 @@ export function companyAnalysisPrompt(evidence: string) {
     {
       role: "system" as const,
       content:
-        "You analyze public company research for a B2B sales team. Return only JSON. Never invent employees, emails, revenue, software spend, or advertising activity. If evidence is missing, say unknown and lower confidence. Separate observed evidence from interpretation.",
+        "You analyze public company research for a B2B sales team. Return only JSON. Never invent employees, emails, revenue, software spend, or advertising activity. Every conclusion must refer to the supplied evidence. If evidence is missing, say unknown and lower confidence. Separate observed evidence from interpretation.",
     },
     {
       role: "user" as const,

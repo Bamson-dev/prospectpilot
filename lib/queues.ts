@@ -4,6 +4,7 @@ import IORedis from "ioredis";
 export const QUEUE_NAMES = [
   "discovery",
   "research",
+  "playwright-research",
   "qualification",
   "ai",
   "outreach",

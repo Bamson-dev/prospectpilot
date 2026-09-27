@@ -4,6 +4,7 @@ import { completeJson, hashInput } from "@/lib/ai/client";
 import { companyAnalysisPrompt, emailPrompt, PROMPTS } from "@/lib/ai/prompts";
 import { companyAnalysisSchema, emailDraftSchema, extractJsonObject, type CompanyAnalysis } from "@/lib/ai/schemas";
 import { recordActivity } from "@/lib/jobs";
+import { logInfo } from "@/lib/logger";
 
 export async function processQualification(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({
@@ -13,16 +14,31 @@ export async function processQualification(prospectId: string) {
   if (!prospect) throw new AppError("Prospect was not found.");
   const research = prospect.research[0];
   if (!research) throw new AppError("Research must finish before qualification.");
+  if (prospect.campaign) {
+    const start = new Date();
+    start.setUTCHours(0, 0, 0, 0);
+    const qualifiedToday = await prisma.activityLog.count({
+      where: { campaignId: prospect.campaignId, action: "prospect.qualified", createdAt: { gte: start } },
+    });
+    if (qualifiedToday >= prospect.campaign.dailyQualificationLimit) {
+      throw new AppError("The daily qualification quota has been reached.");
+    }
+  }
+  const sources = await prisma.discoverySource.findMany({ where: { prospectId: prospect.id }, orderBy: { createdAt: "desc" }, take: 5 });
   const evidence = [
     `Company: ${prospect.companyName}`,
+    prospect.industry ? `Industry: ${prospect.industry}` : "",
+    prospect.city || prospect.country ? `Location: ${[prospect.city, prospect.country].filter(Boolean).join(", ")}` : "",
     prospect.website ? `Website: ${prospect.website}` : "",
     research.title ? `Title: ${research.title}` : "",
     research.metaDescription ? `Description: ${research.metaDescription}` : "",
     research.excerpt ? `Page text: ${research.excerpt.slice(0, 5000)}` : "",
     `Signals: ${JSON.stringify(research.signals).slice(0, 2000)}`,
+    sources.length > 0 ? `Discovery sources: ${sources.map((item) => `${item.sourceName} ${item.sourceUrl}`).join(" | ")}` : "",
   ]
     .filter(Boolean)
     .join("\n");
+  logInfo("qualification.started", { prospectId: prospect.id });
   const inputHash = hashInput(evidence);
   const cached = await prisma.aIRequest.findFirst({
     where: { organizationId: prospect.organizationId, purpose: PROMPTS.companyAnalysis, inputHash, status: "completed" },
@@ -102,6 +118,7 @@ export async function processQualification(prospectId: string) {
     action: "prospect.qualified",
     detail: analysis.recommendedService,
   });
+  logInfo("qualification.completed", { prospectId: prospect.id });
 }
 
 function qualitativeValue(score: number) {

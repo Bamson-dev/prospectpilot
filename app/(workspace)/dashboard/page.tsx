@@ -3,7 +3,7 @@ import { Empty, PageHeader, Panel } from "@/components/ui";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
 import { credentialStatus, integrationLabel } from "@/lib/integrations/status";
-import { workspaceMetrics } from "@/lib/metrics";
+import { discoveryToday, workspaceMetrics } from "@/lib/metrics";
 import { getRedis } from "@/lib/queues";
 
 export const metadata = { title: "Dashboard" };
@@ -25,6 +25,7 @@ const LABELS: Array<[keyof Awaited<ReturnType<typeof workspaceMetrics>>, string]
 export default async function DashboardPage() {
   const { organization } = await requireOrganization();
   const metrics = await workspaceMetrics(organization.id);
+  const today = await discoveryToday(organization.id);
   const [campaigns, replies, pending, failed, activity, accounts, activeCampaigns] = await Promise.all([
     prisma.campaign.findMany({ where: { organizationId: organization.id }, orderBy: { updatedAt: "desc" }, take: 5 }),
     prisma.reply.findMany({ where: { organizationId: organization.id }, orderBy: { receivedAt: "desc" }, take: 5, include: { conversation: { include: { prospect: true } } } }),
@@ -46,6 +47,25 @@ export default async function DashboardPage() {
         <Panel><p className="text-xs uppercase tracking-wider text-muted">Active campaigns</p><p className="mt-2 font-display text-3xl">{activeCampaigns}</p></Panel>
         <Panel><p className="text-xs uppercase tracking-wider text-muted">Pipeline value</p><p className="mt-2 text-sm text-muted">No deal values are stored yet.</p></Panel>
       </div>
+      <Panel className="mt-6">
+        <h2 className="mb-3 font-display text-2xl">Today&apos;s discovery</h2>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            ["Raw results", today.raw],
+            ["Unique companies", today.companies],
+            ["Duplicates removed", today.duplicates],
+            ["Companies researched", today.researched],
+            ["Contacts found", today.contacts],
+            ["Emails found", today.emails],
+            ["Software opportunities", today.software],
+            ["Advertising opportunities", today.advertising],
+            ["Qualified prospects", today.qualified],
+          ].map(([label, value]) => (
+            <p key={String(label)} className="text-sm">{label}: {value}</p>
+          ))}
+        </div>
+        <p className="mt-3 text-sm text-muted">SearXNG {today.sources.search} · Directories {today.sources.directory} · Maps {today.sources.map} · Social {today.sources.social} · Other {today.sources.other}</p>
+      </Panel>
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <Panel>
           <h2 className="mb-3 font-display text-2xl">Recent campaigns</h2>

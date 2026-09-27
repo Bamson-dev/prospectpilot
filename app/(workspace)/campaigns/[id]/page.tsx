@@ -5,6 +5,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { campaignOverview } from "@/lib/campaign-stats";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
+import { buildDiscoveryQueries } from "@/lib/search/queries";
 
 export const metadata = { title: "Campaign" };
 
@@ -23,6 +24,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
     take: 3,
   });
   const stats = await campaignOverview(organization.id, campaign.id);
+  const queries = buildDiscoveryQueries(campaign);
   const counts = [
     ["Prospects", stats.prospects],
     ["Researched", stats.researched],
@@ -45,6 +47,12 @@ export default async function CampaignPage({ params, searchParams }: { params: P
       <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {counts.map(([label, value]) => <Panel key={label}><p className="text-xs uppercase tracking-wider text-muted">{label}</p><p className="mt-2 font-display text-3xl">{value}</p></Panel>)}
       </div>
+      <Panel className="mb-6">
+        <h2 className="font-display text-2xl">Search queries</h2>
+        <ul className="mt-3 space-y-1 text-sm">
+          {queries.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      </Panel>
       <div className="mb-6 flex flex-wrap gap-2">
         <form action={startCampaign}><input type="hidden" name="id" value={campaign.id} /><SubmitButton pendingLabel="Starting">Start discovery</SubmitButton></form>
         <form action={pauseCampaign}><input type="hidden" name="id" value={campaign.id} /><SubmitButton variant="secondary" pendingLabel="Pausing">Pause</SubmitButton></form>

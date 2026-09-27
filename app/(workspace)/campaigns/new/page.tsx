@@ -20,6 +20,7 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
         <Field label="Country" name="country" />
         <Field label="City" name="city" />
         <label className="md:col-span-2 text-sm text-muted">Search terms<textarea name="searchTerms" required rows={3} placeholder="One term per line" /></label>
+        <label className="md:col-span-2 text-sm text-muted">Excluded keywords<textarea name="excludedKeywords" rows={2} /></label>
         <label className="md:col-span-2 text-sm text-muted">Description<textarea name="description" rows={3} /></label>
         <label className="text-sm text-muted">Opportunity
           <select name="opportunityFocus" defaultValue="SOFTWARE_AND_ADVERTISING">
@@ -33,7 +34,14 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
         <Field label="Target company size" name="targetCompanySize" />
         <Field label="Daily discovery limit" name="dailyDiscoveryLimit" type="number" defaultValue="25" />
         <Field label="Daily research limit" name="dailyResearchLimit" type="number" defaultValue="25" />
+        <Field label="Daily qualification limit" name="dailyQualificationLimit" type="number" defaultValue="25" />
         <Field label="Daily outreach limit" name="dailyOutreachLimit" type="number" defaultValue="25" />
+        <Field label="Max queries" name="maxQueries" type="number" defaultValue="6" />
+        <Field label="Pages per website" name="maxPagesPerSite" type="number" defaultValue="10" />
+        <Field label="Research depth" name="crawlDepth" type="number" defaultValue="2" />
+        <label className="text-sm text-muted"><input type="checkbox" name="enableDirectory" value="true" /> Directory discovery</label>
+        <label className="text-sm text-muted"><input type="checkbox" name="enableMap" value="true" /> Map and business discovery</label>
+        <label className="text-sm text-muted"><input type="checkbox" name="enableSocial" value="true" /> Public social discovery</label>
         <Field label="Follow-up days" name="followUps" defaultValue="3, 7, 14" />
         <label className="text-sm text-muted">Email provider
           <select name="provider" defaultValue="">

@@ -1,4 +1,4 @@
-export type IntegrationState = "connected" | "not_configured" | "needs_authentication" | "error";
+export type IntegrationState = "connected" | "not_configured" | "needs_authentication" | "error" | "disabled";
 
 export type CredentialFlags = {
   googleSearch: IntegrationState;
@@ -12,7 +12,9 @@ export function credentialStatus(accounts: Array<{ provider: "RESEND" | "GMAIL";
   const resendAccount = accounts.find((account) => account.provider === "RESEND");
   const gmailReady = Boolean(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REDIRECT_URI);
   return {
-    googleSearch: process.env.GOOGLE_CSE_API_KEY && process.env.GOOGLE_CSE_CX ? "connected" : "not_configured",
+    googleSearch: process.env.GOOGLE_CSE_ENABLED === "true"
+      ? process.env.GOOGLE_CSE_API_KEY && process.env.GOOGLE_CSE_CX ? "connected" : "not_configured"
+      : "disabled",
     deepseek: process.env.DEEPSEEK_API_KEY?.trim() ? "connected" : "not_configured",
     resend: !process.env.RESEND_API_KEY?.trim()
       ? "not_configured"
@@ -33,5 +35,6 @@ export function integrationLabel(state: IntegrationState) {
   if (state === "connected") return "Connected";
   if (state === "needs_authentication") return "Needs authentication";
   if (state === "error") return "Error";
+  if (state === "disabled") return "Disabled";
   return "Not configured";
 }

@@ -2,8 +2,11 @@ import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { queueJob, recordActivity } from "@/lib/jobs";
 import { assertResolvedPublicUrl } from "@/lib/network";
-import { extractPage, pageLooksThin, type PageSignals } from "@/lib/research/extract";
+import { extractPage, type PageSignals } from "@/lib/research/extract";
+import { needsBrowserRender } from "@/lib/research/browser-decision";
+import { crawlCompanySite, crawlHasEvidence } from "@/lib/research/crawl";
 import { socialLinks } from "@/lib/domains";
+import { logInfo } from "@/lib/logger";
 
 const MAX_REDIRECTS = 3;
 
@@ -25,18 +28,75 @@ export async function processResearch(prospectId: string) {
     }
   }
   await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "IN_PROGRESS" } });
+  logInfo("research.started", { prospectId: prospect.id, domain: prospect.domain });
+  const crawl = prospect.domain
+    ? await crawlCompanySite({
+        website: prospect.website,
+        domain: prospect.domain,
+        maxPages: prospect.campaign?.maxPagesPerSite ?? 10,
+        maxDepth: prospect.campaign?.crawlDepth ?? 2,
+      })
+    : null;
+  if (crawl && crawlHasEvidence(crawl)) {
+    const page = crawl.pages.find((item) => (item.text ?? "").length >= 280) ?? crawl.pages[0];
+    await prisma.researchRecord.create({
+      data: {
+        prospectId: prospect.id,
+        url: page?.url ?? prospect.website,
+        fetchMethod: "scrapy",
+        title: page?.title || crawl.companyName || null,
+        metaDescription: crawl.description || null,
+        excerpt: (page?.text ?? "").slice(0, 5000),
+        headings: [],
+        signals: {
+          services: crawl.services,
+          technology: crawl.technologySignals,
+          advertising: crawl.advertisingSignals,
+          emails: crawl.emails.map((item) => item.value),
+          phones: crawl.phones.map((item) => item.value),
+          socialUrls: crawl.socialProfiles.map((item) => item.url),
+        },
+        sourceType: "website",
+        content: (page?.text ?? "").slice(0, 5000),
+        technologies: crawl.technologySignals,
+        services: crawl.services,
+        contactSignals: { emails: crawl.emails, phones: crawl.phones },
+        advertisingSignals: { observed: crawl.advertisingSignals },
+        softwareSignals: { observedTechnology: crawl.technologySignals },
+        socialLinks: crawl.socialProfiles,
+        trackingSignals: { observed: crawl.advertisingSignals },
+        confidence: 70,
+      },
+    });
+    await storeObservedContacts(prospect.organizationId, prospect.id, page?.url ?? prospect.website, {
+      services: crawl.services,
+      technology: crawl.technologySignals,
+      advertising: crawl.advertisingSignals,
+      callsToAction: [],
+      forms: 0,
+      emails: crawl.emails.map((item) => item.value),
+      phones: crawl.phones.map((item) => item.value),
+      socialUrls: crawl.socialProfiles.map((item) => item.url),
+    });
+    await finishResearch(prospect, "scrapy", page?.url ?? prospect.website, crawl.description, crawl.phones[0]?.value, crawl.socialProfiles.map((item) => item.url));
+    return;
+  }
   const first = await fetchPublicHtml(prospect.website);
   let html = first.html;
   const finalUrl = first.url;
   let method = "http";
   const initial = extractPage(html, finalUrl);
-  if (pageLooksThin(initial.excerpt)) {
-    const rendered = await renderWithPlaywright(finalUrl);
-    html = rendered;
-    method = "playwright";
+  if (needsBrowserRender(initial.excerpt, html)) {
+    logInfo("research.playwright.started", { prospectId: prospect.id });
+    try {
+      html = await renderWithPlaywright(finalUrl);
+      method = "playwright";
+      logInfo("research.playwright.completed", { prospectId: prospect.id });
+    } catch (error) {
+      logInfo("research.playwright.failed", { prospectId: prospect.id, message: error instanceof Error ? error.message : "failed" });
+    }
   }
   const extracted = extractPage(html, finalUrl);
-  const social = socialLinks(extracted.signals.socialUrls);
   await prisma.researchRecord.create({
     data: {
       prospectId: prospect.id,
@@ -61,12 +121,24 @@ export async function processResearch(prospectId: string) {
     },
   });
   await storeObservedContacts(prospect.organizationId, prospect.id, finalUrl, extracted.signals);
+  await finishResearch(prospect, method, finalUrl, extracted.metaDescription, extracted.signals.phones[0], extracted.signals.socialUrls);
+}
+
+async function finishResearch(
+  prospect: { id: string; organizationId: string; campaignId: string | null; description: string | null; phone: string | null; linkedinUrl: string | null; facebookUrl: string | null; instagramUrl: string | null },
+  method: string,
+  finalUrl: string,
+  description: string | null,
+  phone: string | undefined,
+  urls: string[],
+) {
+  const social = socialLinks(urls);
   await prisma.prospect.update({
     where: { id: prospect.id },
     data: {
       researchStatus: "COMPLETED",
-      description: prospect.description || extracted.metaDescription,
-      phone: prospect.phone || extracted.signals.phones[0] || null,
+      description: prospect.description || description,
+      phone: prospect.phone || phone || null,
       linkedinUrl: prospect.linkedinUrl || social.linkedinUrl,
       facebookUrl: prospect.facebookUrl || social.facebookUrl,
       instagramUrl: prospect.instagramUrl || social.instagramUrl,
@@ -85,6 +157,7 @@ export async function processResearch(prospectId: string) {
     prospectId: prospect.id,
     queue: "qualification",
     name: "qualification.analyze",
+    payload: { provider: method },
   });
 }
 

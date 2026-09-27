@@ -1,13 +1,22 @@
 import { PageHeader, Panel } from "@/components/ui";
 import { requireOrganization } from "@/lib/current-user";
-import { rate, workspaceMetrics } from "@/lib/metrics";
+import { discoveryToday, rate, workspaceMetrics } from "@/lib/metrics";
 
 export const metadata = { title: "Analytics" };
 
 export default async function AnalyticsPage() {
   const { organization } = await requireOrganization();
   const metrics = await workspaceMetrics(organization.id);
+  const today = await discoveryToday(organization.id);
   const rows = [
+    ["Raw results today", today.raw, "discovery sources"],
+    ["Unique companies today", today.companies, "new prospects"],
+    ["Duplicates today", today.duplicates, "existing companies"],
+    ["SearXNG today", today.sources.search, "search results"],
+    ["Directories today", today.sources.directory, "directory results"],
+    ["Emails today", today.emails, "public addresses"],
+    ["Software opportunities today", today.software, "stored assessments"],
+    ["Advertising opportunities today", today.advertising, "stored assessments"],
     ["Discovery stored", metrics.prospects, "companies"],
     ["Research completion", rate(metrics.researched, metrics.prospects), "% of prospects"],
     ["Qualification", rate(metrics.qualified, metrics.prospects), "% of prospects"],

@@ -11,6 +11,7 @@ export class GoogleSearchProvider implements SearchProvider {
   readonly name = "google";
 
   async search(query: string, options: { limit: number }): Promise<SearchHit[]> {
+    if (process.env.GOOGLE_CSE_ENABLED !== "true") throw new AppError("Google Custom Search is disabled.");
     const limit = Math.min(Math.max(options.limit, 1), 10);
     if (process.env.GOOGLE_CSE_API_KEY && process.env.GOOGLE_CSE_CX) {
       return this.customSearch(query, limit);

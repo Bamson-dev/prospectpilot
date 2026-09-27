@@ -1,0 +1,23 @@
+use_default_settings: true
+
+general:
+  instance_name: "ProspectPilot search"
+  enable_metrics: false
+
+server:
+  secret_key: "__SECRET__"
+  limiter: true
+  image_proxy: false
+  public_instance: false
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 10.0
+  pool_connections: 20
+  pool_maxsize: 20

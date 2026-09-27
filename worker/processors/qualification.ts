@@ -5,6 +5,7 @@ import { companyAnalysisPrompt, emailPrompt, PROMPTS } from "@/lib/ai/prompts";
 import { companyAnalysisSchema, emailDraftSchema, extractJsonObject, type CompanyAnalysis } from "@/lib/ai/schemas";
 import { recordActivity } from "@/lib/jobs";
 import { logInfo } from "@/lib/logger";
+import { analysisRetryDecision, qualificationEvidence, shouldStoreQualificationDraft } from "@/lib/research/evidence";
 
 export async function processQualification(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({
@@ -14,6 +15,9 @@ export async function processQualification(prospectId: string) {
   if (!prospect) throw new AppError("Prospect was not found.");
   const research = prospect.research[0];
   if (!research) throw new AppError("Research must finish before qualification.");
+  if (research.fetchMethod === "blocked" || !research.excerpt) {
+    throw new AppError("Website research did not return page text. Qualification was not run.");
+  }
   if (prospect.campaign) {
     const start = new Date();
     start.setUTCHours(0, 0, 0, 0);
@@ -25,19 +29,20 @@ export async function processQualification(prospectId: string) {
     }
   }
   const sources = await prisma.discoverySource.findMany({ where: { prospectId: prospect.id }, orderBy: { createdAt: "desc" }, take: 5 });
-  const evidence = [
-    `Company: ${prospect.companyName}`,
-    prospect.industry ? `Industry: ${prospect.industry}` : "",
-    prospect.city || prospect.country ? `Location: ${[prospect.city, prospect.country].filter(Boolean).join(", ")}` : "",
-    prospect.website ? `Website: ${prospect.website}` : "",
-    research.title ? `Title: ${research.title}` : "",
-    research.metaDescription ? `Description: ${research.metaDescription}` : "",
-    research.excerpt ? `Page text: ${research.excerpt.slice(0, 5000)}` : "",
-    `Signals: ${JSON.stringify(research.signals).slice(0, 2000)}`,
-    sources.length > 0 ? `Discovery sources: ${sources.map((item) => `${item.sourceName} ${item.sourceUrl}`).join(" | ")}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const evidence = qualificationEvidence({
+    companyName: prospect.companyName,
+    domain: prospect.domain,
+    industry: prospect.industry,
+    city: prospect.city,
+    country: prospect.country,
+    website: prospect.website,
+    fetchMethod: research.fetchMethod,
+    title: research.title,
+    description: research.metaDescription,
+    excerpt: research.excerpt,
+    signals: research.signals,
+    sources,
+  });
   logInfo("qualification.started", { prospectId: prospect.id });
   const inputHash = hashInput(evidence);
   const cached = await prisma.aIRequest.findFirst({
@@ -78,7 +83,10 @@ export async function processQualification(prospectId: string) {
     },
   });
   const contact = prospect.contacts.find((item) => item.email && !item.suppressed);
-  if (prospect.campaign) {
+  const existingDraft = await prisma.outreachMessage.findFirst({
+    where: { prospectId: prospect.id, state: { in: ["DRAFT", "PENDING_APPROVAL"] } },
+  });
+  if (prospect.campaign && shouldStoreQualificationDraft(existingDraft?.state)) {
     const draft = await draftEmail(prospect.organizationId, prospect.id, {
       companyName: prospect.companyName,
       contactName: contact?.fullName ?? null,
@@ -174,6 +182,7 @@ async function analyze(organizationId: string, prospectId: string, evidence: str
       return parsed;
     } catch (error) {
       lastError = error instanceof Error ? error.message : lastError;
+      logInfo("qualification.validation_failed", { prospectId, attempt, message: lastError.slice(0, 180) });
       await prisma.aIRequest.create({
         data: {
           organizationId,
@@ -187,10 +196,12 @@ async function analyze(organizationId: string, prospectId: string, evidence: str
           durationMs: Date.now() - started,
         },
       });
-      if (error instanceof AppError && /not configured/.test(error.message)) throw error;
+      const decision = analysisRetryDecision(attempt, lastError);
+      if (decision === "stop") throw error;
+      if (decision === "fail") break;
     }
   }
-  throw new AppError(lastError);
+  throw new AppError("DeepSeek returned malformed qualification JSON.");
 }
 
 async function draftEmail(

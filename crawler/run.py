@@ -27,6 +27,16 @@ RESULT = {
     "contactPages": [],
     "teamPages": [],
     "note": "",
+    "metrics": {
+        "urlsRequested": 0,
+        "responsesReceived": 0,
+        "pagesExtracted": 0,
+        "pagesFailed": 0,
+        "http403": 0,
+        "emailsFound": 0,
+        "phonesFound": 0,
+        "socialLinksFound": 0,
+    },
 }
 
 
@@ -56,17 +66,38 @@ class CompanySpider(scrapy.Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = cls(*args, **kwargs)
+        spider._set_crawler(crawler)
         crawler.signals.connect(spider.closed, signal=signals.spider_closed)
         return spider
 
     def closed(self, spider, reason):
-        forbidden = spider.crawler.stats.get_value("robotstxt/forbidden") or 0
-        RESULT["note"] = "robots" if forbidden else str(reason)
+        stats = spider.crawler.stats
+        forbidden = stats.get_value("robotstxt/forbidden") or 0
+        failed = status_failures(stats) or RESULT["metrics"]["pagesFailed"]
+        RESULT["metrics"] = {
+            "urlsRequested": stats.get_value("downloader/request_count") or 0,
+            "responsesReceived": stats.get_value("downloader/response_count") or 0,
+            "pagesExtracted": len(RESULT["pages"]),
+            "pagesFailed": failed,
+            "http403": stats.get_value("downloader/response_status_count/403") or 0,
+            "emailsFound": len(RESULT["emails"]),
+            "phonesFound": len(RESULT["phones"]),
+            "socialLinksFound": len(RESULT["socialProfiles"]),
+        }
+        if forbidden:
+            RESULT["note"] = "robots"
+        elif RESULT["metrics"]["http403"]:
+            RESULT["note"] = "http-403"
+        else:
+            RESULT["note"] = str(reason)
 
     def parse(self, response, depth=0):
-        if len(RESULT["pages"]) >= self.max_pages:
-            return
         if response.status >= 400 or len(response.body) > 1_500_000:
+            RESULT["metrics"]["pagesFailed"] += 1
+            if response.status == 403:
+                RESULT["metrics"]["http403"] += 1
+            return
+        if len(RESULT["pages"]) >= self.max_pages:
             return
         text = " ".join(part.strip() for part in response.xpath("//body//text()[not(ancestor::script)][not(ancestor::style)]").getall())
         text = re.sub(r"\s+", " ", text)[:4000]
@@ -114,6 +145,17 @@ class CompanySpider(scrapy.Spider):
                 continue
             if any(token in parsed.path.lower() for token in INTEREST):
                 yield response.follow(absolute, callback=self.parse, cb_kwargs={"depth": depth + 1})
+
+
+def status_failures(stats):
+    failed = stats.get_value("downloader/exception_count") or 0
+    for key, value in stats.get_stats().items():
+        if not str(key).startswith("downloader/response_status_count/"):
+            continue
+        code = int(str(key).rsplit("/", 1)[-1])
+        if code >= 400:
+            failed += int(value or 0)
+    return failed
 
 
 def add_unique(bucket, item):

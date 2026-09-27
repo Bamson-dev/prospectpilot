@@ -35,10 +35,11 @@ export async function discoveryToday(organizationId: string) {
   const sources = { search: 0, directory: 0, map: 0, social: 0, other: 0 };
   for (const row of grouped) {
     const count = row._count._all;
-    if (row.sourceType === "search") sources.search = count;
-    else if (row.sourceType === "directory") sources.directory = count;
-    else if (row.sourceType === "map") sources.map = count;
-    else if (row.sourceType === "social") sources.social = count;
+    const kind = row.sourceType.toLowerCase();
+    if (kind === "search") sources.search += count;
+    else if (kind === "directory") sources.directory += count;
+    else if (kind === "map") sources.map += count;
+    else if (kind === "social") sources.social += count;
     else sources.other += count;
   }
   return { raw, companies, duplicates, researched, contacts, emails, software, advertising, qualified, sources };

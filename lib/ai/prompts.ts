@@ -16,7 +16,7 @@ export function companyAnalysisPrompt(evidence: string) {
     },
     {
       role: "user" as const,
-      content: `Prompt ${PROMPTS.companyAnalysis}\n\nResearch evidence:\n${evidence}\n\nReturn JSON with keys: summary (string), painPoints (string array, max 4), opportunityScore (integer 0-100), opportunityReason (string), recommendedService (string), personalizationAngle (string), suggestedOpening (string), software (object with score 0-100, interpretation, confidence 0-100, evidence string array), advertising (same object shape), automation (same object shape). Evidence strings must quote or closely paraphrase the supplied research.`,
+      content: `Prompt ${PROMPTS.companyAnalysis}\n\nResearch evidence:\n${evidence}\n\nReturn JSON with keys: summary (string), painPoints (string array, max 4), opportunityScore (integer 0-100), opportunityReason (string), recommendedService (string), personalizationAngle (string, maximum 400 characters), suggestedOpening (string), software (object with score 0-100, interpretation, confidence 0-100, evidence string array), advertising (same object shape), automation (same object shape). personalizationAngle must be 400 characters or fewer. Evidence strings must quote or closely paraphrase the supplied research. Do not treat a search snippet as a page you fetched.`,
     },
   ];
 }

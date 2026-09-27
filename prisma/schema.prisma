@@ -282,7 +282,7 @@ model Prospect {
 model DiscoverySource {
   id             String   @id @default(cuid())
   organizationId String
-  prospectId     String
+  prospectId     String?
   campaignId     String?
   sourceType     String
   sourceName     String
@@ -293,7 +293,7 @@ model DiscoverySource {
   confidence     Int      @default(50)
   createdAt      DateTime @default(now())
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  prospect       Prospect     @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  prospect       Prospect?    @relation(fields: [prospectId], references: [id], onDelete: Cascade)
   campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   @@index([prospectId, createdAt])

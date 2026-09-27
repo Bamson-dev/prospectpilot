@@ -7,7 +7,12 @@ const LISTING_PORTALS = [
   "olx.co.za",
   "yellowpages.co.za",
   "yelp.com",
+  "goodfirms.co",
+  "clutch.co",
+  "sortlist.com",
 ];
+
+export type DiscoverySourceType = "DIRECTORY" | "SEARCH" | "SOCIAL" | "MAP" | "WEBSITE" | "OTHER";
 
 const EMAIL = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
 const PHONE = /(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]\d{3,4}/g;
@@ -15,6 +20,25 @@ const PHONE = /(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]\d{3,4
 export function isListingPortal(domain: string) {
   const host = domain.toLowerCase().replace(/^www\./, "");
   return LISTING_PORTALS.some((portal) => host === portal || host.endsWith(`.${portal}`));
+}
+
+export function discoverySourceType(domain: string | null, fallback: DiscoverySourceType = "SEARCH"): DiscoverySourceType {
+  if (!domain) return fallback;
+  if (isListingPortal(domain)) return "DIRECTORY";
+  if (/linkedin\.com|facebook\.com|instagram\.com|youtube\.com|x\.com|twitter\.com/.test(domain)) return "SOCIAL";
+  return fallback;
+}
+
+export function companyWebsiteFromDirectory(input: { listingUrl: string; snippet?: string | null; title?: string | null }) {
+  const listing = canonicalDomain(input.listingUrl);
+  const blob = `${input.title ?? ""}\n${input.snippet ?? ""}`;
+  const urls = blob.match(/https?:\/\/[^\s<>"')\]]+/gi) ?? [];
+  for (const raw of urls) {
+    const site = websiteFromUrl(raw.replace(/[.,;]+$/, ""));
+    if (!site || site.domain === listing || isListingPortal(site.domain)) continue;
+    return site;
+  }
+  return null;
 }
 
 export function canonicalDomain(input: string | null | undefined) {

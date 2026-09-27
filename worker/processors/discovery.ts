@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanCompanyName, socialLinks, websiteFromUrl } from "@/lib/domains";
-import { isListingPortal } from "@/lib/discovery/normalize";
+import { companyWebsiteFromDirectory, discoverySourceType, isListingPortal } from "@/lib/discovery/normalize";
 import { discoveryProviders } from "@/lib/discovery/providers";
 import { recordSourceHealth } from "@/lib/discovery/health";
 import type { DiscoveryHit, DiscoveryProvider } from "@/lib/discovery/types";
@@ -84,12 +84,23 @@ async function collect(provider: DiscoveryProvider, query: string, limit: number
 }
 
 async function storeHit(campaign: { id: string; organizationId: string; industry: string | null }, hit: DiscoveryHit) {
-  const website = websiteFromUrl(hit.url);
-  const social = socialLinks([hit.url]);
-  if (website && (AGGREGATORS.some((host) => website.domain.includes(host)) || isListingPortal(website.domain))) {
-    logInfo("discovery.result.skipped", { domain: website.domain, reason: "listing-portal" });
+  const listed = websiteFromUrl(hit.url);
+  if (listed && AGGREGATORS.some((host) => listed.domain.includes(host))) {
+    logInfo("discovery.result.skipped", { domain: listed.domain, reason: "aggregator" });
     return false;
   }
+  if (listed && isListingPortal(listed.domain)) {
+    const resolved = companyWebsiteFromDirectory({ listingUrl: hit.url, snippet: hit.snippet, title: hit.title });
+    if (!resolved) {
+      await remember(campaign, null, { ...hit, sourceType: "DIRECTORY" }, 30);
+      logInfo("discovery.directory.unresolved", { domain: listed.domain, url: hit.url });
+      return false;
+    }
+    logInfo("discovery.directory.resolved", { directory: listed.domain, domain: resolved.domain });
+    return storeCompany(campaign, { ...hit, sourceType: "DIRECTORY" }, resolved, hit.url);
+  }
+  const website = listed;
+  const social = socialLinks([hit.url]);
   if (!website && !social.linkedinUrl && !social.facebookUrl && !social.instagramUrl) return false;
   if (website) {
     const existing = await prisma.prospect.findUnique({
@@ -97,6 +108,33 @@ async function storeHit(campaign: { id: string; organizationId: string; industry
     });
     if (existing) {
       await remember(campaign, existing.id, hit, 80);
+      await recordActivity({
+        organizationId: campaign.organizationId,
+        campaignId: campaign.id,
+        prospectId: existing.id,
+        action: "discovery.company.duplicate",
+        detail: website.domain,
+      });
+      logInfo("discovery.company.duplicate", { domain: website.domain });
+      return false;
+    }
+  }
+  return storeCompany(campaign, { ...hit, sourceType: discoverySourceType(website?.domain ?? null, "SEARCH") }, website, hit.url, social);
+}
+
+async function storeCompany(
+  campaign: { id: string; organizationId: string; industry: string | null },
+  hit: DiscoveryHit,
+  website: { domain: string; website: string } | null,
+  sourceUrl: string,
+  social = socialLinks([sourceUrl]),
+) {
+  if (website) {
+    const existing = await prisma.prospect.findUnique({
+      where: { organizationId_domain: { organizationId: campaign.organizationId, domain: website.domain } },
+    });
+    if (existing) {
+      await remember(campaign, existing.id, { ...hit, url: sourceUrl }, 80);
       await recordActivity({
         organizationId: campaign.organizationId,
         campaignId: campaign.id,
@@ -117,14 +155,14 @@ async function storeHit(campaign: { id: string; organizationId: string; industry
       website: website?.website ?? null,
       industry: campaign.industry,
       source: hit.sourceName,
-      sourceUrl: hit.url,
+      sourceUrl: website?.website ?? sourceUrl,
       description: hit.snippet || null,
       discoveryStatus: "FOUND",
       researchStatus: website ? "QUEUED" : "SKIPPED",
       ...social,
     },
   });
-  await remember(campaign, prospect.id, hit, website ? 70 : 40);
+  await remember(campaign, prospect.id, { ...hit, url: sourceUrl }, website ? 70 : 40);
   logInfo("discovery.company.normalized", { domain: website?.domain ?? null, prospectId: prospect.id });
   await recordActivity({
     organizationId: campaign.organizationId,
@@ -146,7 +184,7 @@ async function storeHit(campaign: { id: string; organizationId: string; industry
   return true;
 }
 
-async function remember(campaign: { id: string; organizationId: string }, prospectId: string, hit: DiscoveryHit, confidence: number) {
+async function remember(campaign: { id: string; organizationId: string }, prospectId: string | null, hit: DiscoveryHit, confidence: number) {
   await prisma.discoverySource.create({
     data: {
       organizationId: campaign.organizationId,

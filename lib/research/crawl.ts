@@ -24,6 +24,18 @@ export type CrawlResult = {
   contactPages: string[];
   teamPages: string[];
   note?: string;
+  metrics?: CrawlMetrics;
+};
+
+export type CrawlMetrics = {
+  urlsRequested: number;
+  responsesReceived: number;
+  pagesExtracted: number;
+  pagesFailed: number;
+  http403: number;
+  emailsFound: number;
+  phonesFound: number;
+  socialLinksFound: number;
 };
 
 export function parseCrawlResult(value: unknown): CrawlResult | null {
@@ -44,6 +56,22 @@ export function parseCrawlResult(value: unknown): CrawlResult | null {
     contactPages: strings(row.contactPages),
     teamPages: strings(row.teamPages),
     note: typeof row.note === "string" ? row.note.slice(0, 80) : "",
+    metrics: metricsOf((value as { metrics?: unknown }).metrics),
+  };
+}
+
+function metricsOf(value: unknown): CrawlMetrics {
+  const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const count = (key: string) => (typeof row[key] === "number" ? row[key] : 0);
+  return {
+    urlsRequested: count("urlsRequested"),
+    responsesReceived: count("responsesReceived"),
+    pagesExtracted: count("pagesExtracted"),
+    pagesFailed: count("pagesFailed"),
+    http403: count("http403"),
+    emailsFound: count("emailsFound"),
+    phonesFound: count("phonesFound"),
+    socialLinksFound: count("socialLinksFound"),
   };
 }
 
@@ -74,7 +102,19 @@ export async function crawlCompanySite(input: { website: string; domain: string;
       logInfo("research.crawl.failed", { domain: input.domain, reason: "malformed" });
       return null;
     }
-    logInfo("research.crawl.completed", { domain: input.domain, pages: parsed.pages.length, note: parsed.note || "" });
+    logInfo("research.crawl.completed", {
+      domain: input.domain,
+      pages: parsed.pages.length,
+      note: parsed.note || "",
+      urlsRequested: parsed.metrics?.urlsRequested ?? 0,
+      responsesReceived: parsed.metrics?.responsesReceived ?? 0,
+      pagesExtracted: parsed.metrics?.pagesExtracted ?? parsed.pages.length,
+      pagesFailed: parsed.metrics?.pagesFailed ?? 0,
+      http403: parsed.metrics?.http403 ?? 0,
+      emailsFound: parsed.metrics?.emailsFound ?? parsed.emails.length,
+      phonesFound: parsed.metrics?.phonesFound ?? parsed.phones.length,
+      socialLinksFound: parsed.metrics?.socialLinksFound ?? parsed.socialProfiles.length,
+    });
     return parsed;
   } catch {
     logInfo("research.crawl.failed", { domain: input.domain, reason: "unreadable" });

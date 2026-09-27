@@ -2,8 +2,8 @@ import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { queueJob, recordActivity } from "@/lib/jobs";
 import { assertResolvedPublicUrl } from "@/lib/network";
+import { httpStatusFromError, pageAccessBlocked, shouldUsePlaywright } from "@/lib/research/browser-decision";
 import { extractPage, type PageSignals } from "@/lib/research/extract";
-import { needsBrowserRender } from "@/lib/research/browser-decision";
 import { crawlCompanySite, crawlHasEvidence } from "@/lib/research/crawl";
 import { socialLinks } from "@/lib/domains";
 import { logInfo } from "@/lib/logger";
@@ -81,20 +81,57 @@ export async function processResearch(prospectId: string) {
     await finishResearch(prospect, "scrapy", page?.url ?? prospect.website, crawl.description, crawl.phones[0]?.value, crawl.socialProfiles.map((item) => item.url));
     return;
   }
-  const first = await fetchPublicHtml(prospect.website);
-  let html = first.html;
-  const finalUrl = first.url;
-  let method = "http";
-  const initial = extractPage(html, finalUrl);
-  if (needsBrowserRender(initial.excerpt, html)) {
-    logInfo("research.playwright.started", { prospectId: prospect.id });
+  let html = "";
+  let finalUrl = prospect.website;
+  let httpStatus = 0;
+  try {
+    const first = await fetchPublicHtml(prospect.website);
+    html = first.html;
+    finalUrl = first.url;
+  } catch (error) {
+    httpStatus = httpStatusFromError(error);
+    logInfo("research.http.failed", { prospectId: prospect.id, status: httpStatus });
+    if (httpStatus !== 401 && httpStatus !== 403) throw error;
+  }
+  const initial = html ? extractPage(html, finalUrl) : { excerpt: "", signals: emptySignals(), title: null, metaDescription: null, headings: [] as string[] };
+  let method = httpStatus ? "http-blocked" : "http";
+  if (shouldUsePlaywright({ httpStatus, excerpt: initial.excerpt, html, scrapySufficient: false })) {
+    logInfo("research.playwright.started", { prospectId: prospect.id, status: httpStatus });
     try {
-      html = await renderWithPlaywright(finalUrl);
-      method = "playwright";
-      logInfo("research.playwright.completed", { prospectId: prospect.id });
+      const rendered = await renderWithPlaywright(finalUrl);
+      if (pageAccessBlocked({ html: rendered })) {
+        logInfo("research.playwright.blocked", { prospectId: prospect.id });
+      } else {
+        html = rendered;
+        method = "playwright";
+        logInfo("research.playwright.completed", { prospectId: prospect.id });
+      }
     } catch (error) {
       logInfo("research.playwright.failed", { prospectId: prospect.id, message: error instanceof Error ? error.message : "failed" });
     }
+  }
+  if (method !== "playwright" && (!html || pageAccessBlocked({ status: httpStatus, html }))) {
+    await prisma.researchRecord.create({
+      data: {
+        prospectId: prospect.id,
+        url: finalUrl,
+        fetchMethod: "blocked",
+        excerpt: "",
+        headings: [],
+        signals: { status: httpStatus, note: "The site refused automated access. No page text was stored." },
+        sourceType: "blocked",
+        confidence: 0,
+      },
+    });
+    await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "FAILED" } });
+    await recordActivity({
+      organizationId: prospect.organizationId,
+      campaignId: prospect.campaignId,
+      prospectId: prospect.id,
+      action: "research.blocked",
+      detail: httpStatus ? `HTTP ${httpStatus}` : "Playwright could not read the page",
+    });
+    return;
   }
   const extracted = extractPage(html, finalUrl);
   await prisma.researchRecord.create({
@@ -193,6 +230,10 @@ async function renderWithPlaywright(url: string) {
   } finally {
     await browser.close();
   }
+}
+
+function emptySignals(): PageSignals {
+  return { services: [], technology: [], advertising: [], callsToAction: [], forms: 0, emails: [], phones: [], socialUrls: [] };
 }
 
 async function storeObservedContacts(organizationId: string, prospectId: string, sourceUrl: string, signals: PageSignals) {

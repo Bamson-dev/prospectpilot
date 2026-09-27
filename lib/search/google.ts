@@ -1,5 +1,6 @@
 import { AppError } from "@/lib/errors";
 import { allowedGoogleUrl, googleBlocked, googleNeedsBrowser, rejectAllConsent } from "@/lib/search/consent";
+import { describeGoogleDenial, ipv4Get } from "@/lib/search/ipv4";
 import { parseGoogleResults } from "@/lib/search/parse-google";
 import type { SearchHit, SearchProvider } from "@/lib/search/types";
 
@@ -23,13 +24,13 @@ export class GoogleSearchProvider implements SearchProvider {
     url.searchParams.set("cx", process.env.GOOGLE_CSE_CX ?? "");
     url.searchParams.set("q", query);
     url.searchParams.set("num", String(limit));
-    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const response = await ipv4Get(url, 15000);
     if (response.status === 429) throw new AppError("Google search quota was reached. Discovery is paused.");
     if (response.status === 401 || response.status === 403) {
-      throw new AppError(`Google denied this search (${await googleDenyReason(response)}). Discovery stopped instead of retrying.`);
+      throw new AppError(`Google denied this search (${describeGoogleDenial(response.body)}). Discovery stopped instead of retrying.`);
     }
-    if (!response.ok) throw new AppError(`Google search failed with status ${response.status}.`);
-    const payload = (await response.json()) as { items?: Array<{ title?: string; link?: string; snippet?: string }> };
+    if (response.status < 200 || response.status >= 300) throw new AppError(`Google search failed with status ${response.status}.`);
+    const payload = JSON.parse(response.body) as { items?: Array<{ title?: string; link?: string; snippet?: string }> };
     return (payload.items ?? [])
       .filter((item) => item.link && item.title)
       .map((item) => ({ title: item.title ?? "", url: item.link ?? "", snippet: item.snippet ?? "" }));
@@ -103,17 +104,6 @@ async function acceptEssentialConsent(response: Response, cookies: Map<string, s
     body: form.body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
-}
-
-async function googleDenyReason(response: Response) {
-  try {
-    const payload = (await response.json()) as { error?: { status?: string } };
-    const status = payload.error?.status ?? "";
-    if (/^[A-Z0-9_]+$/.test(status)) return status;
-  } catch {
-    return "permission denied";
-  }
-  return "permission denied";
 }
 
 export function getSearchProvider(): SearchProvider {

@@ -6,6 +6,7 @@ import { parseFollowUpSteps } from "@/lib/follow-ups";
 import { redact } from "@/lib/logger";
 import { isBlockedIp } from "@/lib/network";
 import { classifyProviderFailure, isPermanentProviderFailure } from "@/lib/provider-errors";
+import { describeGoogleDenial, IPV4_FAMILY } from "@/lib/search/ipv4";
 import { buildDiscoveryQueries } from "@/lib/search/queries";
 import { googleNeedsBrowser, rejectAllConsent } from "@/lib/search/consent";
 import { parseGoogleResults } from "@/lib/search/parse-google";
@@ -212,6 +213,22 @@ describe("product layers", () => {
     restore("GMAIL_CLIENT_ID", saved.gmailId);
     restore("GMAIL_CLIENT_SECRET", saved.gmailSecret);
     restore("GMAIL_REDIRECT_URI", saved.gmailRedirect);
+  });
+
+  it("classifies a Google IP denial without keeping the key", () => {
+    expect(IPV4_FAMILY).toBe(4);
+    const described = describeGoogleDenial(
+      JSON.stringify({
+        error: {
+          status: "PERMISSION_DENIED",
+          message: "The provided API key has an IP address restriction. The originating IP address of the call (203.0.113.5) violates this restriction.",
+          errors: [{ reason: "forbidden", message: "blocked for AIzaSyTESTKEYshouldNotRemain" }],
+        },
+      }),
+    );
+    expect(described.startsWith("API key restriction")).toBe(true);
+    expect(described).toContain("203.0.113.5");
+    expect(described).not.toContain("AIza");
   });
 
   it("keeps a city discovery query small", () => {

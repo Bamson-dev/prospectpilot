@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import { prisma } from "@/lib/db";
 import { logInfo } from "@/lib/logger";
+import { ipv4Get } from "@/lib/search/ipv4";
 import { getQueue, getRedis } from "@/lib/queues";
 import { processDiscovery } from "@/worker/processors/discovery";
 import { processDueFollowUps, processReply } from "@/worker/processors/follow-up";
@@ -102,3 +103,13 @@ function readPayload(data: Record<string, string>, key: string) {
 }
 
 logInfo("worker.started", { queues: ["discovery", "research", "qualification", "ai", "outreach", "inbox-sync", "reply-analysis", "follow-up"] });
+
+void ipv4Get(new URL("https://api.ipify.org"), 8000)
+  .then((result) => {
+    const ip = result.body.trim();
+    if (result.status === 200 && /^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)) logInfo("worker.outbound_ipv4", { ip });
+    else logInfo("worker.outbound_ipv4_failed", { status: result.status });
+  })
+  .catch((error: unknown) => {
+    logInfo("worker.outbound_ipv4_failed", { message: error instanceof Error ? error.message : "unavailable" });
+  });

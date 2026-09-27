@@ -36,6 +36,9 @@ export async function processQualification(prospectId: string) {
     data: (["software", "advertising", "automation"] as const).map((kind) => ({
       prospectId: prospect.id,
       kind: kind === "software" ? "SOFTWARE" : kind === "advertising" ? "ADVERTISING" : "AUTOMATION",
+      title: kind === "software" ? "Software opportunity" : kind === "advertising" ? "Advertising opportunity" : "Automation opportunity",
+      description: analysis[kind].interpretation,
+      potentialValue: qualitativeValue(analysis[kind].score),
       evidence: analysis[kind].evidence,
       interpretation: analysis[kind].interpretation,
       recommendedService: kind === "software" ? analysis.recommendedService : null,
@@ -59,10 +62,10 @@ export async function processQualification(prospectId: string) {
     },
   });
   const contact = prospect.contacts.find((item) => item.email && !item.suppressed);
-  if (contact?.email && prospect.campaign) {
+  if (prospect.campaign) {
     const draft = await draftEmail(prospect.organizationId, prospect.id, {
       companyName: prospect.companyName,
-      contactName: contact.fullName,
+      contactName: contact?.fullName ?? null,
       evidence: evidence.slice(0, 4000),
       angle: analysis.personalizationAngle,
       recommendedService: analysis.recommendedService,
@@ -79,15 +82,18 @@ export async function processQualification(prospectId: string) {
         organizationId: prospect.organizationId,
         campaignId: prospect.campaignId,
         prospectId: prospect.id,
-        contactId: contact.id,
+        contactId: contact?.id,
         conversationId: conversation.id,
         subject: draft.subject,
         body: draft.body,
-        state: "PENDING_APPROVAL",
+        state: contact?.email ? "PENDING_APPROVAL" : "DRAFT",
         provider: prospect.campaign.provider,
       },
     });
-    await prisma.prospect.update({ where: { id: prospect.id }, data: { outreachState: "PENDING_APPROVAL" } });
+    await prisma.prospect.update({
+      where: { id: prospect.id },
+      data: { outreachState: contact?.email ? "PENDING_APPROVAL" : "DRAFT" },
+    });
   }
   await recordActivity({
     organizationId: prospect.organizationId,
@@ -96,6 +102,13 @@ export async function processQualification(prospectId: string) {
     action: "prospect.qualified",
     detail: analysis.recommendedService,
   });
+}
+
+function qualitativeValue(score: number) {
+  if (score >= 70) return "high";
+  if (score >= 40) return "moderate";
+  if (score > 0) return "low";
+  return "unknown";
 }
 
 async function analyze(organizationId: string, prospectId: string, evidence: string, inputHash: string, reuse: boolean) {

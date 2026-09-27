@@ -3,6 +3,7 @@ import { decryptSecret } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
 import { GmailProvider } from "@/lib/email/gmail";
 import { ResendProvider } from "@/lib/email/resend";
+import { outreachSendingEnabled } from "@/lib/email/send-gate";
 import type { EmailProvider } from "@/lib/email/types";
 import { parseFollowUpSteps } from "@/lib/follow-ups";
 import { recordActivity } from "@/lib/jobs";
@@ -14,6 +15,7 @@ export async function processOutreach(messageId: string) {
     include: { prospect: true, contact: true, campaign: { include: { emailAccount: true } } },
   });
   if (!message) throw new AppError("Outreach message was not found.");
+  if (!outreachSendingEnabled()) throw new AppError("Outreach sending is turned off. No email was sent.");
   if (message.state === "SENT" || message.state === "DELIVERED" || message.state === "REPLIED") return;
   if (!message.contact?.email) throw new AppError("The contact does not have an email address.");
   if (message.contact.suppressed) throw new AppError("This contact is suppressed.");

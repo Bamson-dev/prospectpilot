@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
+import { outreachSendingEnabled } from "@/lib/email/send-gate";
 import { AppError, errorMessage } from "@/lib/errors";
 import { queueJob, recordActivity } from "@/lib/jobs";
 
@@ -27,21 +28,38 @@ export async function approveOutreach(formData: FormData) {
     const subject = String(formData.get("subject") ?? message.subject).trim().slice(0, 160);
     const body = String(formData.get("body") ?? message.body).trim().slice(0, 4000);
     if (!subject || !body) throw new AppError("Subject and body are required.");
+    if (!contact?.email) throw new AppError("Add a contact email before this message can be approved.");
+    const sending = outreachSendingEnabled();
     await prisma.outreachMessage.update({ where: { id }, data: { subject, body, state: "APPROVED" } });
-    await prisma.prospect.update({ where: { id: message.prospectId }, data: { qualificationStatus: "APPROVED", outreachState: "QUEUED" } });
-    await queueJob({
+    await prisma.prospect.update({
+      where: { id: message.prospectId },
+      data: { qualificationStatus: "APPROVED", outreachState: sending ? "QUEUED" : "APPROVED" },
+    });
+    if (sending) {
+      await queueJob({
+        organizationId: organization.id,
+        campaignId: message.campaignId,
+        prospectId: message.prospectId,
+        queue: "outreach",
+        name: "outreach.send",
+        payload: { messageId: id },
+      });
+    }
+    await recordActivity({
       organizationId: organization.id,
       campaignId: message.campaignId,
       prospectId: message.prospectId,
-      queue: "outreach",
-      name: "outreach.send",
-      payload: { messageId: id },
+      action: "outreach.approved",
+      detail: sending ? null : "Sending is turned off.",
     });
-    await recordActivity({ organizationId: organization.id, campaignId: message.campaignId, prospectId: message.prospectId, action: "outreach.approved" });
   } catch (error) {
     redirect(`/outreach?error=${encodeURIComponent(errorMessage(error))}`);
   }
-  redirect("/outreach?notice=Approved+and+queued.+It+will+not+send+until+the+worker+and+email+provider+are+available.");
+  redirect(
+    outreachSendingEnabled()
+      ? "/outreach?notice=Approved+and+queued.+It+will+not+send+until+the+worker+and+email+provider+are+available."
+      : "/outreach?notice=Approved.+Sending+is+turned+off,+so+no+email+was+queued.",
+  );
 }
 
 export async function rejectOutreach(formData: FormData) {

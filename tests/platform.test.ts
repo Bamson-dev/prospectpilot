@@ -15,6 +15,7 @@ import { aiConfigured } from "@/lib/ai/service";
 import { credentialStatus, integrationLabel } from "@/lib/integrations/status";
 import { belongsToOrganization } from "@/lib/ownership";
 import { ResendProvider } from "@/lib/email/resend";
+import { outreachSendingEnabled } from "@/lib/email/send-gate";
 import { QUEUE_NAMES } from "@/lib/queues";
 import { roleAtLeast } from "@/lib/roles";
 import { isSuppressionRequest } from "@/lib/suppression";
@@ -168,5 +169,60 @@ describe("product layers", () => {
   it("registers the worker queues", () => {
     expect(QUEUE_NAMES).toContain("discovery");
     expect(QUEUE_NAMES).toContain("outreach");
+  });
+
+  it("keeps real email sending off unless it is explicitly enabled", () => {
+    const saved = process.env.OUTREACH_SEND_ENABLED;
+    delete process.env.OUTREACH_SEND_ENABLED;
+    expect(outreachSendingEnabled()).toBe(false);
+    process.env.OUTREACH_SEND_ENABLED = "false";
+    expect(outreachSendingEnabled()).toBe(false);
+    process.env.OUTREACH_SEND_ENABLED = "true";
+    expect(outreachSendingEnabled()).toBe(true);
+    restore("OUTREACH_SEND_ENABLED", saved);
+  });
+
+  it("reports configured providers from present credentials without calling them", () => {
+    const saved = {
+      deepseek: process.env.DEEPSEEK_API_KEY,
+      resend: process.env.RESEND_API_KEY,
+      googleKey: process.env.GOOGLE_CSE_API_KEY,
+      googleCx: process.env.GOOGLE_CSE_CX,
+      gmailId: process.env.GMAIL_CLIENT_ID,
+      gmailSecret: process.env.GMAIL_CLIENT_SECRET,
+      gmailRedirect: process.env.GMAIL_REDIRECT_URI,
+    };
+    process.env.DEEPSEEK_API_KEY = "test-deepseek";
+    process.env.RESEND_API_KEY = "test-resend";
+    process.env.GOOGLE_CSE_API_KEY = "test-google";
+    process.env.GOOGLE_CSE_CX = "test-cx";
+    process.env.GMAIL_CLIENT_ID = "test-gmail-id";
+    process.env.GMAIL_CLIENT_SECRET = "test-gmail-secret";
+    process.env.GMAIL_REDIRECT_URI = "https://leadpilot.live/api/integrations/gmail/callback";
+    const status = credentialStatus();
+    expect(status.deepseek).toBe("connected");
+    expect(status.resend).toBe("connected");
+    expect(status.googleSearch).toBe("connected");
+    expect(status.gmail).toBe("needs_authentication");
+    expect(aiConfigured()).toBe(true);
+    restore("DEEPSEEK_API_KEY", saved.deepseek);
+    restore("RESEND_API_KEY", saved.resend);
+    restore("GOOGLE_CSE_API_KEY", saved.googleKey);
+    restore("GOOGLE_CSE_CX", saved.googleCx);
+    restore("GMAIL_CLIENT_ID", saved.gmailId);
+    restore("GMAIL_CLIENT_SECRET", saved.gmailSecret);
+    restore("GMAIL_REDIRECT_URI", saved.gmailRedirect);
+  });
+
+  it("keeps a city discovery query small", () => {
+    const queries = buildDiscoveryQueries({
+      industry: "Real Estate",
+      city: "Johannesburg",
+      country: "South Africa",
+      searchTerms: "real estate agencies",
+    });
+    expect(queries.length).toBeLessThanOrEqual(2);
+    expect(queries[0]).toContain("Johannesburg");
+    expect(queries[0]).toContain("South Africa");
   });
 });

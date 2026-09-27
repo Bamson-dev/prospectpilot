@@ -39,7 +39,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
         </form>
       )}
       <p className="mt-4 text-sm"><a className="text-tide" href="/api/integrations/gmail/start">Connect Gmail</a></p>
-      <p className="mt-2 text-sm text-muted">Without a Custom Search key, discovery uses Google’s public HTML results at a fixed slow rate and stops if Google blocks it.</p>
+      <p className="mt-2 text-sm text-muted">{status.googleSearch === "connected" ? "Discovery uses the configured Google Custom Search engine. Public HTML search is only the fallback when that key is absent." : "Without a Custom Search key, discovery uses Google’s public HTML results at a fixed slow rate and stops if Google blocks it."}</p>
     </div>
   );
 }

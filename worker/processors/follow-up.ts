@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { outreachSendingEnabled } from "@/lib/email/send-gate";
 import { AppError } from "@/lib/errors";
 import { queueJob } from "@/lib/jobs";
 import { isSuppressionRequest } from "@/lib/suppression";
 
 export async function processDueFollowUps(organizationId: string) {
+  if (!outreachSendingEnabled()) return;
   const due = await prisma.followUp.findMany({
     where: { organizationId, state: "SCHEDULED", runAt: { lte: new Date() } },
     take: 20,

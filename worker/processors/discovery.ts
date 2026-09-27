@@ -19,7 +19,7 @@ export async function processDiscovery(campaignId: string) {
   const remaining = campaign.dailyDiscoveryLimit - discoveredToday;
   if (remaining <= 0) throw new AppError("The daily discovery limit has been reached.");
 
-  const queries = buildDiscoveryQueries(campaign);
+  const queries = buildDiscoveryQueries(campaign).slice(0, campaign.dailyDiscoveryLimit <= 2 ? 1 : 8);
   if (queries.length === 0) throw new AppError("Add search terms before starting discovery.");
   const provider = getSearchProvider();
   let stored = 0;

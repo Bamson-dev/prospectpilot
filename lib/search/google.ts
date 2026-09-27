@@ -25,6 +25,9 @@ export class GoogleSearchProvider implements SearchProvider {
     url.searchParams.set("num", String(limit));
     const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
     if (response.status === 429) throw new AppError("Google search quota was reached. Discovery is paused.");
+    if (response.status === 401 || response.status === 403) {
+      throw new AppError(`Google denied this search (${await googleDenyReason(response)}). Discovery stopped instead of retrying.`);
+    }
     if (!response.ok) throw new AppError(`Google search failed with status ${response.status}.`);
     const payload = (await response.json()) as { items?: Array<{ title?: string; link?: string; snippet?: string }> };
     return (payload.items ?? [])
@@ -100,6 +103,17 @@ async function acceptEssentialConsent(response: Response, cookies: Map<string, s
     body: form.body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
+}
+
+async function googleDenyReason(response: Response) {
+  try {
+    const payload = (await response.json()) as { error?: { status?: string } };
+    const status = payload.error?.status ?? "";
+    if (/^[A-Z0-9_]+$/.test(status)) return status;
+  } catch {
+    return "permission denied";
+  }
+  return "permission denied";
 }
 
 export function getSearchProvider(): SearchProvider {

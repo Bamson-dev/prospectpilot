@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { isAppError } from "@/lib/errors";
 import { logError, logInfo } from "@/lib/logger";
 
-const PERMANENT = /not configured|stopped|blocked|private network|not a public|quota|rate limit|policy|restricted|credentials|did not return|malformed|no company results/i;
+const PERMANENT = /not configured|stopped|blocked|denied|private network|not a public|quota|rate limit|policy|restricted|credentials|did not return|malformed|no company results/i;
 
 export async function runJob(jobId: string, work: () => Promise<void>) {
   const existing = await prisma.backgroundJob.findUnique({ where: { id: jobId } });

@@ -95,7 +95,9 @@ export async function processResearch(prospectId: string) {
   }
   const initial = html ? extractPage(html, finalUrl) : { excerpt: "", signals: emptySignals(), title: null, metaDescription: null, headings: [] as string[] };
   let method = httpStatus ? "http-blocked" : "http";
+  let playwrightTried = false;
   if (shouldUsePlaywright({ httpStatus, excerpt: initial.excerpt, html, scrapySufficient: false })) {
+    playwrightTried = true;
     logInfo("research.playwright.started", { prospectId: prospect.id, status: httpStatus });
     try {
       const rendered = await renderWithPlaywright(finalUrl);
@@ -129,7 +131,7 @@ export async function processResearch(prospectId: string) {
       campaignId: prospect.campaignId,
       prospectId: prospect.id,
       action: "research.blocked",
-      detail: httpStatus ? `HTTP ${httpStatus}` : "Playwright could not read the page",
+      detail: httpStatus ? `HTTP ${httpStatus}` : playwrightTried ? "Playwright could not read the page" : "The HTTP response was an access challenge",
     });
     return;
   }

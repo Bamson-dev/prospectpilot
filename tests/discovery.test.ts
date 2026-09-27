@@ -83,6 +83,9 @@ describe("discovery providers", () => {
     expect(pageAccessBlocked({ status: 403, html: "<html>ok</html>" })).toBe(true);
     expect(pageAccessBlocked({ html: "<html>verify you are human</html>" })).toBe(true);
     expect(pageAccessBlocked({ status: 200, html: "<html><p>office</p></html>" })).toBe(false);
+    expect(pageAccessBlocked({ status: 200, html: "<html><title>Byron Thomas Properties</title><script src=\"https://www.google.com/recaptcha/api.js\"></script><div id=\"captcha_box\"></div><p>public office</p></html>" })).toBe(false);
+    expect(shouldUsePlaywright({ httpStatus: 200, excerpt: "x".repeat(600), html: "<html><script src=\"https://www.google.com/recaptcha/api.js\"></script><p>public office</p></html>", scrapySufficient: false })).toBe(false);
+    expect(shouldUsePlaywright({ httpStatus: 200, excerpt: "x".repeat(600), html: "<html>verify you are human</html>", scrapySufficient: false })).toBe(true);
   });
 
   it("keeps personalization angles inside 400 characters and retries once", () => {

@@ -91,10 +91,10 @@ export async function crawlCompanySite(input: { website: string; domain: string;
     maxDepth: Math.min(Math.max(input.maxDepth, 1), 3),
   }));
   logInfo("research.crawl.started", { domain: input.domain });
-  const code = await runPython(script, [jobPath, outPath]);
+  const run = await runPython(script, [jobPath, outPath]);
   try {
-    if (code !== 0) {
-      logInfo("research.crawl.failed", { domain: input.domain, code });
+    if (run.code !== 0 || crawlerStartupFailed(run.stderr)) {
+      logInfo("research.crawl.failed", { domain: input.domain, code: run.code, reason: crawlerStartupFailed(run.stderr) ? "crawler-startup" : "exit" });
       return null;
     }
     const parsed = parseCrawlResult(JSON.parse(await readFile(outPath, "utf8")));
@@ -124,17 +124,26 @@ export async function crawlCompanySite(input: { website: string; domain: string;
   }
 }
 
+function crawlerStartupFailed(stderr: string) {
+  return /ImportError|Traceback \(most recent call last\)/.test(stderr);
+}
+
 function runPython(script: string, args: string[]) {
-  return new Promise<number>((resolve) => {
+  return new Promise<{ code: number; stderr: string }>((resolve) => {
     const child = spawn(process.env.CRAWLER_PYTHON || "python3", [script, ...args], { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+      if (stderr.length > 4000) stderr = stderr.slice(-4000);
+    });
     const timer = setTimeout(() => child.kill("SIGTERM"), 70000);
     child.on("error", () => {
       clearTimeout(timer);
-      resolve(1);
+      resolve({ code: 1, stderr });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve(code ?? 1);
+      resolve({ code: code ?? 1, stderr });
     });
   });
 }

@@ -26,10 +26,16 @@ export function classifyQuestion(question: string): ApplicationQuestionKind {
   return "OTHER";
 }
 
+function storedFact(candidate: CandidateRecord, pattern: RegExp) {
+  return candidate.facts.find((fact) => fact.verified && pattern.test(fact.fact))?.fact ?? null;
+}
+
 export function answerQuestion(question: string, job: JobInput, candidate: CandidateRecord, fit: FitResult): QuestionDraft {
   const kind = classifyQuestion(question);
   if (kind === "SALARY" || kind === "WORK_AUTHORIZATION" || kind === "AVAILABILITY") {
-    return { question, kind, answer: null, status: "NEEDS_USER_INPUT" };
+    const pattern = kind === "SALARY" ? /^salary expectation:/i : kind === "WORK_AUTHORIZATION" ? /^work authorization:/i : /^notice period:/i;
+    const answer = storedFact(candidate, pattern);
+    return { question, kind, answer, status: answer ? "ANSWERED" : "NEEDS_USER_INPUT" };
   }
   if (kind === "BEHAVIORAL" || kind === "COMPANY_SPECIFIC") {
     return { question, kind, answer: null, status: "REVIEW_REQUIRED" };
@@ -37,11 +43,14 @@ export function answerQuestion(question: string, job: JobInput, candidate: Candi
   if (kind === "EXPERIENCE" && /years/.test(question.toLowerCase())) {
     return { question, kind, answer: null, status: "NEEDS_USER_INPUT" };
   }
-  if (/linkedin/i.test(question) && !candidate.facts.some((fact) => fact.category === "LINK" && fact.verified && /linkedin/i.test(fact.fact))) {
-    return { question, kind, answer: null, status: "NEEDS_USER_INPUT" };
+  if (/linkedin/i.test(question)) {
+    const answer = storedFact(candidate, /linkedin/i);
+    return { question, kind, answer, status: answer ? "ANSWERED" : "NEEDS_USER_INPUT" };
   }
-  if (kind === "EDUCATION" && !candidate.facts.some((fact) => fact.category === "EDUCATION" && fact.verified)) {
-    return { question, kind, answer: null, status: "NEEDS_USER_INPUT" };
+  if (kind === "EDUCATION" || /certification|certificate/i.test(question)) {
+    const category = /certification|certificate/i.test(question) ? "CERTIFICATION" : "EDUCATION";
+    const answer = candidate.facts.find((fact) => fact.verified && fact.category === category)?.fact ?? null;
+    return { question, kind, answer, status: answer ? "ANSWERED" : "NEEDS_USER_INPUT" };
   }
   if (kind === "LOCATION") {
     return {

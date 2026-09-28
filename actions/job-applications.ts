@@ -7,6 +7,7 @@ import { AppError, errorMessage } from "@/lib/errors";
 import { queueJob } from "@/lib/jobs";
 import { jobDiscoveryEnabled } from "@/lib/applications/config";
 import { ensureCandidate } from "@/lib/applications/service";
+import { optionalCandidateFacts } from "@/lib/applications/candidate-fields";
 import { canTransition } from "@/lib/applications/state";
 import type { ApplicationStatus } from "@/lib/applications/types";
 
@@ -20,11 +21,30 @@ export async function saveCandidateProfile(formData: FormData) {
   if (!fullName || !email || !email.includes("@") || email.endsWith("@invalid.test")) {
     redirect("/jobs/candidate?error=Enter+a+real+name+and+email.");
   }
+  const optional = optionalCandidateFacts(formData);
+  if (optional.error) redirect(`/jobs/candidate?error=${encodeURIComponent(optional.error)}`);
   const [firstName, ...rest] = fullName.split(/\s+/);
   await prisma.candidate.update({
     where: { id: candidate.id },
     data: { fullName, firstName, lastName: rest.join(" ") || firstName, email, location: location || null, phone: phone || null },
   });
+  for (const fact of optional.facts) {
+    await prisma.candidateFact.deleteMany({
+      where: { candidateId: candidate.id, source: "candidate-settings", subcategory: fact.subcategory },
+    });
+    if (!fact.fact) continue;
+    await prisma.candidateFact.create({
+      data: {
+        candidateId: candidate.id,
+        category: fact.category,
+        subcategory: fact.subcategory,
+        fact: fact.fact,
+        source: "candidate-settings",
+        verified: true,
+        confidence: 100,
+      },
+    });
+  }
   redirect("/jobs/candidate?notice=Candidate+profile+saved.");
 }
 

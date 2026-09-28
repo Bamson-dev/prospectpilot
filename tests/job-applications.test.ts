@@ -63,6 +63,9 @@ describe("job application evidence", () => {
     const check = unsupportedClaims("Built Kubernetes at Acme while earning a bachelor degree.", candidate());
     expect(check.ok).toBe(false);
     expect(check.unsupported).toEqual(expect.arrayContaining(["kubernetes", "Acme", "education credential"]));
+    const invented = unsupportedClaims("Used Rust at Fake Corporation.", candidate());
+    expect(invented.ok).toBe(false);
+    expect(invented.unsupported).toEqual(expect.arrayContaining(["rust", "Fake Corporation"]));
   });
 
   it("builds a CV and cover letter from verified evidence", () => {
@@ -82,7 +85,13 @@ describe("job application evidence", () => {
 
   it("asks for input instead of guessing salary or work authorization", () => {
     expect(classifyQuestion("What is your salary expectation?")).toBe("SALARY");
-    expect(answerQuestion("Are you authorized to work?", job, candidate(), scoreJobFit(job, candidate(), [])).status).toBe("NEEDS_USER_INPUT");
+    const fit = scoreJobFit(job, candidate(), []);
+    expect(answerQuestion("Are you authorized to work?", job, candidate(), fit).status).toBe("NEEDS_USER_INPUT");
+    const withAuthorization = {
+      ...candidate(),
+      facts: [...candidate().facts, { id: "auth", category: "IDENTITY" as const, fact: "Work authorization: stored by the candidate", verified: true, profiles: [] }],
+    };
+    expect(answerQuestion("Are you authorized to work?", job, withAuthorization, fit).answer).toBe("Work authorization: stored by the candidate");
   });
 
   it("deduplicates an application url and detects the ATS", () => {

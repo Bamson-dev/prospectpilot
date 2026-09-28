@@ -2,7 +2,7 @@ import type { CandidateRecord } from "@/lib/applications/types";
 
 const COMMON_TECH = [
   "react", "vue", "angular", "kubernetes", "aws", "azure", "gcp", "java", "golang", "go", "ruby", "php",
-  "django", "spring", "terraform", "docker", "graphql", "swift", "kotlin", "dotnet", "salesforce",
+  "django", "spring", "terraform", "docker", "graphql", "swift", "kotlin", "dotnet", "salesforce", "rust",
 ];
 
 export type ClaimCheck = { ok: boolean; unsupported: string[] };

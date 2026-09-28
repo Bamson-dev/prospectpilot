@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { documentAccess } from "@/lib/applications/access";
+import { missingCandidateFields, optionalCandidateFacts } from "@/lib/applications/candidate-fields";
 import { chooseProfile, scoreJobFit } from "@/lib/applications/fit";
 import { assemblePackage } from "@/lib/applications/package";
 import { answerQuestion } from "@/lib/applications/questions";
@@ -22,6 +23,16 @@ describe("candidate positioning", () => {
   it("keeps seven presentations of one candidate and leaves unknown fields unknown", () => {
     expect(CAREER_PROFILES.map((profile) => profile.kind)).toEqual(["SOFTWARE", "WEB", "SAAS", "MARKETING", "GROWTH", "FOUNDER", "HYBRID"]);
     expect(unknownCandidateFields()).toEqual(expect.arrayContaining(["linkedin", "education", "certifications"]));
+    const form = new FormData();
+    form.set("salaryExpectation", "not invented");
+    const parsed = optionalCandidateFacts(form);
+    expect(parsed.error).toBeNull();
+    expect(parsed.facts.find((fact) => fact.subcategory === "salary-expectation")?.fact).toBe("Salary expectation: not invented");
+    expect(parsed.facts.find((fact) => fact.subcategory === "linkedin")?.fact).toBe("");
+    const badLink = new FormData();
+    badLink.set("linkedin", "bamidele");
+    expect(optionalCandidateFacts(badLink).error).toContain("LinkedIn");
+    expect(missingCandidateFields({ phone: null, location: null, facts: person.facts }).length).toBeGreaterThan(3);
     expect(person.projects.find((project) => project.name === "LeadThur")?.technologies).toEqual([]);
     expect(person.projects.find((project) => project.name === "ProspectPilot")?.technologies).toContain("TypeScript");
     expect(person.projects.find((project) => project.name === "ProspectPilot")?.technologies).not.toContain("AWS");

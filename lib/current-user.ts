@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { MembershipRole } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { selectOrganizationMembership } from "@/lib/organization-context";
 import { roleAtLeast } from "@/lib/roles";
 import { SESSION_COOKIE, sessionCookieOptions, signSession, verifySession, type SessionPayload } from "@/lib/session";
 
@@ -39,12 +40,14 @@ export async function requireUser() {
 
 export async function requireOrganization(minimum: MembershipRole = "MEMBER") {
   const user = await requireUser();
-  const membership = await prisma.membership.findFirst({
+  const session = await readSession();
+  const memberships = await prisma.membership.findMany({
     where: { userId: user.id },
     include: { organization: true },
     orderBy: { createdAt: "asc" },
   });
-  if (!membership) redirect("/register");
+  const membership = selectOrganizationMembership(memberships, session?.organizationId);
+  if (!membership) redirect(memberships.length === 0 ? "/register" : "/organizations");
   if (!roleAtLeast(membership.role, minimum)) redirect("/dashboard?error=You+do+not+have+access+to+that+area.");
   return { user, membership, organization: membership.organization };
 }

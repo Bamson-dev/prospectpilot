@@ -1,7 +1,7 @@
 import { UnrecoverableError } from "bullmq";
 import { prisma } from "@/lib/db";
 import { isAppError } from "@/lib/errors";
-import { watchLease } from "@/lib/independent-heartbeat";
+import { ensureIndependentHeartbeat, watchLease } from "@/lib/independent-heartbeat";
 import { isPermanentJobError, jobDeliveryDecision } from "@/lib/job-state";
 import { logError, logInfo } from "@/lib/logger";
 
@@ -29,6 +29,9 @@ export async function runJob(jobId: string, work: () => Promise<void>) {
     });
     throw new UnrecoverableError("Job stopped after its attempt limit.");
   }
+  if ((await ensureIndependentHeartbeat()) !== "run") {
+    throw new Error("Heartbeat process is unavailable.");
+  }
   // Compare the observed attempt count as well as state. BullMQ can deliver a
   // duplicate while a job is ACTIVE; exactly one delivery may claim that
   // observed version of the database row. Refresh startedAt so a reclaimed
@@ -43,10 +46,7 @@ export async function runJob(jobId: string, work: () => Promise<void>) {
   }
   const started = Date.now();
   const attempt = existing.attempts + 1;
-  const stopHeartbeat = watchLease({ kind: "job", id: jobId, attempt }, () => prisma.backgroundJob.updateMany({
-    where: { id: jobId, state: "ACTIVE", attempts: attempt },
-    data: { startedAt: new Date() },
-  }));
+  const stopHeartbeat = watchLease({ kind: "job", id: jobId, attempt });
   try {
     try {
       await work();

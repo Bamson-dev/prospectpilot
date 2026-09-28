@@ -5,6 +5,10 @@ export function shouldExecuteJob(state: string, attempts = 0, maxAttempts = Numb
 export const ACTIVE_JOB_STALE_MS = 45_000;
 export const JOB_HEARTBEAT_MS = 15_000;
 
+export function heartbeatRunDecision(independentAlive: boolean) {
+  return independentAlive ? "run" as const : "retry" as const;
+}
+
 export function jobDeliveryDecision(input: {
   state: string;
   attempts: number;

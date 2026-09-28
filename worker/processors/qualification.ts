@@ -32,7 +32,7 @@ export async function processQualification(prospectId: string) {
   }
   const slotId = await reserveQualificationSlot(prospect);
   const stopLease = slotId
-    ? watchLease({ kind: "qualification", id: slotId }, () => refreshQualificationLease(slotId))
+    ? watchLease({ kind: "qualification", id: slotId })
     : null;
   try {
   const sources = await prisma.discoverySource.findMany({ where: { prospectId: prospect.id }, orderBy: { createdAt: "desc" }, take: 5 });
@@ -204,13 +204,6 @@ async function reserveQualificationSlot(prospect: {
       },
     });
     return row.id;
-  });
-}
-
-async function refreshQualificationLease(slotId: string) {
-  await prisma.activityLog.updateMany({
-    where: { id: slotId, action: "qualification.slot" },
-    data: { createdAt: new Date() },
   });
 }
 

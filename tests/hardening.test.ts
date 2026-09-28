@@ -8,9 +8,12 @@ import {
   webhookTimestampFresh,
 } from "@/lib/email/message-policy";
 import { qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
-import { ACTIVE_JOB_STALE_MS, claimAfterIndependentHeartbeats, isPermanentJobError, JOB_HEARTBEAT_MS, jobDeliveryDecision, retryQueueJobId, shouldExecuteJob } from "@/lib/job-state";
+import { ACTIVE_JOB_STALE_MS, claimAfterIndependentHeartbeats, heartbeatRunDecision, isPermanentJobError, JOB_HEARTBEAT_MS, jobDeliveryDecision, retryQueueJobId, shouldExecuteJob } from "@/lib/job-state";
 import { QUOTA_LEASE_MS, releasePendingReservation, researchQuotaDecision, reserveAgainstCap, takeDailySlots } from "@/lib/campaign-quota";
-import { classifyJobId, inboundReplyDecision, inboundReplyId, prospectOutreachAfterBounce, prospectOutreachAfterProviderEvent, replyWorkDecision, webhookStateTransition } from "@/lib/email/message-policy";
+import { classifyJobId, gmailReplyId, inboundReplyDecision, inboundReplyId, inboxImportDecision, prospectOutreachAfterBounce, prospectOutreachAfterProviderEvent, replyWorkDecision, webhookStateTransition } from "@/lib/email/message-policy";
+import { FOLLOW_UP_CLAIM_STALE_MS, followUpRecoveryDecision } from "@/lib/follow-up-recovery";
+import { selectOrganizationMembership } from "@/lib/organization-context";
+import { signSession, verifySession } from "@/lib/session";
 import { routePublicBrowserTraffic } from "@/lib/research/public-browser";
 import { isBlockedIp } from "@/lib/network";
 import { GMAIL_STATE_PURPOSE } from "@/lib/email/gmail";
@@ -135,6 +138,9 @@ describe("job retries and research targets", () => {
     expect(claimAfterIndependentHeartbeats({ claimedAtMs: claimedAt, nowMs: now, heartbeats: true })).toBe("busy");
     expect(claimAfterIndependentHeartbeats({ claimedAtMs: claimedAt, nowMs: now, heartbeats: false })).toBe("reclaim");
     expect(isPermanentJobError("Job is already active.")).toBe(false);
+    expect(isPermanentJobError("Heartbeat process is unavailable.")).toBe(false);
+    expect(heartbeatRunDecision(true)).toBe("run");
+    expect(heartbeatRunDecision(false)).toBe("retry");
     expect(isPermanentJobError("Outreach sending is turned off. No email was sent.")).toBe(true);
     expect(isPermanentJobError("The daily research limit has been reached.")).toBe(true);
     expect(isPermanentJobError("The daily qualification quota has been reached.")).toBe(true);
@@ -244,5 +250,68 @@ describe("job retries and research targets", () => {
 
   it("names the Gmail state purpose", () => {
     expect(GMAIL_STATE_PURPOSE).toBe("gmail-connect");
+  });
+});
+
+describe("crash recovery and workspace context", () => {
+  it("stores each provider message even when the sender and subject match", () => {
+    const first = gmailReplyId("msg-a");
+    const second = gmailReplyId("msg-b");
+    expect(inboxImportDecision("msg-a", [])).toBe("store");
+    expect(inboxImportDecision("msg-b", [first])).toBe("store");
+    expect(inboxImportDecision("msg-a", [first])).toBe("already-stored");
+    expect(inboxImportDecision("  ", [second])).toBe("ignore");
+    expect(first).not.toBe(second);
+  });
+
+  it("reclaims a follow-up only after its claim is abandoned", () => {
+    const now = 10_000_000;
+    expect(followUpRecoveryDecision({ state: "SCHEDULED", messageId: null, updatedAtMs: now, nowMs: now })).toBe("claim");
+    expect(followUpRecoveryDecision({
+      state: "QUEUED",
+      messageId: null,
+      updatedAtMs: now - 1_000,
+      nowMs: now,
+    })).toBe("in-progress");
+    expect(followUpRecoveryDecision({
+      state: "QUEUED",
+      messageId: null,
+      updatedAtMs: now - FOLLOW_UP_CLAIM_STALE_MS,
+      nowMs: now,
+    })).toBe("reclaim");
+    expect(followUpRecoveryDecision({
+      state: "QUEUED",
+      messageId: "message-1",
+      updatedAtMs: now - FOLLOW_UP_CLAIM_STALE_MS,
+      nowMs: now,
+    })).toBe("skip");
+  });
+
+  it("uses the requested workspace and does not fall back to an older one", () => {
+    const memberships = [
+      { organizationId: "older", role: "MEMBER" },
+      { organizationId: "newer", role: "OWNER" },
+    ];
+    expect(selectOrganizationMembership(memberships, undefined)).toBeNull();
+    expect(selectOrganizationMembership(memberships, "missing")).toBeNull();
+    expect(selectOrganizationMembership(memberships, "newer")?.organizationId).toBe("newer");
+    expect(selectOrganizationMembership(memberships, "newer")?.role).toBe("OWNER");
+    expect(selectOrganizationMembership([{ organizationId: "only", role: "OWNER" }], undefined)?.organizationId).toBe("only");
+    expect(selectOrganizationMembership([], "only")).toBeNull();
+  });
+
+  it("keeps the selected workspace in the session token", async () => {
+    const previous = process.env.AUTH_SECRET;
+    process.env.AUTH_SECRET = "test-secret-test-secret-test-secret";
+    try {
+      const token = await signSession({ sub: "user-1", email: "ops@example.com", name: "Ops", organizationId: "newer" });
+      const session = await verifySession(token);
+      expect(session?.organizationId).toBe("newer");
+      const legacy = await signSession({ sub: "user-1", email: "ops@example.com", name: "Ops" });
+      expect((await verifySession(legacy))?.organizationId).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.AUTH_SECRET;
+      else process.env.AUTH_SECRET = previous;
+    }
   });
 });

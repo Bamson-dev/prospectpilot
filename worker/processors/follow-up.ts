@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { replyWorkDecision } from "@/lib/email/message-policy";
+import { FOLLOW_UP_CLAIM_STALE_MS } from "@/lib/follow-up-recovery";
 import { outreachSendingEnabled } from "@/lib/email/send-gate";
 import { AppError } from "@/lib/errors";
 import { queueJob } from "@/lib/jobs";
@@ -8,8 +9,16 @@ import { isSuppressionRequest } from "@/lib/suppression";
 
 export async function processDueFollowUps(organizationId: string) {
   if (!outreachSendingEnabled()) return;
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - FOLLOW_UP_CLAIM_STALE_MS);
   const due = await prisma.followUp.findMany({
-    where: { organizationId, state: "SCHEDULED", runAt: { lte: new Date() } },
+    where: {
+      organizationId,
+      OR: [
+        { state: "SCHEDULED", runAt: { lte: now } },
+        { state: "QUEUED", messageId: null, updatedAt: { lt: staleBefore } },
+      ],
+    },
     take: 20,
     include: { campaign: true },
   });
@@ -29,7 +38,13 @@ export async function processDueFollowUps(organizationId: string) {
       continue;
     }
     const claim = await prisma.followUp.updateMany({
-      where: { id: followUp.id, state: "SCHEDULED" },
+      where: {
+        id: followUp.id,
+        OR: [
+          { state: "SCHEDULED" },
+          { state: "QUEUED", messageId: null, updatedAt: { lt: staleBefore } },
+        ],
+      },
       data: { state: "QUEUED" },
     });
     if (claim.count !== 1) continue;

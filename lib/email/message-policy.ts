@@ -67,6 +67,18 @@ export function prospectOutreachAfterBounce(current: string) {
   return prospectOutreachAfterProviderEvent(current, "email.bounced");
 }
 
+export function gmailReplyId(messageId: string) {
+  const trimmed = messageId.trim();
+  return trimmed ? `gmail:${trimmed}` : "";
+}
+
+export function inboxImportDecision(messageId: string, storedIds: string[]) {
+  const id = gmailReplyId(messageId);
+  if (!id) return "ignore" as const;
+  if (storedIds.includes(id)) return "already-stored" as const;
+  return "store" as const;
+}
+
 export function classifyJobId(replyId: string) {
   const digest = createHash("sha256").update(replyId).digest("hex").slice(0, 32);
   return `classify_${digest}`;

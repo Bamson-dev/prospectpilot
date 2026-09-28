@@ -1,14 +1,4 @@
 import { PrismaClient } from "@prisma/client";
-import { parentPort, workerData } from "node:worker_threads";
-
-const intervalMs = Number(workerData?.intervalMs) || 15_000;
-const databaseUrl = heartbeatDatabaseUrl(process.env.DATABASE_URL);
-if (!parentPort || !databaseUrl) {
-  process.exit(0);
-}
-
-const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
-const watches = new Map();
 
 function heartbeatDatabaseUrl(raw) {
   if (!raw) return "";
@@ -19,6 +9,23 @@ function heartbeatDatabaseUrl(raw) {
   } catch {
     return raw;
   }
+}
+
+const databaseUrl = heartbeatDatabaseUrl(process.env.DATABASE_URL);
+if (!databaseUrl || typeof process.send !== "function") {
+  process.exit(1);
+}
+
+const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+const watches = new Map();
+const intervalMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 15_000;
+
+try {
+  await prisma.$queryRaw`SELECT 1`;
+  process.send({ type: "ready" });
+} catch {
+  process.send({ type: "failed" });
+  process.exit(1);
 }
 
 async function beat(watch) {
@@ -51,8 +58,13 @@ const timer = setInterval(() => {
 }, intervalMs);
 timer.unref();
 
-parentPort.on("message", (message) => {
+process.on("message", (message) => {
   if (!message || typeof message !== "object") return;
   if (message.type === "watch" && message.key && message.watch) watches.set(message.key, message.watch);
   if (message.type === "stop" && message.key) watches.delete(message.key);
+});
+
+process.on("disconnect", () => {
+  clearInterval(timer);
+  void prisma.$disconnect().finally(() => process.exit(0));
 });

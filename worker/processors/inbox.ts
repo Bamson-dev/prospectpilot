@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
-import { classifyJobId } from "@/lib/email/message-policy";
+import { classifyJobId, gmailReplyId, inboxImportDecision } from "@/lib/email/message-policy";
 import { AppError } from "@/lib/errors";
 import { queueJob } from "@/lib/jobs";
 
@@ -45,13 +45,9 @@ async function importGmailMessage(organizationId: string, accessToken: string, m
     include: { prospect: true },
   });
   if (!contact) return;
-  const replyId = `gmail:${messageId}`;
-  const stored = await prisma.reply.findUnique({ where: { id: replyId }, select: { id: true } });
-  if (stored) return;
-  const existing = await prisma.reply.findFirst({
-    where: { prospectId: contact.prospectId, fromEmail: email, subject },
-  });
-  if (existing) return;
+  const replyId = gmailReplyId(messageId);
+  const stored = replyId ? await prisma.reply.findUnique({ where: { id: replyId }, select: { id: true } }) : null;
+  if (inboxImportDecision(messageId, stored ? [stored.id] : []) !== "store") return;
   let conversation = await prisma.conversation.findFirst({
     where: { prospectId: contact.prospectId },
     orderBy: { updatedAt: "desc" },

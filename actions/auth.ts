@@ -46,8 +46,9 @@ export async function register(formData: FormData) {
           },
         },
       },
+      include: { memberships: true },
     });
-    await setSession({ sub: user.id, email: user.email, name: user.name });
+    await setSession({ sub: user.id, email: user.email, name: user.name, organizationId: user.memberships[0]?.organizationId });
   } catch (error) {
     redirect(`/register?error=${encodeURIComponent(errorMessage(error))}`);
   }
@@ -57,15 +58,21 @@ export async function register(formData: FormData) {
 export async function login(formData: FormData) {
   const parsed = loginSchema.safeParse({ email: formData.get("email"), password: formData.get("password") });
   if (!parsed.success) redirect("/login?error=Enter+a+valid+email+and+password.");
+  let destination = "/dashboard";
   try {
-    const user = await prisma.user.findUnique({ where: { email: parsed.data.email.toLowerCase() } });
+    const user = await prisma.user.findUnique({
+      where: { email: parsed.data.email.toLowerCase() },
+      include: { memberships: { orderBy: { createdAt: "asc" }, take: 2 } },
+    });
     const valid = user ? await compare(parsed.data.password, user.passwordHash) : false;
     if (!user || !valid) throw new AppError("Email or password is incorrect.");
-    await setSession({ sub: user.id, email: user.email, name: user.name });
+    const organizationId = user.memberships.length === 1 ? user.memberships[0]?.organizationId : undefined;
+    await setSession({ sub: user.id, email: user.email, name: user.name, organizationId });
+    destination = user.memberships.length > 1 ? "/organizations" : "/dashboard";
   } catch (error) {
     redirect(`/login?error=${encodeURIComponent(errorMessage(error))}`);
   }
-  redirect("/dashboard");
+  redirect(destination);
 }
 
 export async function logout() {

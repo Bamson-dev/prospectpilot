@@ -25,7 +25,7 @@ export async function processResearch(prospectId: string) {
     campaign: prospect.campaign,
   });
   let kept = false;
-  const stopLease = watchLease({ kind: "research", id: slot.id }, () => refreshResearchLease(slot.id));
+  const stopLease = watchLease({ kind: "research", id: slot.id });
   try {
   await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "IN_PROGRESS" } });
   logInfo("research.started", { prospectId: prospect.id, domain: prospect.domain });
@@ -265,13 +265,6 @@ async function reserveResearchSlot(prospect: {
         confidence: 0,
       },
     });
-  });
-}
-
-async function refreshResearchLease(id: string) {
-  await prisma.researchRecord.updateMany({
-    where: { id, fetchMethod: "pending" },
-    data: { createdAt: new Date() },
   });
 }
 

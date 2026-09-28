@@ -11,6 +11,15 @@ export const QUEUE_NAMES = [
   "inbox-sync",
   "reply-analysis",
   "follow-up",
+  "job-discovery",
+  "job-analysis",
+  "job-fit",
+  "cv-generation",
+  "cover-letter",
+  "application-preparation",
+  "application-submit",
+  "application-verification",
+  "application-followup",
 ] as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[number];

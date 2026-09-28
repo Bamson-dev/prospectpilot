@@ -164,6 +164,10 @@ model Organization {
   tags          Tag[]
   sequences     Sequence[]
   discoverySources DiscoverySource[]
+  candidates    Candidate[]
+  jobVacancies  JobVacancy[]
+  jobApplications JobApplication[]
+  generatedDocuments GeneratedDocument[]
 }
 
 model Membership {
@@ -641,4 +645,401 @@ model SequenceStep {
   sequence   Sequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
 
   @@unique([sequenceId, position])
+}
+
+enum CareerProfileKind {
+  SOFTWARE
+  WEB
+  MARKETING
+}
+
+enum FactCategory {
+  IDENTITY
+  EXPERIENCE
+  ACHIEVEMENT
+  SKILL
+  TECHNOLOGY
+  CERTIFICATION
+  EDUCATION
+  METRIC
+  PROJECT
+  LINK
+}
+
+enum RequirementKind {
+  MUST_HAVE
+  NICE_TO_HAVE
+  RESPONSIBILITY
+  TECHNOLOGY
+  SOFT_SKILL
+  EDUCATION
+  EXPERIENCE_YEARS
+  SENIORITY
+  INDUSTRY
+  LOCATION
+  REMOTE_POLICY
+  EMPLOYMENT_TYPE
+  SALARY
+  APPLICATION_METHOD
+  APPLICATION_PLATFORM
+}
+
+enum JobVacancyStatus {
+  DISCOVERED
+  ANALYZED
+  QUALIFIED
+  REJECTED
+  DUPLICATE
+  ARCHIVED
+}
+
+enum ApplicationPackageStatus {
+  PREPARED
+  READY_FOR_REVIEW
+  READY_TO_SUBMIT
+  SUBMITTING
+  SUBMITTED
+  VERIFICATION_REQUIRED
+  FAILED
+  REQUIRES_MANUAL_ACTION
+  WITHDRAWN
+}
+
+enum ApplicationEventType {
+  JOB_FOUND
+  JOB_ANALYZED
+  FIT_CALCULATED
+  CV_GENERATED
+  COVER_LETTER_GENERATED
+  APPLICATION_OPENED
+  FORM_STARTED
+  CV_UPLOADED
+  QUESTIONS_FILLED
+  SUBMISSION_STARTED
+  SUBMITTED
+  VERIFICATION_PASSED
+  VERIFICATION_FAILED
+  CAPTCHA_DETECTED
+  RATE_LIMITED
+  MANUAL_ACTION_REQUIRED
+}
+
+enum GeneratedDocumentKind {
+  CV
+  COVER_LETTER
+  SUPPORTING
+}
+
+enum ApplicationQuestionKind {
+  EXPERIENCE
+  MOTIVATION
+  SALARY
+  LOCATION
+  WORK_AUTHORIZATION
+  AVAILABILITY
+  TECHNICAL
+  BEHAVIORAL
+  COMPANY_SPECIFIC
+  PORTFOLIO
+  EDUCATION
+  OTHER
+}
+
+model Candidate {
+  id             String   @id @default(cuid())
+  organizationId String
+  fullName       String
+  firstName      String
+  lastName       String
+  email          String
+  phone          String?
+  location       String?
+  headline       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  profiles       CandidateCareerProfile[]
+  experiences    CandidateExperience[]
+  projects       CandidateProject[]
+  facts          CandidateFact[]
+  writing        CandidateWritingProfile?
+  preference     CandidatePreference?
+  documents      GeneratedDocument[]
+  applications   JobApplication[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+}
+
+model CandidateCareerProfile {
+  id          String            @id @default(cuid())
+  candidateId String
+  kind        CareerProfileKind
+  title       String
+  summary     String
+  candidate   Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, kind])
+}
+
+model CandidateExperience {
+  id          String    @id @default(cuid())
+  candidateId String
+  title       String
+  organizationName String
+  summary     String
+  startDate   DateTime?
+  endDate     DateTime?
+  current     Boolean   @default(false)
+  verified    Boolean   @default(false)
+  source      String
+  profiles    CareerProfileKind[]
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model CandidateProject {
+  id           String   @id @default(cuid())
+  candidateId  String
+  name         String
+  description  String
+  role         String
+  industry     String?
+  projectType  String?
+  technologies String[] @default([])
+  features     String[] @default([])
+  responsibilities String[] @default([])
+  outcomes     String[] @default([])
+  metrics      String[] @default([])
+  url          String?
+  githubUrl    String?
+  demoUrl      String?
+  videoUrl     String?
+  verified     Boolean  @default(false)
+  source       String
+  profiles     CareerProfileKind[]
+  candidate    Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, name])
+  @@index([candidateId])
+}
+
+model CandidateFact {
+  id             String            @id @default(cuid())
+  candidateId    String
+  category       FactCategory
+  subcategory    String?
+  fact           String
+  source         String
+  sourceDocumentId String?
+  verified       Boolean           @default(false)
+  confidence     Int               @default(0)
+  startDate      DateTime?
+  endDate        DateTime?
+  profiles       CareerProfileKind[]
+  industries     String[]          @default([])
+  roles          String[]          @default([])
+  skills         String[]          @default([])
+  technologies   String[]          @default([])
+  keywords       String[]          @default([])
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  candidate      Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, category, fact])
+  @@index([candidateId, category])
+}
+
+model CandidateWritingProfile {
+  id          String   @id @default(cuid())
+  candidateId String   @unique
+  tone        String
+  formality   String
+  verbosity   String
+  voice       String
+  samples     String[] @default([])
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidatePreference {
+  id              String   @id @default(cuid())
+  candidateId     String   @unique
+  discoverJobs    Boolean  @default(false)
+  dailyTarget     Int      @default(500)
+  mode            String   @default("AUTO_PREPARE")
+  locations       String[] @default([])
+  remoteOnly      Boolean  @default(false)
+  candidate       Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model JobVacancy {
+  id                 String           @id @default(cuid())
+  organizationId     String
+  source             String
+  sourceUrl          String
+  applicationUrl     String
+  externalId         String?
+  companyName        String
+  companyDomain      String?
+  companyDescription String?
+  title              String
+  location           String?
+  country            String?
+  remoteType         String?
+  employmentType     String?
+  salaryMin          Int?
+  salaryMax          Int?
+  salaryCurrency     String?
+  description        String           @db.Text
+  seniority          String?
+  industry           String?
+  postedAt           DateTime?
+  deadline           DateTime?
+  discoveredAt       DateTime         @default(now())
+  status             JobVacancyStatus @default(DISCOVERED)
+  duplicateOf        String?
+  rawData            Json?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requirements       JobRequirement[]
+  fit                JobFitSnapshot?
+  applications       JobApplication[]
+  documents          GeneratedDocument[]
+
+  @@unique([organizationId, applicationUrl])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, externalId])
+  @@index([companyDomain])
+}
+
+model JobRequirement {
+  id          String          @id @default(cuid())
+  vacancyId   String
+  kind        RequirementKind
+  text        String
+  years       Int?
+  required    Boolean         @default(false)
+  vacancy     JobVacancy      @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@index([vacancyId, kind])
+}
+
+model JobFitSnapshot {
+  id                String   @id @default(cuid())
+  vacancyId         String   @unique
+  candidateId       String
+  profile           CareerProfileKind
+  overallMatch      Int
+  profileMatch      Int
+  missing           Json
+  evidence          Json
+  gaps              Json
+  advantages        Json
+  recommendation    String
+  selectedProjectIds String[] @default([])
+  selectedFactIds   String[] @default([])
+  createdAt         DateTime @default(now())
+  vacancy           JobVacancy @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+}
+
+model GeneratedDocument {
+  id             String                @id @default(cuid())
+  organizationId String
+  candidateId    String
+  vacancyId      String?
+  profile        CareerProfileKind?
+  kind           GeneratedDocumentKind
+  version        Int                   @default(1)
+  fileName       String
+  fileType       String
+  checksum       String
+  text           String                @db.Text
+  content        Bytes
+  archived       Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  candidate      Candidate             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  vacancy        JobVacancy?           @relation(fields: [vacancyId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, candidateId, kind, createdAt])
+  @@index([vacancyId])
+}
+
+model ApplicationPackage {
+  id             String                   @id @default(cuid())
+  applicationId  String                   @unique
+  profile        CareerProfileKind
+  fitSummary     String
+  strategy       String
+  status         ApplicationPackageStatus @default(PREPARED)
+  warnings       String[]                 @default([])
+  application    JobApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model JobApplication {
+  id              String                   @id @default(cuid())
+  organizationId  String
+  candidateId     String
+  vacancyId       String
+  profile         CareerProfileKind
+  status          ApplicationPackageStatus @default(PREPARED)
+  source          String
+  applicationUrl  String
+  cvId            String?
+  coverLetterId   String?
+  submittedAt     DateTime?
+  verifiedAt      DateTime?
+  failureReason   String?
+  blockedReason   String?
+  retryCount      Int                      @default(0)
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  organization    Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  candidate       Candidate                @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  vacancy         JobVacancy               @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  package         ApplicationPackage?
+  events          ApplicationEvent[]
+  answers         ApplicationAnswer[]
+  followUps       ApplicationFollowUp[]
+
+  @@unique([organizationId, vacancyId, candidateId])
+  @@index([organizationId, status, createdAt])
+  @@index([applicationUrl])
+}
+
+model ApplicationEvent {
+  id            String               @id @default(cuid())
+  applicationId String
+  type          ApplicationEventType
+  detail        String?
+  createdAt     DateTime             @default(now())
+  application   JobApplication       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+}
+
+model ApplicationAnswer {
+  id            String                  @id @default(cuid())
+  applicationId String
+  question      String
+  kind          ApplicationQuestionKind
+  answer        String?
+  status        String
+  application   JobApplication          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model ApplicationFollowUp {
+  id            String   @id @default(cuid())
+  applicationId String
+  runAt         DateTime
+  channel       String
+  status        String   @default("DRAFT")
+  draft         String
+  application   JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, runAt])
 }

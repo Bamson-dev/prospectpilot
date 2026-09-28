@@ -15,3 +15,4 @@ npm-debug.log*
 playwright-report
 test-results
 /tmp
+/storage

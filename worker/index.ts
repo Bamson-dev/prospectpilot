@@ -3,7 +3,9 @@ import { prisma } from "@/lib/db";
 import { logInfo } from "@/lib/logger";
 import { ipv4Get } from "@/lib/search/ipv4";
 import { jobRetryDelayMs } from "@/lib/research/failure";
+import { applicationWorkerConcurrency } from "@/lib/applications/config";
 import { getQueue, getRedis } from "@/lib/queues";
+import { processApplicationFollowUp, processApplicationPreparation, processApplicationSubmit, processJobDiscovery } from "@/worker/processors/job-applications";
 import { processDiscovery } from "@/worker/processors/discovery";
 import { processDueFollowUps, processReply } from "@/worker/processors/follow-up";
 import { processInboxSync } from "@/worker/processors/inbox";
@@ -15,6 +17,9 @@ import { runJob } from "@/worker/runtime";
 const connection = getRedis();
 
 function concurrency(name: string) {
+  if (name.startsWith("job-") || name.startsWith("application-") || name === "cv-generation" || name === "cover-letter") {
+    return applicationWorkerConcurrency();
+  }
   const configured = Number(
     name === "discovery" ? process.env.DISCOVERY_CONCURRENCY
       : name === "research" ? process.env.CRAWL_CONCURRENCY
@@ -103,6 +108,60 @@ const followUps = new Worker(
 followUps.on("failed", (job, error) => {
   logInfo("worker.job_failed", { queue: "follow-up", jobId: job?.id, message: error.message });
 });
+
+start("job-discovery", async (data) => {
+  if (!data.organizationId) throw new Error("Job discovery is missing an organization.");
+  await processJobDiscovery(data.organizationId, data.query || "software engineer remote");
+});
+
+for (const name of ["job-analysis", "job-fit", "cv-generation", "cover-letter", "application-preparation", "application-verification"] as const) {
+  start(name, async (data) => {
+    if (!data.organizationId || !data.vacancyId) throw new Error("Application job is missing its target.");
+    await processApplicationPreparation(data.organizationId, data.vacancyId);
+  });
+}
+
+start("application-submit", async (data) => {
+  if (!data.applicationId) throw new Error("Application submit job is missing an application.");
+  await processApplicationSubmit(data.applicationId);
+});
+
+const applicationFollowUps = new Worker(
+  "application-followup",
+  async (job) => {
+    if (job.name === "scan") {
+      const due = await prisma.applicationFollowUp.findMany({
+        where: { status: "DRAFT", runAt: { lte: new Date() } },
+        distinct: ["applicationId"],
+        select: { application: { select: { organizationId: true } } },
+      });
+      const seen = new Set<string>();
+      for (const row of due) {
+        if (seen.has(row.application.organizationId)) continue;
+        seen.add(row.application.organizationId);
+        await processApplicationFollowUp(row.application.organizationId);
+      }
+      return;
+    }
+    const data = job.data as Record<string, string>;
+    await runJob(data.jobId, async () => {
+      if (!data.organizationId) throw new Error("Application follow-up is missing an organization.");
+      await processApplicationFollowUp(data.organizationId);
+    });
+  },
+  { connection, concurrency: 1, settings: { backoffStrategy: retryBackoff } },
+);
+applicationFollowUps.on("failed", (job, error) => {
+  logInfo("worker.job_failed", { queue: "application-followup", jobId: job?.id, message: error.message });
+});
+
+void getQueue("application-followup")
+  .add("scan", {}, { repeat: { every: 60 * 60 * 1000 }, jobId: "application-followup-scan" })
+  .catch((error: unknown) => {
+    logInfo("worker.application_followup_schedule_failed", {
+      message: error instanceof Error ? error.message : "unknown",
+    });
+  });
 
 void getQueue("follow-up")
   .add("scan", {}, { repeat: { every: 15 * 60 * 1000 }, jobId: "follow-up-scan" })

@@ -12,6 +12,7 @@ const LINKS = [
   ["/inbox", "Inbox"],
   ["/follow-ups", "Follow-ups"],
   ["/contacts", "Contacts"],
+  ["/jobs", "Job applications"],
   ["/analytics", "Analytics"],
   ["/integrations", "Integrations"],
   ["/settings", "Settings"],

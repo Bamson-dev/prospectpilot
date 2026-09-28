@@ -169,6 +169,8 @@ async function launchChromium() {
     const hinted = message.match(/Executable doesn't exist at (\S+)/);
     const arm = hinted?.[1]?.replace("mac-x64", "mac-arm64");
     if (arm && arm !== hinted?.[1] && existsSync(arm)) return chromium.launch({ executablePath: arm, headless: true });
+    const home = `${process.env.HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
+    if (existsSync(home)) return chromium.launch({ executablePath: home, headless: true });
     throw error;
   }
 }

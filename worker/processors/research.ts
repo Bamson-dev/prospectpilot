@@ -8,7 +8,8 @@ import { extractPage, type PageSignals } from "@/lib/research/extract";
 import { crawlCompanySite, crawlHasEvidence } from "@/lib/research/crawl";
 import { socialLinks } from "@/lib/domains";
 import { logInfo } from "@/lib/logger";
-import { QUOTA_RESERVATION_STALE_MS } from "@/lib/campaign-quota";
+import { QUOTA_LEASE_MS } from "@/lib/campaign-quota";
+import { JOB_HEARTBEAT_MS } from "@/lib/job-state";
 
 export async function processResearch(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({ where: { id: prospectId }, include: { campaign: true } });
@@ -24,6 +25,9 @@ export async function processResearch(prospectId: string) {
     campaign: prospect.campaign,
   });
   let kept = false;
+  const lease = setInterval(() => {
+    void refreshResearchLease(slot.id).catch(() => undefined);
+  }, JOB_HEARTBEAT_MS);
   try {
   await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "IN_PROGRESS" } });
   logInfo("research.started", { prospectId: prospect.id, domain: prospect.domain });
@@ -163,6 +167,7 @@ export async function processResearch(prospectId: string) {
   await storeObservedContacts(prospect.organizationId, prospect.id, finalUrl, extracted.signals);
   await finishResearch(prospect, method, finalUrl, extracted.metaDescription, extracted.signals.phones[0], extracted.signals.socialUrls);
   } finally {
+    clearInterval(lease);
     if (!kept) await releaseResearchSlot(slot.id);
   }
 }
@@ -239,7 +244,7 @@ async function reserveResearchSlot(prospect: {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`research:${prospect.campaignId}`}))`;
       const start = new Date();
       start.setUTCHours(0, 0, 0, 0);
-      const staleBefore = new Date(Date.now() - QUOTA_RESERVATION_STALE_MS);
+      const staleBefore = new Date(Date.now() - QUOTA_LEASE_MS);
       await tx.researchRecord.deleteMany({
         where: { prospect: { campaignId: prospect.campaignId }, fetchMethod: "pending", createdAt: { lt: staleBefore } },
       });
@@ -262,6 +267,13 @@ async function reserveResearchSlot(prospect: {
         confidence: 0,
       },
     });
+  });
+}
+
+async function refreshResearchLease(id: string) {
+  await prisma.researchRecord.updateMany({
+    where: { id, fetchMethod: "pending" },
+    data: { createdAt: new Date() },
   });
 }
 

@@ -8,9 +8,9 @@ import {
   webhookTimestampFresh,
 } from "@/lib/email/message-policy";
 import { qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
-import { ACTIVE_JOB_STALE_MS, isPermanentJobError, jobDeliveryDecision, retryQueueJobId, shouldExecuteJob } from "@/lib/job-state";
-import { QUOTA_RESERVATION_STALE_MS, releasePendingReservation, researchQuotaDecision, reserveAgainstCap, takeDailySlots } from "@/lib/campaign-quota";
-import { webhookStateTransition } from "@/lib/email/message-policy";
+import { ACTIVE_JOB_STALE_MS, isPermanentJobError, JOB_HEARTBEAT_MS, jobDeliveryDecision, retryQueueJobId, shouldExecuteJob } from "@/lib/job-state";
+import { QUOTA_LEASE_MS, releasePendingReservation, researchQuotaDecision, reserveAgainstCap, takeDailySlots } from "@/lib/campaign-quota";
+import { inboundReplyDecision, inboundReplyId, prospectOutreachAfterBounce, webhookStateTransition } from "@/lib/email/message-policy";
 import { routePublicBrowserTraffic } from "@/lib/research/public-browser";
 import { isBlockedIp } from "@/lib/network";
 import { GMAIL_STATE_PURPOSE } from "@/lib/email/gmail";
@@ -65,6 +65,14 @@ describe("provider webhooks", () => {
     expect(webhookStateTransition("SENT", "email.delivered")).toBe("DELIVERED");
     expect(webhookStateTransition("DELIVERED", "email.opened")).toBe("OPENED");
     expect(webhookStateTransition("OPENED", "email.bounced")).toBe("FAILED");
+    expect(prospectOutreachAfterBounce("OPENED")).toBe("FAILED");
+    expect(prospectOutreachAfterBounce("SENT")).toBe("FAILED");
+    expect(prospectOutreachAfterBounce("REPLIED")).toBe("REPLIED");
+    expect(prospectOutreachAfterBounce("DRAFT")).toBe("DRAFT");
+    const eventId = "msg_123";
+    expect(inboundReplyDecision([], eventId)).toBe("store");
+    expect(inboundReplyDecision([inboundReplyId(eventId)], eventId)).toBe("duplicate");
+    expect(inboundReplyDecision([inboundReplyId("msg_other")], eventId)).toBe("store");
   });
 
   it("attaches an inbound reply only when the sender matches one contact", () => {
@@ -100,6 +108,14 @@ describe("job retries and research targets", () => {
       startedAtMs: now - ACTIVE_JOB_STALE_MS,
       nowMs: now,
     })).toBe("exhausted");
+    expect(jobDeliveryDecision({
+      state: "ACTIVE",
+      attempts: 1,
+      maxAttempts: 3,
+      startedAtMs: now - JOB_HEARTBEAT_MS,
+      nowMs: now,
+    })).toBe("busy");
+    expect(JOB_HEARTBEAT_MS < ACTIVE_JOB_STALE_MS).toBe(true);
     expect(isPermanentJobError("Job is already active.")).toBe(false);
     expect(isPermanentJobError("Outreach sending is turned off. No email was sent.")).toBe(true);
     expect(isPermanentJobError("The daily research limit has been reached.")).toBe(true);
@@ -121,7 +137,10 @@ describe("job retries and research targets", () => {
     expect(researchQuotaDecision(held, 1, now)).toBe("stop");
     const released = held.filter((record) => releasePendingReservation(record.fetchMethod) === "keep");
     expect(researchQuotaDecision(released, 1, now)).toBe("allow");
-    expect(researchQuotaDecision([{ prospectId: "byron", fetchMethod: "pending", createdAtMs: now - QUOTA_RESERVATION_STALE_MS }], 1, now)).toBe("allow");
+    expect(researchQuotaDecision([{ prospectId: "byron", fetchMethod: "pending", createdAtMs: now - JOB_HEARTBEAT_MS }], 1, now)).toBe("stop");
+    expect(researchQuotaDecision([{ prospectId: "byron", fetchMethod: "pending", createdAtMs: now - QUOTA_LEASE_MS }], 1, now)).toBe("allow");
+    expect(researchQuotaDecision([{ prospectId: "byron", fetchMethod: "scrapy", createdAtMs: now - QUOTA_LEASE_MS }], 1, now)).toBe("stop");
+    expect(QUOTA_LEASE_MS < 15 * 60 * 1000).toBe(true);
     expect(releasePendingReservation("scrapy")).toBe("keep");
   });
 

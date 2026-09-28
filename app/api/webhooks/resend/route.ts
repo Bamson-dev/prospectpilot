@@ -1,9 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logInfo } from "@/lib/logger";
 import { queueJob } from "@/lib/jobs";
-import { onlyMatchingContact, providerEventWrite, webhookTimestampFresh } from "@/lib/email/message-policy";
+import { inboundReplyId, onlyMatchingContact, providerEventWrite, webhookTimestampFresh } from "@/lib/email/message-policy";
 import { isSuppressionRequest } from "@/lib/suppression";
 
 export const dynamic = "force-dynamic";
@@ -27,15 +28,27 @@ export async function POST(request: Request) {
   const emailId = event.data?.email_id;
   const write = event.type ? providerEventWrite(event.type) : null;
   if (write && emailId) {
-    await prisma.outreachMessage.updateMany({
+    const pending = await prisma.outreachMessage.findMany({
       where: { providerMessageId: emailId, state: { in: write.from } },
-      data: {
-        state: write.state,
-        error: write.error,
-        ...(write.state === "DELIVERED" ? { deliveredAt: new Date() } : {}),
-        ...(write.state === "OPENED" ? { openedAt: new Date() } : {}),
-      },
+      select: { id: true, prospectId: true },
     });
+    if (pending.length > 0) {
+      const updated = await prisma.outreachMessage.updateMany({
+        where: { id: { in: pending.map((item) => item.id) }, state: { in: write.from } },
+        data: {
+          state: write.state,
+          error: write.error,
+          ...(write.state === "DELIVERED" ? { deliveredAt: new Date() } : {}),
+          ...(write.state === "OPENED" ? { openedAt: new Date() } : {}),
+        },
+      });
+      if (updated.count > 0 && write.state === "FAILED") {
+        await prisma.prospect.updateMany({
+          where: { id: { in: [...new Set(pending.map((item) => item.prospectId))] }, outreachState: { in: write.from } },
+          data: { outreachState: "FAILED" },
+        });
+      }
+    }
   }
   if ((event.type === "email.received" || event.type === "email.replied") && event.data?.from) {
     const from = event.data.from.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.toLowerCase();
@@ -45,25 +58,43 @@ export async function POST(request: Request) {
       if (contact) {
         const conversation = await prisma.conversation.findFirst({ where: { prospectId: contact.prospectId }, orderBy: { updatedAt: "desc" } });
         if (conversation) {
-          const reply = await prisma.reply.create({
-            data: {
-              organizationId: contact.organizationId,
-              conversationId: conversation.id,
-              prospectId: contact.prospectId,
-              contactId: contact.id,
-              fromEmail: from,
-              subject: event.data.subject,
-              body: event.data.text || "(No message body was included.)",
-              classification: event.data.text && isSuppressionRequest(event.data.text) ? "UNSUBSCRIBE" : "UNCLASSIFIED",
-            },
-          });
-          await queueJob({
+          const replyId = inboundReplyId(id);
+          const replyData = {
+            id: replyId,
             organizationId: contact.organizationId,
+            conversationId: conversation.id,
             prospectId: contact.prospectId,
-            queue: "reply-analysis",
-            name: "reply.classify",
-            payload: { replyId: reply.id },
-          });
+            contactId: contact.id,
+            fromEmail: from,
+            subject: event.data.subject,
+            body: event.data.text || "(No message body was included.)",
+            classification: event.data.text && isSuppressionRequest(event.data.text) ? "UNSUBSCRIBE" as const : "UNCLASSIFIED" as const,
+          };
+          try {
+            await prisma.reply.create({ data: replyData });
+            await queueJob({
+              organizationId: contact.organizationId,
+              prospectId: contact.prospectId,
+              queue: "reply-analysis",
+              name: "reply.classify",
+              payload: { replyId },
+            });
+          } catch (error) {
+            if (!isUnique(error)) throw error;
+            const queued = await prisma.backgroundJob.findFirst({
+              where: { name: "reply.classify", payload: { path: ["replyId"], equals: replyId } },
+              select: { id: true },
+            });
+            if (!queued) {
+              await queueJob({
+                organizationId: contact.organizationId,
+                prospectId: contact.prospectId,
+                queue: "reply-analysis",
+                name: "reply.classify",
+                payload: { replyId },
+              });
+            }
+          }
         }
       } else if (contacts.length > 1) {
         logInfo("resend.webhook.ambiguous_sender", { matches: contacts.length });
@@ -72,6 +103,10 @@ export async function POST(request: Request) {
   }
   logInfo("resend.webhook", { type: event.type ?? "unknown" });
   return NextResponse.json({ ok: true });
+}
+
+function isUnique(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
 function validSignature(secret: string, id: string, timestamp: string, body: string, header: string) {

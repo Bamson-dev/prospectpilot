@@ -1,7 +1,7 @@
 import { UnrecoverableError } from "bullmq";
 import { prisma } from "@/lib/db";
 import { isAppError } from "@/lib/errors";
-import { isPermanentJobError, jobDeliveryDecision } from "@/lib/job-state";
+import { isPermanentJobError, JOB_HEARTBEAT_MS, jobDeliveryDecision } from "@/lib/job-state";
 import { logError, logInfo } from "@/lib/logger";
 
 export async function runJob(jobId: string, work: () => Promise<void>) {
@@ -41,24 +41,35 @@ export async function runJob(jobId: string, work: () => Promise<void>) {
     return;
   }
   const started = Date.now();
+  const attempt = existing.attempts + 1;
+  const heartbeat = setInterval(() => {
+    void prisma.backgroundJob.updateMany({
+      where: { id: jobId, state: "ACTIVE", attempts: attempt },
+      data: { startedAt: new Date() },
+    }).catch(() => undefined);
+  }, JOB_HEARTBEAT_MS);
   try {
-    await work();
-    await prisma.backgroundJob.updateMany({
-      where: { id: jobId, state: "ACTIVE", attempts: existing.attempts + 1 },
-      data: { state: "COMPLETED", finishedAt: new Date(), error: null },
-    });
-    logInfo("job.completed", { jobId, queue: existing.queue, durationMs: Date.now() - started });
-  } catch (error) {
-    const message = (error instanceof Error ? error.message : "Job failed").slice(0, 500);
-    await prisma.backgroundJob.updateMany({
-      where: { id: jobId, state: "ACTIVE", attempts: existing.attempts + 1 },
-      data: { state: "FAILED", error: message, finishedAt: new Date() },
-    });
-    logError("job.failed", { jobId, queue: existing.queue, message, durationMs: Date.now() - started });
-    const permanent =
-      (error instanceof Error && (error.name === "PermanentProviderError" || isPermanentJobError(error.message))) ||
-      (isAppError(error) && isPermanentJobError(error.message));
-    if (permanent) throw new UnrecoverableError(message);
-    throw error;
+    try {
+      await work();
+      await prisma.backgroundJob.updateMany({
+        where: { id: jobId, state: "ACTIVE", attempts: attempt },
+        data: { state: "COMPLETED", finishedAt: new Date(), error: null },
+      });
+      logInfo("job.completed", { jobId, queue: existing.queue, durationMs: Date.now() - started });
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : "Job failed").slice(0, 500);
+      await prisma.backgroundJob.updateMany({
+        where: { id: jobId, state: "ACTIVE", attempts: attempt },
+        data: { state: "FAILED", error: message, finishedAt: new Date() },
+      });
+      logError("job.failed", { jobId, queue: existing.queue, message, durationMs: Date.now() - started });
+      const permanent =
+        (error instanceof Error && (error.name === "PermanentProviderError" || isPermanentJobError(error.message))) ||
+        (isAppError(error) && isPermanentJobError(error.message));
+      if (permanent) throw new UnrecoverableError(message);
+      throw error;
+    }
+  } finally {
+    clearInterval(heartbeat);
   }
 }

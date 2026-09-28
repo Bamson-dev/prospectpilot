@@ -6,7 +6,8 @@ import { companyAnalysisSchema, emailDraftSchema, extractJsonObject } from "@/li
 import { recordActivity } from "@/lib/jobs";
 import { logInfo } from "@/lib/logger";
 import { analysisRetryDecision, qualificationEvidence, qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
-import { QUOTA_RESERVATION_STALE_MS } from "@/lib/campaign-quota";
+import { QUOTA_LEASE_MS } from "@/lib/campaign-quota";
+import { JOB_HEARTBEAT_MS } from "@/lib/job-state";
 
 export async function processQualification(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({
@@ -30,6 +31,11 @@ export async function processQualification(prospectId: string) {
     return;
   }
   const slotId = await reserveQualificationSlot(prospect);
+  const lease = slotId
+    ? setInterval(() => {
+        void refreshQualificationLease(slotId).catch(() => undefined);
+      }, JOB_HEARTBEAT_MS)
+    : null;
   try {
   const sources = await prisma.discoverySource.findMany({ where: { prospectId: prospect.id }, orderBy: { createdAt: "desc" }, take: 5 });
   const evidence = qualificationEvidence({
@@ -158,6 +164,8 @@ export async function processQualification(prospectId: string) {
   } catch (error) {
     await releaseQualificationSlot(slotId);
     throw error;
+  } finally {
+    if (lease) clearInterval(lease);
   }
 }
 
@@ -172,7 +180,7 @@ async function reserveQualificationSlot(prospect: {
   const campaignId = prospect.campaignId;
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`qualification:${campaignId}`}))`;
-    const staleBefore = new Date(Date.now() - QUOTA_RESERVATION_STALE_MS);
+    const staleBefore = new Date(Date.now() - QUOTA_LEASE_MS);
     await tx.activityLog.deleteMany({
       where: { campaignId, action: "qualification.slot", createdAt: { lt: staleBefore } },
     });
@@ -198,6 +206,13 @@ async function reserveQualificationSlot(prospect: {
       },
     });
     return row.id;
+  });
+}
+
+async function refreshQualificationLease(slotId: string) {
+  await prisma.activityLog.updateMany({
+    where: { id: slotId, action: "qualification.slot" },
+    data: { createdAt: new Date() },
   });
 }
 

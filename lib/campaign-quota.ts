@@ -1,4 +1,5 @@
-export const QUOTA_RESERVATION_STALE_MS = 15 * 60 * 1000;
+export const QUOTA_LEASE_MS = 90_000;
+export const QUOTA_RESERVATION_STALE_MS = QUOTA_LEASE_MS;
 
 export type ResearchReservation = {
   prospectId: string;

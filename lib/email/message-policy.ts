@@ -45,3 +45,19 @@ export function webhookTimestampFresh(timestamp: string, nowMs: number) {
 export function onlyMatchingContact<T>(contacts: T[]) {
   return contacts.length === 1 ? contacts[0] : null;
 }
+
+export function inboundReplyId(eventId: string) {
+  return `svix:${eventId}`;
+}
+
+export function inboundReplyDecision(existingIds: string[], eventId: string) {
+  if (!eventId) return "ignore" as const;
+  if (existingIds.includes(inboundReplyId(eventId))) return "duplicate" as const;
+  return "store" as const;
+}
+
+export function prospectOutreachAfterBounce(current: string) {
+  const write = providerEventWrite("email.bounced");
+  if (!write || !write.from.includes(current as OutreachState)) return current;
+  return write.state;
+}

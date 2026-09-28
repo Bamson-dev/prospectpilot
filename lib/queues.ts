@@ -42,7 +42,7 @@ export async function enqueue(name: QueueName, jobId: string, data: Record<strin
   await getQueue(name).add(name, data, {
     jobId,
     attempts: 3,
-    backoff: { type: "exponential", delay: 15000 },
+    backoff: { type: "job-retry", delay: 15000 },
     removeOnComplete: 200,
     removeOnFail: 200,
   });

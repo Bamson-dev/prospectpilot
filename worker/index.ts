@@ -2,6 +2,7 @@ import { Worker } from "bullmq";
 import { prisma } from "@/lib/db";
 import { logInfo } from "@/lib/logger";
 import { ipv4Get } from "@/lib/search/ipv4";
+import { jobRetryDelayMs } from "@/lib/research/failure";
 import { getQueue, getRedis } from "@/lib/queues";
 import { processDiscovery } from "@/worker/processors/discovery";
 import { processDueFollowUps, processReply } from "@/worker/processors/follow-up";
@@ -34,7 +35,7 @@ function start(name: string, handler: (data: Record<string, string>) => Promise<
       const data = job.data as Record<string, string>;
       await runJob(data.jobId, () => handler(data));
     },
-    { connection, concurrency: concurrency(name) },
+    { connection, concurrency: concurrency(name), settings: { backoffStrategy: retryBackoff } },
   );
   worker.on("failed", (job, error) => {
     logInfo("worker.job_failed", { queue: name, jobId: job?.id, message: error.message });
@@ -97,7 +98,7 @@ const followUps = new Worker(
       await processDueFollowUps(data.organizationId);
     });
   },
-  { connection, concurrency: 1 },
+  { connection, concurrency: 1, settings: { backoffStrategy: retryBackoff } },
 );
 followUps.on("failed", (job, error) => {
   logInfo("worker.job_failed", { queue: "follow-up", jobId: job?.id, message: error.message });
@@ -110,6 +111,10 @@ void getQueue("follow-up")
       message: error instanceof Error ? error.message : "unknown",
     });
   });
+
+function retryBackoff(attemptsMade: number, _type?: string, err?: Error) {
+  return jobRetryDelayMs(attemptsMade, err);
+}
 
 function readPayload(data: Record<string, string>, key: string) {
   if (data[key]) return data[key];

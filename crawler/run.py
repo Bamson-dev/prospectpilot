@@ -29,12 +29,14 @@ RESULT = {
     "contactPages": [],
     "teamPages": [],
     "note": "",
+    "retryAfter": "",
     "metrics": {
         "urlsRequested": 0,
         "responsesReceived": 0,
         "pagesExtracted": 0,
         "pagesFailed": 0,
         "http403": 0,
+        "http429": 0,
         "emailsFound": 0,
         "phonesFound": 0,
         "socialLinksFound": 0,
@@ -49,9 +51,12 @@ class CompanySpider(scrapy.Spider):
         "AUTOTHROTTLE_ENABLED": True,
         "AUTOTHROTTLE_START_DELAY": 1,
         "AUTOTHROTTLE_MAX_DELAY": 8,
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
+        "CONCURRENT_REQUESTS": 1,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 1,
+        "DOWNLOAD_DELAY": 1,
         "DOWNLOAD_TIMEOUT": 12,
         "RETRY_TIMES": 1,
+        "RETRY_HTTP_CODES": [500, 502, 503, 504, 522, 524, 408],
         "LOG_ENABLED": False,
         "TELNETCONSOLE_ENABLED": False,
         "COOKIES_ENABLED": False,
@@ -79,13 +84,15 @@ class CompanySpider(scrapy.Spider):
     def closed(self, spider, reason):
         stats = spider.crawler.stats
         forbidden = stats.get_value("robotstxt/forbidden") or 0
-        failed = status_failures(stats) or RESULT["metrics"]["pagesFailed"]
+        failed = status_failures(stats) or RESULT["metrics"].get("pagesFailed") or 0
+        http429 = stats.get_value("downloader/response_status_count/429") or RESULT["metrics"].get("http429") or 0
         RESULT["metrics"] = {
             "urlsRequested": stats.get_value("downloader/request_count") or 0,
             "responsesReceived": stats.get_value("downloader/response_count") or 0,
             "pagesExtracted": len(RESULT["pages"]),
             "pagesFailed": failed,
             "http403": stats.get_value("downloader/response_status_count/403") or 0,
+            "http429": http429,
             "emailsFound": len(RESULT["emails"]),
             "phonesFound": len(RESULT["phones"]),
             "socialLinksFound": len(RESULT["socialProfiles"]),
@@ -94,6 +101,8 @@ class CompanySpider(scrapy.Spider):
             RESULT["note"] = "private-network"
         elif forbidden:
             RESULT["note"] = "robots"
+        elif http429 and not RESULT["pages"]:
+            RESULT["note"] = "http-429"
         elif RESULT["metrics"]["http403"]:
             RESULT["note"] = "http-403"
         else:
@@ -101,9 +110,15 @@ class CompanySpider(scrapy.Spider):
 
     def parse(self, response, depth=0):
         if response.status >= 400 or len(response.body) > 1_500_000:
-            RESULT["metrics"]["pagesFailed"] += 1
+            metrics = RESULT["metrics"]
+            metrics["pagesFailed"] = metrics.get("pagesFailed", 0) + 1
             if response.status == 403:
-                RESULT["metrics"]["http403"] += 1
+                metrics["http403"] = metrics.get("http403", 0) + 1
+            if response.status == 429:
+                metrics["http429"] = metrics.get("http429", 0) + 1
+                retry_after = header_value(response, b"Retry-After")
+                if retry_after and not RESULT.get("retryAfter"):
+                    RESULT["retryAfter"] = retry_after
             return
         if len(RESULT["pages"]) >= self.max_pages:
             return
@@ -153,6 +168,15 @@ class CompanySpider(scrapy.Spider):
                 continue
             if any(token in parsed.path.lower() for token in INTEREST):
                 yield response.follow(absolute, callback=self.parse, cb_kwargs={"depth": depth + 1})
+
+
+def header_value(response, name):
+    value = response.headers.get(name)
+    if not value:
+        return ""
+    if isinstance(value, bytes):
+        value = value.decode("latin1", errors="ignore")
+    return str(value).strip()[:40]
 
 
 def status_failures(stats):

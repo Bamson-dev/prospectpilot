@@ -6,6 +6,7 @@ import { routePublicBrowserTraffic } from "@/lib/research/public-browser";
 import { httpStatusFromError, pageAccessBlocked, shouldUsePlaywright } from "@/lib/research/browser-decision";
 import { extractPage, type PageSignals } from "@/lib/research/extract";
 import { crawlCompanySite, crawlHasEvidence } from "@/lib/research/crawl";
+import { crawlRateLimited, httpFallbackDecision, rateLimitedResearchMessage, researchRetryPlan } from "@/lib/research/failure";
 import { socialLinks } from "@/lib/domains";
 import { logInfo } from "@/lib/logger";
 import { QUOTA_LEASE_MS } from "@/lib/campaign-quota";
@@ -17,6 +18,33 @@ export async function processResearch(prospectId: string) {
   if (!prospect.website) {
     await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "SKIPPED" } });
     throw new AppError("This prospect has no public website to research.");
+  }
+  const latest = await prisma.researchRecord.findFirst({
+    where: { prospectId: prospect.id },
+    orderBy: { createdAt: "desc" },
+  });
+  const plan = researchRetryPlan({
+    latestFetchMethod: latest?.fetchMethod ?? null,
+    contentLength: (latest?.content || latest?.excerpt || "").length,
+  });
+  if (plan === "blocked") {
+    await prisma.prospect.updateMany({
+      where: { id: prospect.id, researchStatus: "IN_PROGRESS" },
+      data: { researchStatus: "FAILED" },
+    });
+    return;
+  }
+  if (plan === "keep") {
+    await prisma.prospect.updateMany({
+      where: { id: prospect.id, researchStatus: "IN_PROGRESS" },
+      data: { researchStatus: "FAILED" },
+    });
+    return;
+  }
+  if (plan === "reuse" && latest) {
+    await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "COMPLETED" } });
+    await ensureQualificationJob(prospect);
+    return;
   }
   const slot = await reserveResearchSlot({
     id: prospect.id,
@@ -37,6 +65,10 @@ export async function processResearch(prospectId: string) {
         maxDepth: prospect.campaign?.crawlDepth ?? 2,
       })
     : null;
+  if (crawl && crawlRateLimited(crawl)) {
+    logInfo("research.rate_limited", { prospectId: prospect.id, domain: prospect.domain, retryAfter: crawl.retryAfter || "" });
+    throw new AppError(rateLimitedResearchMessage(crawl.retryAfter));
+  }
   if (crawl && crawlHasEvidence(crawl)) {
     const page = crawl.pages.find((item) => (item.text ?? "").length >= 280) ?? crawl.pages[0];
     await prisma.researchRecord.update({
@@ -68,7 +100,6 @@ export async function processResearch(prospectId: string) {
         confidence: 70,
       },
     });
-    kept = true;
     await storeObservedContacts(prospect.organizationId, prospect.id, page?.url ?? prospect.website, {
       services: crawl.services,
       technology: crawl.technologySignals,
@@ -80,6 +111,7 @@ export async function processResearch(prospectId: string) {
       socialUrls: crawl.socialProfiles.map((item) => item.url),
     });
     await finishResearch(prospect, "scrapy", page?.url ?? prospect.website, crawl.description, crawl.phones[0]?.value, crawl.socialProfiles.map((item) => item.url));
+    kept = true;
     return;
   }
   let html = "";
@@ -92,7 +124,9 @@ export async function processResearch(prospectId: string) {
   } catch (error) {
     httpStatus = httpStatusFromError(error);
     logInfo("research.http.failed", { prospectId: prospect.id, status: httpStatus });
-    if (httpStatus !== 401 && httpStatus !== 403) throw error;
+    const decision = httpFallbackDecision(httpStatus);
+    if (decision === "retry") throw error;
+    if (decision !== "browser") throw error;
   }
   const initial = html ? extractPage(html, finalUrl) : { excerpt: "", signals: emptySignals(), title: null, metaDescription: null, headings: [] as string[] };
   let method = httpStatus ? "http-blocked" : "http";
@@ -126,7 +160,6 @@ export async function processResearch(prospectId: string) {
         confidence: 0,
       },
     });
-    kept = true;
     await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "FAILED" } });
     await recordActivity({
       organizationId: prospect.organizationId,
@@ -135,6 +168,7 @@ export async function processResearch(prospectId: string) {
       action: "research.blocked",
       detail: httpStatus ? `HTTP ${httpStatus}` : playwrightTried ? "Playwright could not read the page" : "The HTTP response was an access challenge",
     });
+    kept = true;
     return;
   }
   const extracted = extractPage(html, finalUrl);
@@ -161,12 +195,33 @@ export async function processResearch(prospectId: string) {
       confidence: extracted.excerpt.length > 280 ? 70 : 40,
     },
   });
-  kept = true;
   await storeObservedContacts(prospect.organizationId, prospect.id, finalUrl, extracted.signals);
   await finishResearch(prospect, method, finalUrl, extracted.metaDescription, extracted.signals.phones[0], extracted.signals.socialUrls);
+  kept = true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Research failed";
+    logInfo("research.failed", { prospectId: prospect.id, message: message.slice(0, 180) });
+    try {
+      await recordActivity({
+        organizationId: prospect.organizationId,
+        campaignId: prospect.campaignId,
+        prospectId: prospect.id,
+        action: "research.failed",
+        detail: message.slice(0, 180),
+      });
+    } catch {
+      logInfo("research.failed_activity", { prospectId: prospect.id });
+    }
+    throw error;
   } finally {
     stopLease();
-    if (!kept) await releaseResearchSlot(slot.id);
+    if (!kept) {
+      await releaseResearchSlot(slot.id);
+      await prisma.prospect.updateMany({
+        where: { id: prospect.id, researchStatus: "IN_PROGRESS" },
+        data: { researchStatus: "FAILED" },
+      });
+    }
   }
 }
 
@@ -197,18 +252,36 @@ async function finishResearch(
     action: "prospect.researched",
     detail: `${method} ${finalUrl}`,
   });
+  await ensureQualificationJob(prospect, method);
+}
+
+async function ensureQualificationJob(
+  prospect: { id: string; organizationId: string; campaignId: string | null },
+  provider = "existing",
+) {
+  const existing = await prisma.backgroundJob.findFirst({
+    where: {
+      prospectId: prospect.id,
+      queue: "qualification",
+      name: "qualification.analyze",
+      state: { not: "CANCELLED" },
+    },
+    select: { id: true },
+  });
+  if (existing) return;
   await queueJob({
     organizationId: prospect.organizationId,
     campaignId: prospect.campaignId,
     prospectId: prospect.id,
     queue: "qualification",
     name: "qualification.analyze",
-    payload: { provider: method },
+    payload: { provider },
   });
 }
 
 async function fetchPublicHtml(input: string): Promise<{ url: string; html: string }> {
   const response = await fetchPublic(input);
+  if (response.status === 429) throw new AppError(rateLimitedResearchMessage(response.headers["retry-after"]));
   if (response.status < 200 || response.status >= 300) throw new AppError(`The website returned status ${response.status}.`);
   const type = response.headers["content-type"] ?? "";
   if (!type.includes("text/html") && !type.includes("text/plain") && type) {
@@ -246,6 +319,10 @@ async function reserveResearchSlot(prospect: {
       await tx.researchRecord.deleteMany({
         where: { prospect: { campaignId: prospect.campaignId }, fetchMethod: "pending", createdAt: { lt: staleBefore } },
       });
+      const pending = await tx.researchRecord.findFirst({
+        where: { prospectId: prospect.id, fetchMethod: "pending" },
+      });
+      if (pending) return pending;
       const researched = await tx.researchRecord.count({
         where: { prospect: { campaignId: prospect.campaignId }, createdAt: { gte: start } },
       });
@@ -253,6 +330,10 @@ async function reserveResearchSlot(prospect: {
         throw new AppError("The daily research limit has been reached.");
       }
     }
+    const existingPending = await tx.researchRecord.findFirst({
+      where: { prospectId: prospect.id, fetchMethod: "pending" },
+    });
+    if (existingPending) return existingPending;
     return tx.researchRecord.create({
       data: {
         prospectId: prospect.id,

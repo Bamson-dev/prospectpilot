@@ -94,17 +94,22 @@ request = Request("https://vered.co.za/")
 list(spider.parse(HtmlResponse(request.url, request=request, body=html, encoding="utf-8")))
 forbidden = HtmlResponse(request.url, request=request, body=b"Forbidden", status=403, encoding="utf-8")
 list(spider.parse(forbidden))
-print(json.dumps({"pages":crawler.RESULT["pages"],"emails":crawler.RESULT["emails"],"phones":crawler.RESULT["phones"],"social":crawler.RESULT["socialProfiles"],"failed":crawler.RESULT["metrics"]["pagesFailed"],"http403":crawler.RESULT["metrics"]["http403"]}))
+limited = HtmlResponse(request.url, request=request, body=b"slow down", status=429, encoding="utf-8", headers={"Retry-After": "12"})
+list(spider.parse(limited))
+print(json.dumps({"pages":crawler.RESULT["pages"],"emails":crawler.RESULT["emails"],"phones":crawler.RESULT["phones"],"social":crawler.RESULT["socialProfiles"],"failed":crawler.RESULT["metrics"]["pagesFailed"],"http403":crawler.RESULT["metrics"].get("http403",0),"http429":crawler.RESULT["metrics"].get("http429",0),"retryAfter":crawler.RESULT.get("retryAfter","")}))
 `;
     const output = execFileSync(python, ["-c", script], { cwd: "crawler", encoding: "utf8" });
-    const parsed = JSON.parse(output) as { pages: Array<{ text: string }>; emails: Array<{ value: string }>; phones: Array<{ value: string }>; social: Array<{ url: string }>; failed: number; http403: number };
+    const parsed = JSON.parse(output) as { pages: Array<{ text: string }>; emails: Array<{ value: string }>; phones: Array<{ value: string }>; social: Array<{ url: string }>; failed: number; http403: number; http429: number; retryAfter: string };
     expect(parsed.pages).toHaveLength(1);
     expect(parsed.pages[0]?.text).toContain("Johannesburg");
     expect(parsed.emails[0]?.value).toBe("sales@vered.co.za");
     expect(parsed.phones.length).toBeGreaterThan(0);
     expect(parsed.social[0]?.url).toContain("linkedin.com/company/vered");
-    expect(parsed.failed).toBe(1);
+    expect(parsed.failed).toBe(2);
     expect(parsed.http403).toBe(1);
+    expect(parsed.http429).toBe(1);
+    expect(parsed.retryAfter).toBe("12");
+    expect(parsed.pages).toHaveLength(1);
   });
 });
 

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { AppError } from "@/lib/errors";
 import { logInfo } from "@/lib/logger";
 
 export type CrawlPage = {
@@ -24,6 +25,7 @@ export type CrawlResult = {
   contactPages: string[];
   teamPages: string[];
   note?: string;
+  retryAfter?: string;
   metrics?: CrawlMetrics;
 };
 
@@ -33,6 +35,7 @@ export type CrawlMetrics = {
   pagesExtracted: number;
   pagesFailed: number;
   http403: number;
+  http429: number;
   emailsFound: number;
   phonesFound: number;
   socialLinksFound: number;
@@ -56,6 +59,9 @@ export function parseCrawlResult(value: unknown): CrawlResult | null {
     contactPages: strings(row.contactPages),
     teamPages: strings(row.teamPages),
     note: typeof row.note === "string" ? row.note.slice(0, 80) : "",
+    retryAfter: typeof (value as { retryAfter?: unknown }).retryAfter === "string"
+      ? (value as { retryAfter: string }).retryAfter.slice(0, 40)
+      : "",
     metrics: metricsOf((value as { metrics?: unknown }).metrics),
   };
 }
@@ -69,6 +75,7 @@ function metricsOf(value: unknown): CrawlMetrics {
     pagesExtracted: count("pagesExtracted"),
     pagesFailed: count("pagesFailed"),
     http403: count("http403"),
+    http429: count("http429"),
     emailsFound: count("emailsFound"),
     phonesFound: count("phonesFound"),
     socialLinksFound: count("socialLinksFound"),
@@ -77,6 +84,13 @@ function metricsOf(value: unknown): CrawlMetrics {
 
 export function crawlHasEvidence(result: CrawlResult) {
   return result.pages.some((page) => (page.text ?? "").trim().length >= 280);
+}
+
+export function crawlOutcome(input: { code: number; stderr: string; parsed: boolean }) {
+  if (input.code !== 0 || /ImportError|Traceback \(most recent call last\)/.test(input.stderr) || !input.parsed) {
+    return "failed" as const;
+  }
+  return "result" as const;
 }
 
 export async function crawlCompanySite(input: { website: string; domain: string; maxPages: number; maxDepth: number }) {
@@ -93,14 +107,21 @@ export async function crawlCompanySite(input: { website: string; domain: string;
   logInfo("research.crawl.started", { domain: input.domain });
   const run = await runPython(script, [jobPath, outPath]);
   try {
-    if (run.code !== 0 || crawlerStartupFailed(run.stderr)) {
-      logInfo("research.crawl.failed", { domain: input.domain, code: run.code, reason: crawlerStartupFailed(run.stderr) ? "crawler-startup" : "exit" });
-      return null;
+    let parsed: CrawlResult | null = null;
+    if (run.code === 0 && !crawlerStartupFailed(run.stderr)) {
+      try {
+        parsed = parseCrawlResult(JSON.parse(await readFile(outPath, "utf8")));
+      } catch {
+        parsed = null;
+      }
     }
-    const parsed = parseCrawlResult(JSON.parse(await readFile(outPath, "utf8")));
-    if (!parsed) {
-      logInfo("research.crawl.failed", { domain: input.domain, reason: "malformed" });
-      return null;
+    if (crawlOutcome({ code: run.code, stderr: run.stderr, parsed: Boolean(parsed) }) === "failed" || !parsed) {
+      logInfo("research.crawl.failed", {
+        domain: input.domain,
+        code: run.code,
+        reason: crawlerStartupFailed(run.stderr) ? "crawler-startup" : run.code !== 0 ? "exit" : "malformed",
+      });
+      throw new AppError("The crawler stopped before producing a result.");
     }
     logInfo("research.crawl.completed", {
       domain: input.domain,
@@ -111,14 +132,12 @@ export async function crawlCompanySite(input: { website: string; domain: string;
       pagesExtracted: parsed.metrics?.pagesExtracted ?? parsed.pages.length,
       pagesFailed: parsed.metrics?.pagesFailed ?? 0,
       http403: parsed.metrics?.http403 ?? 0,
+      http429: parsed.metrics?.http429 ?? 0,
       emailsFound: parsed.metrics?.emailsFound ?? parsed.emails.length,
       phonesFound: parsed.metrics?.phonesFound ?? parsed.phones.length,
       socialLinksFound: parsed.metrics?.socialLinksFound ?? parsed.socialProfiles.length,
     });
     return parsed;
-  } catch {
-    logInfo("research.crawl.failed", { domain: input.domain, reason: "unreadable" });
-    return null;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -27,6 +27,12 @@ export async function runJob(jobId: string, work: () => Promise<void>) {
       where: { id: jobId, state: "ACTIVE", attempts: existing.attempts },
       data: { state: "FAILED", error: "Job stopped after its attempt limit.", finishedAt: new Date() },
     });
+    if (existing.queue === "research" && existing.prospectId) {
+      await prisma.prospect.updateMany({
+        where: { id: existing.prospectId, researchStatus: "IN_PROGRESS" },
+        data: { researchStatus: "FAILED" },
+      });
+    }
     throw new UnrecoverableError("Job stopped after its attempt limit.");
   }
   if ((await ensureIndependentHeartbeat()) !== "run") {

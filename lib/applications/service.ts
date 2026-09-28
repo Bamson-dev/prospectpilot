@@ -12,7 +12,7 @@ import { checksum, docxContains, pdfLooksReadable, renderDocx, renderPdf } from 
 import { documentFileName } from "@/lib/applications/filenames";
 import { answerQuestion } from "@/lib/applications/questions";
 import { extractRequirements } from "@/lib/applications/requirements";
-import { contactIsReady, seedCandidateRecord } from "@/lib/applications/seed-data";
+import { CAREER_PROFILES, contactIsReady, seedCandidateRecord, seedWritingProfile } from "@/lib/applications/seed-data";
 import type { CandidateRecord, JobInput } from "@/lib/applications/types";
 import { DateValidator, FormattingValidator } from "@/lib/applications/validators";
 import { CV_SYSTEM_PROMPT, evidencePrompt } from "@/lib/applications/prompts";
@@ -31,16 +31,23 @@ export async function ensureCandidate(organizationId: string) {
       lastName: seed.lastName,
       email: seed.email,
       headline: "Software, web, and growth",
-      profiles: {
-        create: [
-          { kind: "SOFTWARE", title: "Software Engineer", summary: "Full-stack and product engineering evidence is limited to verified project technologies." },
-          { kind: "WEB", title: "Web Developer", summary: "Website and frontend evidence is limited to verified web-application work." },
-          { kind: "MARKETING", title: "Growth Marketer", summary: "Growth, acquisition, affiliate, and go-to-market evidence comes from PromptEarn." },
-        ],
-      },
-      writing: { create: { tone: "specific", formality: "professional", verbosity: "concise", voice: "plain" } },
+      profiles: { create: CAREER_PROFILES.map((profile) => ({ kind: profile.kind, title: profile.title, summary: profile.summary })) },
+      writing: { create: seedWritingProfile() },
       preference: { create: { discoverJobs: false, dailyTarget: 500, mode: "AUTO_PREPARE" } },
     },
+  });
+  for (const profile of CAREER_PROFILES) {
+    await prisma.candidateCareerProfile.upsert({
+      where: { candidateId_kind: { candidateId: candidate.id, kind: profile.kind } },
+      update: { title: profile.title, summary: profile.summary },
+      create: { candidateId: candidate.id, kind: profile.kind, title: profile.title, summary: profile.summary },
+    });
+  }
+  const writing = seedWritingProfile();
+  await prisma.candidateWritingProfile.upsert({
+    where: { candidateId: candidate.id },
+    update: writing,
+    create: { candidateId: candidate.id, ...writing },
   });
   for (const fact of seed.facts) {
     await prisma.candidateFact.upsert({
@@ -63,7 +70,14 @@ export async function ensureCandidate(organizationId: string) {
   for (const project of seed.projects) {
     await prisma.candidateProject.upsert({
       where: { candidateId_name: { candidateId: candidate.id, name: project.name } },
-      update: { technologies: project.technologies, verified: true },
+      update: {
+        technologies: project.technologies,
+        profiles: project.profiles,
+        description: project.description,
+        url: project.url,
+        githubUrl: project.githubUrl,
+        verified: true,
+      },
       create: {
         candidateId: candidate.id,
         name: project.name,
@@ -72,8 +86,10 @@ export async function ensureCandidate(organizationId: string) {
         technologies: project.technologies,
         features: project.features,
         outcomes: project.outcomes,
+        url: project.url,
+        githubUrl: project.githubUrl,
         verified: true,
-        source: project.name === "ProspectPilot" ? "prospectpilot-repository" : "operator-supplied candidate brief",
+        source: project.source ?? (project.name === "ProspectPilot" ? "prospectpilot-repository" : "operator-supplied candidate brief"),
         profiles: project.profiles,
       },
     });
@@ -91,8 +107,13 @@ export async function ensureCandidate(organizationId: string) {
         verified: true,
         current: false,
         source: "operator-supplied candidate brief",
-        profiles: ["MARKETING"],
+        profiles: ["MARKETING", "GROWTH", "FOUNDER", "SAAS", "HYBRID"],
       },
+    });
+  } else {
+    await prisma.candidateExperience.update({
+      where: { id: existingExperience.id },
+      data: { profiles: ["MARKETING", "GROWTH", "FOUNDER", "SAAS", "HYBRID"], summary: seed.experiences[0].summary },
     });
   }
   return candidate;
@@ -323,6 +344,19 @@ function fitData(candidateId: string, fit: ReturnType<typeof scoreJobFit>): Omit
     gaps: fit.gaps,
     advantages: fit.advantages,
     recommendation: fit.recommendation,
+    analysis: {
+      profile: fit.profile,
+      requiredMatches: fit.requirementMatches,
+      requiredGaps: fit.missingRequirements,
+      preferredMatches: fit.preferredMatches,
+      preferredGaps: fit.preferredGaps,
+      evidence: fit.evidence,
+      blockers: fit.blockers,
+      missingInformation: fit.missingInformation,
+      transferable: fit.transferable,
+      skills: fit.recommendedSkills,
+      structure: fit.cvStructure,
+    },
     selectedProjectIds: fit.selectedProjects.map((project) => project.id),
     selectedFactIds: fit.selectedFacts.map((fact) => fact.id),
   };

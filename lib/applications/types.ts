@@ -1,4 +1,4 @@
-export type CareerProfile = "SOFTWARE" | "WEB" | "MARKETING";
+export type CareerProfile = "SOFTWARE" | "WEB" | "MARKETING" | "SAAS" | "GROWTH" | "FOUNDER" | "HYBRID";
 
 export type FactCategory =
   | "IDENTITY"
@@ -51,6 +51,10 @@ export type CandidateProjectInput = {
   metrics: string[];
   verified: boolean;
   profiles: CareerProfile[];
+  url?: string | null;
+  githubUrl?: string | null;
+  source?: string;
+  confidence?: number;
 };
 
 export type CandidateExperienceInput = {
@@ -115,4 +119,9 @@ export type ApplicationStatus =
   | "VERIFICATION_REQUIRED"
   | "FAILED"
   | "REQUIRES_MANUAL_ACTION"
-  | "WITHDRAWN";
+  | "WITHDRAWN"
+  | "APPROVED"
+  | "REJECTED"
+  | "VERIFIED"
+  | "PREPARING"
+  | "FIT_EVALUATED";

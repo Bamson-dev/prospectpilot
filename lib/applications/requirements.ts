@@ -8,7 +8,7 @@ const TECH = [
 const YEAR = /(\d{1,2})\+?\s*(?:years|yrs)/i;
 
 export function extractRequirements(description: string): ExtractedRequirement[] {
-  const lines = description
+  const lines = plainText(description)
     .split(/\n+/)
     .map((line) => line.replace(/^[\s*\-•]+/, "").trim())
     .filter((line) => line.length > 2);
@@ -27,7 +27,10 @@ export function extractRequirements(description: string): ExtractedRequirement[]
       });
     }
     const kind = classifyLine(lower, preferred, required);
-    if (kind) found.push({ kind, text: line, required: kind === "MUST_HAVE" || kind === "TECHNOLOGY" && required });
+    if (kind) {
+      const hard = kind === "MUST_HAVE" || kind === "EDUCATION" || (kind === "TECHNOLOGY" && required);
+      found.push({ kind, text: line, required: preferred ? false : hard });
+    }
   }
   return dedupeRequirements(found);
 }
@@ -53,6 +56,24 @@ function dedupeRequirements(items: ExtractedRequirement[]) {
     seen.add(key);
     return true;
   });
+}
+
+export function plainText(value: string) {
+  return value
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/<li[^>]*>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h\d|ul|ol|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function technologiesInText(text: string) {

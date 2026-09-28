@@ -5,16 +5,18 @@ export type QuestionDraft = {
   question: string;
   kind: ApplicationQuestionKind;
   answer: string | null;
-  status: "ANSWERED" | "NEEDS_USER_INPUT";
+  status: "ANSWERED" | "NEEDS_USER_INPUT" | "REVIEW_REQUIRED";
 };
 
 export function classifyQuestion(question: string): ApplicationQuestionKind {
   const text = question.toLowerCase();
-  if (/salary|compensation|pay|rate/.test(text)) return "SALARY";
+  if (/salary|compensation|pay expectation|expected pay/.test(text)) return "SALARY";
   if (/authori[sz]ed|visa|citizen|sponsor|right to work/.test(text)) return "WORK_AUTHORIZATION";
   if (/available|notice period|start date/.test(text)) return "AVAILABILITY";
-  if (/where|location|relocat|remote/.test(text)) return "LOCATION";
+  if (/linkedin/.test(text)) return "PORTFOLIO";
+  if (/where are you based|location|relocat/.test(text)) return "LOCATION";
   if (/degree|university|education/.test(text)) return "EDUCATION";
+  if (/how many years|years of experience/.test(text)) return "EXPERIENCE";
   if (/portfolio|github|website/.test(text)) return "PORTFOLIO";
   if (/why .*company|why do you want/.test(text)) return "COMPANY_SPECIFIC";
   if (/tell me about a time|conflict|leadership/.test(text)) return "BEHAVIORAL";
@@ -27,6 +29,15 @@ export function classifyQuestion(question: string): ApplicationQuestionKind {
 export function answerQuestion(question: string, job: JobInput, candidate: CandidateRecord, fit: FitResult): QuestionDraft {
   const kind = classifyQuestion(question);
   if (kind === "SALARY" || kind === "WORK_AUTHORIZATION" || kind === "AVAILABILITY") {
+    return { question, kind, answer: null, status: "NEEDS_USER_INPUT" };
+  }
+  if (kind === "BEHAVIORAL" || kind === "COMPANY_SPECIFIC") {
+    return { question, kind, answer: null, status: "REVIEW_REQUIRED" };
+  }
+  if (kind === "EXPERIENCE" && /years/.test(question.toLowerCase())) {
+    return { question, kind, answer: null, status: "NEEDS_USER_INPUT" };
+  }
+  if (/linkedin/i.test(question) && !candidate.facts.some((fact) => fact.category === "LINK" && fact.verified && /linkedin/i.test(fact.fact))) {
     return { question, kind, answer: null, status: "NEEDS_USER_INPUT" };
   }
   if (kind === "EDUCATION" && !candidate.facts.some((fact) => fact.category === "EDUCATION" && fact.verified)) {

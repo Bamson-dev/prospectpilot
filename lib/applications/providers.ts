@@ -39,6 +39,12 @@ export function parseJobPage(input: { url: string; title: string; text: string; 
   };
 }
 
+export function discoveryBlock(status: number, body: string) {
+  if (status === 401 || status === 403 || status === 429) return "blocked" as const;
+  if (/captcha|cloudflare|just a moment|verify you are human/i.test(body)) return "blocked" as const;
+  return null;
+}
+
 export function dedupeDiscovered(jobs: DiscoveredJob[]) {
   const seen = new Set<string>();
   return jobs.filter((job) => {

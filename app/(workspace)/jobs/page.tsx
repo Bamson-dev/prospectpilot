@@ -33,6 +33,10 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
         <Panel><p className="text-sm text-muted">Verified today</p><p className="font-display text-3xl">{stats.verified}</p></Panel>
         <Panel><p className="text-sm text-muted">Failed / blocked / manual</p><p className="font-display text-3xl">{stats.failed} / {stats.blocked} / {stats.manual}</p></Panel>
       </div>
+      <Panel className="mb-4">
+        <h2 className="font-display text-2xl">Throughput</h2>
+        <p className="mt-2 text-sm text-muted">The target is {target} application attempts in a day. That number has not been benchmarked. CPU, memory, Redis latency, PostgreSQL latency, and per-hour rates are not measured here. Submitted today is {stats.submitted}.</p>
+      </Panel>
       {jobs.length === 0 ? <Empty title="No vacancies yet" detail="Discover jobs after SearXNG and job discovery are enabled. Nothing is submitted automatically." /> : jobs.map((job) => (
         <Panel key={job.id} className="mb-3">
           <p className="font-display text-2xl">{job.title}</p>

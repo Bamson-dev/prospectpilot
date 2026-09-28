@@ -7,6 +7,8 @@ import { AppError, errorMessage } from "@/lib/errors";
 import { queueJob } from "@/lib/jobs";
 import { jobDiscoveryEnabled } from "@/lib/applications/config";
 import { ensureCandidate } from "@/lib/applications/service";
+import { canTransition } from "@/lib/applications/state";
+import type { ApplicationStatus } from "@/lib/applications/types";
 
 export async function saveCandidateProfile(formData: FormData) {
   const { organization } = await requireOrganization("MEMBER");
@@ -102,6 +104,23 @@ export async function enqueueApplicationPreparation(formData: FormData) {
     redirect(`/jobs?error=${encodeURIComponent(errorMessage(error))}`);
   }
   redirect("/jobs/applications?notice=Application+preparation+queued.");
+}
+
+export async function decideApplication(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const id = String(formData.get("id") ?? "");
+  const decision = String(formData.get("decision") ?? "");
+  if (decision !== "APPROVED" && decision !== "REJECTED") redirect("/jobs/applications?error=Unknown+decision.");
+  const application = await prisma.jobApplication.findFirst({ where: { id, organizationId: organization.id } });
+  if (!application) redirect("/jobs/applications?error=Application+not+found.");
+  if (!canTransition(application.status as ApplicationStatus, decision)) {
+    redirect(`/jobs/applications/${id}?error=That+status+change+is+not+allowed.`);
+  }
+  await prisma.jobApplication.update({ where: { id: application.id }, data: { status: decision } });
+  await prisma.applicationEvent.create({
+    data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: decision === "APPROVED" ? "Approved for review. Not submitted." : "Rejected before submission." },
+  });
+  redirect(`/jobs/applications/${id}?notice=Status+saved.+Nothing+was+submitted.`);
 }
 
 export async function archiveGeneratedDocument(formData: FormData) {

@@ -3,6 +3,7 @@ import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { requireOrganization } from "@/lib/current-user";
+import { unknownCandidateFields } from "@/lib/applications/seed-data";
 import { ensureCandidate } from "@/lib/applications/service";
 import { prisma } from "@/lib/db";
 
@@ -52,9 +53,15 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
           <SubmitButton pendingLabel="Saving">Add fact</SubmitButton>
         </form>
       </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Not on file</h2>
+        <p className="mt-2 text-sm">{unknownCandidateFields().join(", ")}. These stay blank. The system will not guess them.</p>
+        <p className="mt-2 text-sm text-muted">LinkedIn, education, and certifications have no verified record.</p>
+      </Panel>
       <Panel>
         <h2 className="font-display text-2xl">Writing style</h2>
         <p className="mt-2 text-sm">{candidate.writing?.tone} · {candidate.writing?.formality} · {candidate.writing?.verbosity}</p>
+        <p className="mt-2 text-sm">{candidate.writing?.voice}</p>
       </Panel>
     </div>
   );

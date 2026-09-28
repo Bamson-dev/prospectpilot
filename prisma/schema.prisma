@@ -651,6 +651,10 @@ enum CareerProfileKind {
   SOFTWARE
   WEB
   MARKETING
+  SAAS
+  GROWTH
+  FOUNDER
+  HYBRID
 }
 
 enum FactCategory {
@@ -703,6 +707,11 @@ enum ApplicationPackageStatus {
   FAILED
   REQUIRES_MANUAL_ACTION
   WITHDRAWN
+  APPROVED
+  REJECTED
+  VERIFIED
+  PREPARING
+  FIT_EVALUATED
 }
 
 enum ApplicationEventType {
@@ -938,6 +947,7 @@ model JobFitSnapshot {
   gaps              Json
   advantages        Json
   recommendation    String
+  analysis          Json?
   selectedProjectIds String[] @default([])
   selectedFactIds   String[] @default([])
   createdAt         DateTime @default(now())

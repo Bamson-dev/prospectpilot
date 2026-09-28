@@ -6,6 +6,7 @@ import { companyAnalysisSchema, emailDraftSchema, extractJsonObject } from "@/li
 import { recordActivity } from "@/lib/jobs";
 import { logInfo } from "@/lib/logger";
 import { analysisRetryDecision, qualificationEvidence, qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
+import { QUOTA_RESERVATION_STALE_MS } from "@/lib/campaign-quota";
 
 export async function processQualification(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({
@@ -28,16 +29,8 @@ export async function processQualification(prospectId: string) {
     logInfo("qualification.skipped_existing", { prospectId: prospect.id });
     return;
   }
-  if (prospect.campaign) {
-    const start = new Date();
-    start.setUTCHours(0, 0, 0, 0);
-    const qualifiedToday = await prisma.activityLog.count({
-      where: { campaignId: prospect.campaignId, action: "prospect.qualified", createdAt: { gte: start } },
-    });
-    if (qualifiedToday >= prospect.campaign.dailyQualificationLimit) {
-      throw new AppError("The daily qualification quota has been reached.");
-    }
-  }
+  const slotId = await reserveQualificationSlot(prospect);
+  try {
   const sources = await prisma.discoverySource.findMany({ where: { prospectId: prospect.id }, orderBy: { createdAt: "desc" }, take: 5 });
   const evidence = qualificationEvidence({
     companyName: prospect.companyName,
@@ -104,6 +97,7 @@ export async function processQualification(prospectId: string) {
     return true;
   });
   if (!wrote) {
+    await releaseQualificationSlot(slotId);
     logInfo("qualification.skipped_existing", { prospectId: prospect.id });
     return;
   }
@@ -146,14 +140,70 @@ export async function processQualification(prospectId: string) {
       });
     });
   }
-  await recordActivity({
-    organizationId: prospect.organizationId,
-    campaignId: prospect.campaignId,
-    prospectId: prospect.id,
-    action: "prospect.qualified",
-    detail: analysis.recommendedService,
-  });
+  if (slotId) {
+    await prisma.activityLog.updateMany({
+      where: { id: slotId, action: "qualification.slot" },
+      data: { action: "prospect.qualified", detail: analysis.recommendedService },
+    });
+  } else {
+    await recordActivity({
+      organizationId: prospect.organizationId,
+      campaignId: prospect.campaignId,
+      prospectId: prospect.id,
+      action: "prospect.qualified",
+      detail: analysis.recommendedService,
+    });
+  }
   logInfo("qualification.completed", { prospectId: prospect.id });
+  } catch (error) {
+    await releaseQualificationSlot(slotId);
+    throw error;
+  }
+}
+
+async function reserveQualificationSlot(prospect: {
+  id: string;
+  organizationId: string;
+  campaignId: string | null;
+  campaign: { dailyQualificationLimit: number } | null;
+}) {
+  const campaign = prospect.campaign;
+  if (!campaign || !prospect.campaignId) return null;
+  const campaignId = prospect.campaignId;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`qualification:${campaignId}`}))`;
+    const staleBefore = new Date(Date.now() - QUOTA_RESERVATION_STALE_MS);
+    await tx.activityLog.deleteMany({
+      where: { campaignId, action: "qualification.slot", createdAt: { lt: staleBefore } },
+    });
+    const start = new Date();
+    start.setUTCHours(0, 0, 0, 0);
+    const used = await tx.activityLog.count({
+      where: {
+        campaignId,
+        action: { in: ["qualification.slot", "prospect.qualified"] },
+        createdAt: { gte: start },
+      },
+    });
+    if (used >= campaign.dailyQualificationLimit) {
+      throw new AppError("The daily qualification quota has been reached.");
+    }
+    const row = await tx.activityLog.create({
+      data: {
+        organizationId: prospect.organizationId,
+        campaignId,
+        prospectId: prospect.id,
+        action: "qualification.slot",
+        detail: "Qualification slot reserved.",
+      },
+    });
+    return row.id;
+  });
+}
+
+async function releaseQualificationSlot(slotId: string | null) {
+  if (!slotId) return;
+  await prisma.activityLog.deleteMany({ where: { id: slotId, action: "qualification.slot" } });
 }
 
 function qualitativeValue(score: number) {

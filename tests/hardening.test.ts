@@ -8,7 +8,9 @@ import {
   webhookTimestampFresh,
 } from "@/lib/email/message-policy";
 import { qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
-import { ACTIVE_JOB_STALE_MS, jobDeliveryDecision, retryQueueJobId, shouldExecuteJob } from "@/lib/job-state";
+import { ACTIVE_JOB_STALE_MS, isPermanentJobError, jobDeliveryDecision, retryQueueJobId, shouldExecuteJob } from "@/lib/job-state";
+import { QUOTA_RESERVATION_STALE_MS, releasePendingReservation, researchQuotaDecision, reserveAgainstCap, takeDailySlots } from "@/lib/campaign-quota";
+import { webhookStateTransition } from "@/lib/email/message-policy";
 import { routePublicBrowserTraffic } from "@/lib/research/public-browser";
 import { isBlockedIp } from "@/lib/network";
 import { GMAIL_STATE_PURPOSE } from "@/lib/email/gmail";
@@ -57,6 +59,12 @@ describe("provider webhooks", () => {
     expect(providerEventWrite("email.opened")?.from.includes("REPLIED")).toBe(false);
     expect(providerEventWrite("email.bounced")?.from.includes("REPLIED")).toBe(false);
     expect(providerEventWrite("email.bounced")?.state).toBe("FAILED");
+    expect(webhookStateTransition("OPENED", "email.delivered")).toBe("OPENED");
+    expect(webhookStateTransition("REPLIED", "email.opened")).toBe("REPLIED");
+    expect(webhookStateTransition("FAILED", "email.delivered")).toBe("FAILED");
+    expect(webhookStateTransition("SENT", "email.delivered")).toBe("DELIVERED");
+    expect(webhookStateTransition("DELIVERED", "email.opened")).toBe("OPENED");
+    expect(webhookStateTransition("OPENED", "email.bounced")).toBe("FAILED");
   });
 
   it("attaches an inbound reply only when the sender matches one contact", () => {
@@ -91,7 +99,30 @@ describe("job retries and research targets", () => {
       maxAttempts: 3,
       startedAtMs: now - ACTIVE_JOB_STALE_MS,
       nowMs: now,
-    })).toBe("busy");
+    })).toBe("exhausted");
+    expect(isPermanentJobError("Job is already active.")).toBe(false);
+    expect(isPermanentJobError("Outreach sending is turned off. No email was sent.")).toBe(true);
+    expect(isPermanentJobError("The daily research limit has been reached.")).toBe(true);
+    expect(isPermanentJobError("The daily qualification quota has been reached.")).toBe(true);
+    expect(isPermanentJobError("The daily discovery limit has been reached.")).toBe(true);
+  });
+
+  it("reserves one daily slot at a time and releases a failed research hold", () => {
+    const now = 5_000_000;
+    const first = reserveAgainstCap([], ["byron", "remax"], 2, now);
+    expect(first.accepted).toEqual(["byron", "remax"]);
+    const raced = reserveAgainstCap(first.records, ["another"], 2, now);
+    expect(raced.accepted).toEqual([]);
+    let used = 1;
+    const claimed = takeDailySlots(used, 2, 1);
+    used = claimed.usedAfter;
+    expect(takeDailySlots(used, 2, 1).accepted).toBe(0);
+    const held = [{ prospectId: "byron", fetchMethod: "pending", createdAtMs: now }];
+    expect(researchQuotaDecision(held, 1, now)).toBe("stop");
+    const released = held.filter((record) => releasePendingReservation(record.fetchMethod) === "keep");
+    expect(researchQuotaDecision(released, 1, now)).toBe("allow");
+    expect(researchQuotaDecision([{ prospectId: "byron", fetchMethod: "pending", createdAtMs: now - QUOTA_RESERVATION_STALE_MS }], 1, now)).toBe("allow");
+    expect(releasePendingReservation("scrapy")).toBe("keep");
   });
 
   it("does not run a finished job again", () => {

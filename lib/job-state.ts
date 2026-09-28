@@ -14,8 +14,9 @@ export function jobDeliveryDecision(input: {
   if (input.state === "COMPLETED" || input.state === "CANCELLED") return "skip" as const;
   if (input.state === "ACTIVE") {
     const age = input.startedAtMs == null ? ACTIVE_JOB_STALE_MS : input.nowMs - input.startedAtMs;
-    if (age >= ACTIVE_JOB_STALE_MS && input.attempts < input.maxAttempts) return "reclaim" as const;
-    return "busy" as const;
+    if (age < ACTIVE_JOB_STALE_MS) return "busy" as const;
+    if (input.attempts >= input.maxAttempts) return "exhausted" as const;
+    return "reclaim" as const;
   }
   if (shouldExecuteJob(input.state, input.attempts, input.maxAttempts)) return "run" as const;
   return "skip" as const;
@@ -23,4 +24,10 @@ export function jobDeliveryDecision(input: {
 
 export function retryQueueJobId(jobId: string, attempts: number) {
   return `${jobId}:retry:${attempts}`;
+}
+
+const PERMANENT_JOB_ERROR = /not configured|stopped|blocked|denied|private network|not a public|quota|rate limit|limit has been reached|turned off|policy|restricted|credentials|did not return|malformed|no company results|not approved/i;
+
+export function isPermanentJobError(message: string) {
+  return PERMANENT_JOB_ERROR.test(message);
 }

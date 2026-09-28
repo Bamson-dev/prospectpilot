@@ -20,6 +20,12 @@ export function outreachSendDecision(state: string) {
   return "refuse" as const;
 }
 
+export function webhookStateTransition(current: string, type: string) {
+  const write = providerEventWrite(type);
+  if (!write || !write.from.includes(current as OutreachState)) return current;
+  return write.state;
+}
+
 export function providerEventWrite(type: string): { state: OutreachState; from: OutreachState[]; error: string | null } | null {
   if (type === "email.delivered") return { state: "DELIVERED", from: ["SENT"], error: null };
   if (type === "email.opened") return { state: "OPENED", from: ["SENT", "DELIVERED"], error: null };

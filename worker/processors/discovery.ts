@@ -83,7 +83,7 @@ async function collect(provider: DiscoveryProvider, query: string, limit: number
   }
 }
 
-async function storeHit(campaign: { id: string; organizationId: string; industry: string | null }, hit: DiscoveryHit) {
+async function storeHit(campaign: { id: string; organizationId: string; industry: string | null; dailyDiscoveryLimit: number }, hit: DiscoveryHit) {
   const listed = websiteFromUrl(hit.url);
   if (listed && AGGREGATORS.some((host) => listed.domain.includes(host))) {
     logInfo("discovery.result.skipped", { domain: listed.domain, reason: "aggregator" });
@@ -123,7 +123,7 @@ async function storeHit(campaign: { id: string; organizationId: string; industry
 }
 
 async function storeCompany(
-  campaign: { id: string; organizationId: string; industry: string | null },
+  campaign: { id: string; organizationId: string; industry: string | null; dailyDiscoveryLimit: number },
   hit: DiscoveryHit,
   website: { domain: string; website: string } | null,
   sourceUrl: string,
@@ -146,22 +146,33 @@ async function storeCompany(
       return false;
     }
   }
-  const prospect = await prisma.prospect.create({
-    data: {
-      organizationId: campaign.organizationId,
-      campaignId: campaign.id,
-      companyName: cleanCompanyName(hit.title) || hit.title.slice(0, 160),
-      domain: website?.domain,
-      website: website?.website ?? null,
-      industry: campaign.industry,
-      source: hit.sourceName,
-      sourceUrl: website?.website ?? sourceUrl,
-      description: hit.snippet || null,
-      discoveryStatus: "FOUND",
-      researchStatus: website ? "QUEUED" : "SKIPPED",
-      ...social,
-    },
+  const prospect = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`discovery:${campaign.id}`}))`;
+    const start = new Date();
+    start.setUTCHours(0, 0, 0, 0);
+    const used = await tx.prospect.count({ where: { campaignId: campaign.id, createdAt: { gte: start } } });
+    if (used >= campaign.dailyDiscoveryLimit) return null;
+    return tx.prospect.create({
+      data: {
+        organizationId: campaign.organizationId,
+        campaignId: campaign.id,
+        companyName: cleanCompanyName(hit.title) || hit.title.slice(0, 160),
+        domain: website?.domain,
+        website: website?.website ?? null,
+        industry: campaign.industry,
+        source: hit.sourceName,
+        sourceUrl: website?.website ?? sourceUrl,
+        description: hit.snippet || null,
+        discoveryStatus: "FOUND",
+        researchStatus: website ? "QUEUED" : "SKIPPED",
+        ...social,
+      },
+    });
   });
+  if (!prospect) {
+    logInfo("discovery.limit.reached", { campaignId: campaign.id });
+    return false;
+  }
   await remember(campaign, prospect.id, { ...hit, url: sourceUrl }, website ? 70 : 40);
   logInfo("discovery.company.normalized", { domain: website?.domain ?? null, prospectId: prospect.id });
   await recordActivity({

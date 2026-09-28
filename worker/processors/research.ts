@@ -8,6 +8,7 @@ import { extractPage, type PageSignals } from "@/lib/research/extract";
 import { crawlCompanySite, crawlHasEvidence } from "@/lib/research/crawl";
 import { socialLinks } from "@/lib/domains";
 import { logInfo } from "@/lib/logger";
+import { QUOTA_RESERVATION_STALE_MS } from "@/lib/campaign-quota";
 
 export async function processResearch(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({ where: { id: prospectId }, include: { campaign: true } });
@@ -22,6 +23,8 @@ export async function processResearch(prospectId: string) {
     campaignId: prospect.campaignId,
     campaign: prospect.campaign,
   });
+  let kept = false;
+  try {
   await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "IN_PROGRESS" } });
   logInfo("research.started", { prospectId: prospect.id, domain: prospect.domain });
   const crawl = prospect.domain
@@ -63,6 +66,7 @@ export async function processResearch(prospectId: string) {
         confidence: 70,
       },
     });
+    kept = true;
     await storeObservedContacts(prospect.organizationId, prospect.id, page?.url ?? prospect.website, {
       services: crawl.services,
       technology: crawl.technologySignals,
@@ -120,6 +124,7 @@ export async function processResearch(prospectId: string) {
         confidence: 0,
       },
     });
+    kept = true;
     await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "FAILED" } });
     await recordActivity({
       organizationId: prospect.organizationId,
@@ -154,8 +159,12 @@ export async function processResearch(prospectId: string) {
       confidence: extracted.excerpt.length > 280 ? 70 : 40,
     },
   });
+  kept = true;
   await storeObservedContacts(prospect.organizationId, prospect.id, finalUrl, extracted.signals);
   await finishResearch(prospect, method, finalUrl, extracted.metaDescription, extracted.signals.phones[0], extracted.signals.socialUrls);
+  } finally {
+    if (!kept) await releaseResearchSlot(slot.id);
+  }
 }
 
 async function finishResearch(
@@ -230,6 +239,10 @@ async function reserveResearchSlot(prospect: {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`research:${prospect.campaignId}`}))`;
       const start = new Date();
       start.setUTCHours(0, 0, 0, 0);
+      const staleBefore = new Date(Date.now() - QUOTA_RESERVATION_STALE_MS);
+      await tx.researchRecord.deleteMany({
+        where: { prospect: { campaignId: prospect.campaignId }, fetchMethod: "pending", createdAt: { lt: staleBefore } },
+      });
       const researched = await tx.researchRecord.count({
         where: { prospect: { campaignId: prospect.campaignId }, createdAt: { gte: start } },
       });
@@ -250,6 +263,10 @@ async function reserveResearchSlot(prospect: {
       },
     });
   });
+}
+
+async function releaseResearchSlot(id: string) {
+  await prisma.researchRecord.deleteMany({ where: { id, fetchMethod: "pending" } });
 }
 
 function emptySignals(): PageSignals {

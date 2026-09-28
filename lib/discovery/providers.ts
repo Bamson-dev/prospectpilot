@@ -1,4 +1,5 @@
 import { AppError } from "@/lib/errors";
+import { routePublicBrowserTraffic } from "@/lib/research/public-browser";
 import type { DiscoveryHit, DiscoveryInput, DiscoveryProvider, ProviderHealth } from "@/lib/discovery/types";
 import { parseSearxngResults, SearXNGProvider, searxngEnabled, searxngSearch } from "@/lib/discovery/searxng";
 
@@ -172,8 +173,10 @@ async function renderSearchPage(url: string) {
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const page = await context.newPage();
     page.setDefaultTimeout(15000);
+    await routePublicBrowserTraffic(page);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
     return await page.content();
   } finally {

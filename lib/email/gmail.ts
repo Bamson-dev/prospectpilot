@@ -91,6 +91,8 @@ export class GmailProvider implements EmailProvider {
   }
 }
 
+export const GMAIL_STATE_PURPOSE = "gmail-connect";
+
 export function gmailAuthUrl(state: string) {
   const clientId = process.env.GMAIL_CLIENT_ID;
   const redirectUri = process.env.GMAIL_REDIRECT_URI;

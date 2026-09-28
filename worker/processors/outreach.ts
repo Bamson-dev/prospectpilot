@@ -3,6 +3,7 @@ import { decryptSecret } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
 import { GmailProvider } from "@/lib/email/gmail";
 import { ResendProvider } from "@/lib/email/resend";
+import { outreachSendDecision } from "@/lib/email/message-policy";
 import { outreachSendingEnabled } from "@/lib/email/send-gate";
 import type { EmailProvider } from "@/lib/email/types";
 import { parseFollowUpSteps } from "@/lib/follow-ups";
@@ -15,8 +16,10 @@ export async function processOutreach(messageId: string) {
     include: { prospect: true, contact: true, campaign: { include: { emailAccount: true } } },
   });
   if (!message) throw new AppError("Outreach message was not found.");
+  const decision = outreachSendDecision(message.state);
+  if (decision === "already-sent" || decision === "do-not-resend") return;
+  if (decision === "refuse") throw new AppError("This message is not approved to send.");
   if (!outreachSendingEnabled()) throw new AppError("Outreach sending is turned off. No email was sent.");
-  if (message.state === "SENT" || message.state === "DELIVERED" || message.state === "REPLIED") return;
   if (!message.contact?.email) throw new AppError("The contact does not have an email address.");
   if (message.contact.suppressed) throw new AppError("This contact is suppressed.");
   const suppressed = await prisma.suppression.findUnique({
@@ -44,7 +47,11 @@ export async function processOutreach(messageId: string) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://leadpilot.live";
   const unsubscribe = await signUnsubscribeToken(message.contact.id);
   const text = `${message.body.trim()}\n\nIf you would rather not hear from us, use this link: ${appUrl}/unsubscribe?token=${unsubscribe}`;
-  await prisma.outreachMessage.update({ where: { id: message.id }, data: { state: "SENDING", error: null } });
+  const claim = await prisma.outreachMessage.updateMany({
+    where: { id: message.id, state: { in: ["APPROVED", "QUEUED"] } },
+    data: { state: "SENDING", error: null },
+  });
+  if (claim.count !== 1) return;
   try {
     const result = await provider.sendEmail({
       to: message.contact.email,
@@ -53,8 +60,8 @@ export async function processOutreach(messageId: string) {
       subject: message.subject,
       text,
     });
-    await prisma.outreachMessage.update({
-      where: { id: message.id },
+    const sent = await prisma.outreachMessage.updateMany({
+      where: { id: message.id, state: "SENDING" },
       data: {
         state: "SENT",
         provider: account.provider,
@@ -63,6 +70,7 @@ export async function processOutreach(messageId: string) {
         error: null,
       },
     });
+    if (sent.count !== 1) return;
     await prisma.prospect.update({ where: { id: message.prospectId }, data: { outreachState: "SENT" } });
     await createFollowUps(message.campaign.id, message.organizationId, message.prospectId, message.id, message.campaign.autoFollowUp, message.campaign.followUpSteps);
     await recordActivity({
@@ -74,8 +82,8 @@ export async function processOutreach(messageId: string) {
     });
   } catch (error) {
     const permanent = error instanceof Error && error.name === "PermanentProviderError";
-    await prisma.outreachMessage.update({
-      where: { id: message.id },
+    await prisma.outreachMessage.updateMany({
+      where: { id: message.id, state: "SENDING" },
       data: { state: "FAILED", error: error instanceof Error ? error.message.slice(0, 300) : "Send failed" },
     });
     await prisma.prospect.update({ where: { id: message.prospectId }, data: { outreachState: "FAILED" } });

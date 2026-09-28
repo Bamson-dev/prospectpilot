@@ -32,8 +32,15 @@ export function qualificationEvidence(input: {
     .join("\n");
 }
 
-export function shouldStoreQualificationDraft(state: string | null | undefined) {
-  return state !== "DRAFT" && state !== "PENDING_APPROVAL";
+export function shouldStoreQualificationDraft(states: Array<string | null | undefined>) {
+  return !states.some((state) => Boolean(state) && state !== "CANCELLED");
+}
+
+export function qualificationWritePlan(input: { qualificationStatus: string; assessmentCount: number; messageStates: string[] }) {
+  const hasEvidence = input.assessmentCount >= 3;
+  const hasOutreach = input.messageStates.some((state) => state !== "CANCELLED");
+  if (input.qualificationStatus === "QUALIFIED" && hasEvidence && hasOutreach) return "skip" as const;
+  return "write" as const;
 }
 
 export function analysisRetryDecision(attempt: number, message: string) {

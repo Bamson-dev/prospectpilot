@@ -5,6 +5,7 @@ import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
 import { errorMessage } from "@/lib/errors";
 import { recordActivity } from "@/lib/jobs";
+import { retryQueueJobId } from "@/lib/job-state";
 import { enqueue, QUEUE_NAMES, type QueueName } from "@/lib/queues";
 
 export async function retryJob(formData: FormData) {
@@ -21,9 +22,13 @@ export async function retryJob(formData: FormData) {
       if (typeof value === "string") extra[key] = value;
     }
   }
+  const claim = await prisma.backgroundJob.updateMany({
+    where: { id, organizationId: organization.id, state: "FAILED", attempts: job.attempts },
+    data: { state: "QUEUED", error: null, finishedAt: null },
+  });
+  if (claim.count !== 1) redirect("/settings/jobs?error=This+job+changed+before+it+could+be+retried.");
   try {
-    await prisma.backgroundJob.update({ where: { id }, data: { state: "QUEUED", error: null, finishedAt: null } });
-    await enqueue(job.queue as QueueName, job.id, {
+    await enqueue(job.queue as QueueName, retryQueueJobId(job.id, job.attempts), {
       jobId: job.id,
       organizationId: organization.id,
       campaignId: job.campaignId ?? "",
@@ -31,8 +36,8 @@ export async function retryJob(formData: FormData) {
       ...extra,
     });
   } catch (error) {
-    await prisma.backgroundJob.update({
-      where: { id },
+    await prisma.backgroundJob.updateMany({
+      where: { id, organizationId: organization.id, state: "QUEUED", attempts: job.attempts },
       data: { state: "FAILED", error: "Redis queue is unavailable.", finishedAt: new Date() },
     });
     redirect(`/settings/jobs?error=${encodeURIComponent(errorMessage(error))}`);

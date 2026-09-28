@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 import { encryptSecret } from "@/lib/crypto";
+import { GMAIL_STATE_PURPOSE } from "@/lib/email/gmail";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,11 @@ export async function GET(request: Request) {
   if (!code || !state || !secret) return NextResponse.redirect(new URL("/integrations?error=Gmail+connection+was+not+completed.", appUrl));
   try {
     const verified = await jwtVerify(state, new TextEncoder().encode(secret));
+    if (verified.payload.purpose !== GMAIL_STATE_PURPOSE) {
+      return NextResponse.redirect(new URL("/integrations?error=Gmail+connection+was+not+completed.", appUrl));
+    }
     const organizationId = String(verified.payload.organizationId || "");
+    if (!organizationId) return NextResponse.redirect(new URL("/integrations?error=Gmail+connection+was+not+completed.", appUrl));
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

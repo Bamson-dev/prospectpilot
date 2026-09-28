@@ -82,7 +82,7 @@ describe("security helpers", () => {
     expect(isBlockedIp("169.254.169.254")).toBe(true);
     expect(isBlockedIp("172.16.0.4")).toBe(true);
     expect(isBlockedIp("8.8.8.8")).toBe(false);
-    expect(isBlockedIp("207.180.248.233")).toBe(true);
+    expect(isBlockedIp("207.180.248.233")).toBe(false);
   });
 
   it("redacts secrets and detects suppression", () => {

@@ -3,12 +3,16 @@
 import { redirect } from "next/navigation";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
+import { canApproveOutreach, canDismissOutreach } from "@/lib/email/message-policy";
 import { outreachSendingEnabled } from "@/lib/email/send-gate";
 import { AppError, errorMessage } from "@/lib/errors";
 import { queueJob, recordActivity } from "@/lib/jobs";
 
 async function ownedMessage(id: string, organizationId: string) {
-  const message = await prisma.outreachMessage.findFirst({ where: { id, organizationId } });
+  const message = await prisma.outreachMessage.findFirst({
+    where: { id, organizationId },
+    include: { campaign: true },
+  });
   if (!message) throw new AppError("Message not found.");
   return message;
 }
@@ -18,19 +22,30 @@ export async function approveOutreach(formData: FormData) {
   const id = String(formData.get("id"));
   try {
     const message = await ownedMessage(id, organization.id);
+    if (!canApproveOutreach(message.state)) throw new AppError("Only a message waiting for approval can be approved.");
+    const sending = outreachSendingEnabled();
+    if (sending && (!message.campaign || message.campaign.status === "PAUSED" || message.campaign.status === "ARCHIVED")) {
+      throw new AppError("The campaign is not allowed to send.");
+    }
     const contact = message.contactId
       ? await prisma.contact.findFirst({ where: { id: message.contactId, organizationId: organization.id } })
       : null;
     if (contact?.suppressed || (contact?.email && await prisma.suppression.findUnique({ where: { organizationId_email: { organizationId: organization.id, email: contact.email } } }))) {
-      await prisma.outreachMessage.update({ where: { id }, data: { state: "SUPPRESSED", error: "Suppressed before sending." } });
+      await prisma.outreachMessage.updateMany({
+        where: { id, organizationId: organization.id, state: "PENDING_APPROVAL" },
+        data: { state: "SUPPRESSED", error: "Suppressed before sending." },
+      });
       throw new AppError("This contact is suppressed and cannot enter the outreach queue.");
     }
     const subject = String(formData.get("subject") ?? message.subject).trim().slice(0, 160);
     const body = String(formData.get("body") ?? message.body).trim().slice(0, 4000);
     if (!subject || !body) throw new AppError("Subject and body are required.");
     if (!contact?.email) throw new AppError("Add a contact email before this message can be approved.");
-    const sending = outreachSendingEnabled();
-    await prisma.outreachMessage.update({ where: { id }, data: { subject, body, state: "APPROVED" } });
+    const approval = await prisma.outreachMessage.updateMany({
+      where: { id, organizationId: organization.id, state: "PENDING_APPROVAL" },
+      data: { subject, body, state: "APPROVED" },
+    });
+    if (approval.count !== 1) throw new AppError("This message changed before it could be approved.");
     await prisma.prospect.update({
       where: { id: message.prospectId },
       data: { qualificationStatus: "APPROVED", outreachState: sending ? "QUEUED" : "APPROVED" },
@@ -67,7 +82,9 @@ export async function rejectOutreach(formData: FormData) {
   const id = String(formData.get("id"));
   const message = await prisma.outreachMessage.findFirst({ where: { id, organizationId: organization.id } });
   if (!message) redirect("/outreach?error=Message+not+found.");
-  await prisma.outreachMessage.update({ where: { id }, data: { state: "CANCELLED", error: "Rejected by a reviewer." } });
+  if (!canDismissOutreach(message.state)) redirect("/outreach?error=A+sent+message+cannot+be+rejected.");
+  const dismissal = await prisma.outreachMessage.updateMany({ where: { id, organizationId: organization.id, state: message.state }, data: { state: "CANCELLED", error: "Rejected by a reviewer." } });
+  if (dismissal.count !== 1) redirect("/outreach?error=This+message+changed+before+it+could+be+rejected.");
   await prisma.prospect.update({ where: { id: message.prospectId }, data: { qualificationStatus: "REJECTED", outreachState: "CANCELLED" } });
   await recordActivity({ organizationId: organization.id, prospectId: message.prospectId, action: "outreach.rejected" });
   redirect("/outreach?notice=Prospect+rejected.");
@@ -78,7 +95,9 @@ export async function skipOutreach(formData: FormData) {
   const id = String(formData.get("id"));
   const message = await prisma.outreachMessage.findFirst({ where: { id, organizationId: organization.id } });
   if (!message) redirect("/outreach?error=Message+not+found.");
-  await prisma.outreachMessage.update({ where: { id }, data: { state: "DRAFT" } });
+  if (!canDismissOutreach(message.state)) redirect("/outreach?error=A+sent+message+cannot+be+skipped.");
+  const dismissal = await prisma.outreachMessage.updateMany({ where: { id, organizationId: organization.id, state: message.state }, data: { state: "DRAFT" } });
+  if (dismissal.count !== 1) redirect("/outreach?error=This+message+changed+before+it+could+be+skipped.");
   await prisma.prospect.update({ where: { id: message.prospectId }, data: { qualificationStatus: "SKIPPED", outreachState: "DRAFT" } });
   redirect("/outreach?notice=Skipped.");
 }

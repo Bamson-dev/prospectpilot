@@ -10,6 +10,8 @@ import scrapy
 from scrapy import signals
 from scrapy.crawler import CrawlerProcess
 
+from pin import PinPublicDestinationMiddleware, install_pinned_resolver
+
 EMAIL = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
 PHONE = re.compile(r"(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)\d{3,4}[\s.-]\d{3,4}")
 INTEREST = ("about", "service", "product", "solution", "contact", "team", "pricing", "case", "portfolio", "blog", "career")
@@ -54,6 +56,9 @@ class CompanySpider(scrapy.Spider):
         "TELNETCONSOLE_ENABLED": False,
         "COOKIES_ENABLED": False,
         "REDIRECT_MAX_TIMES": 3,
+        "DOWNLOADER_MIDDLEWARES": {
+            PinPublicDestinationMiddleware: 50,
+        },
     }
 
     def __init__(self, start_url, allowed, max_pages, max_depth, *args, **kwargs):
@@ -62,6 +67,7 @@ class CompanySpider(scrapy.Spider):
         self.allowed_domains = [allowed]
         self.max_pages = max_pages
         self.max_depth = max_depth
+        self.result_note = {"value": ""}
 
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
@@ -84,7 +90,9 @@ class CompanySpider(scrapy.Spider):
             "phonesFound": len(RESULT["phones"]),
             "socialLinksFound": len(RESULT["socialProfiles"]),
         }
-        if forbidden:
+        if spider.result_note.get("value") == "private-network":
+            RESULT["note"] = "private-network"
+        elif forbidden:
             RESULT["note"] = "robots"
         elif RESULT["metrics"]["http403"]:
             RESULT["note"] = "http-403"
@@ -173,6 +181,7 @@ def main():
     out_path = sys.argv[2]
     domain = job["domain"].lower().removeprefix("www.")
     RESULT["domain"] = domain
+    install_pinned_resolver()
     process = CrawlerProcess(settings={"USER_AGENT": "ProspectPilotResearch/1.0 (+https://leadpilot.live)", "CLOSESPIDER_PAGECOUNT": int(job["maxPages"])})
     process.crawl(CompanySpider, start_url=job["website"], allowed=domain, max_pages=int(job["maxPages"]), max_depth=int(job["maxDepth"]))
     process.start()

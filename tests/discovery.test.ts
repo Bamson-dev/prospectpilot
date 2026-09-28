@@ -95,9 +95,11 @@ describe("discovery providers", () => {
     expect(companyAnalysisPrompt("evidence")[1]?.content).toContain("maximum 400 characters");
     expect(analysisRetryDecision(0, "String must contain at most 400 character(s)")).toBe("retry");
     expect(analysisRetryDecision(1, "String must contain at most 400 character(s)")).toBe("fail");
-    expect(shouldStoreQualificationDraft("DRAFT")).toBe(false);
-    expect(shouldStoreQualificationDraft("PENDING_APPROVAL")).toBe(false);
-    expect(shouldStoreQualificationDraft(null)).toBe(true);
+    expect(shouldStoreQualificationDraft(["DRAFT"])).toBe(false);
+    expect(shouldStoreQualificationDraft(["PENDING_APPROVAL"])).toBe(false);
+    expect(shouldStoreQualificationDraft(["SENT"])).toBe(false);
+    expect(shouldStoreQualificationDraft(["CANCELLED"])).toBe(true);
+    expect(shouldStoreQualificationDraft([])).toBe(true);
   });
 
   it("labels page research separately from a blocked or snippet-only result", () => {

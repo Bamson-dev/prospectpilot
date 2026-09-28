@@ -65,6 +65,14 @@ export async function createCampaign(formData: FormData) {
     followUps: optional(formData.get("followUps")),
   });
   if (!parsed.success) redirect(`/campaigns/new?error=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Check the campaign.")}`);
+  let emailAccountId: string | null = null;
+  if (parsed.data.emailAccountId) {
+    const account = await prisma.emailAccount.findFirst({
+      where: { id: parsed.data.emailAccountId, organizationId: organization.id },
+    });
+    if (!account) redirect("/campaigns/new?error=That+sender+is+not+in+this+workspace.");
+    emailAccountId = account.id;
+  }
   const campaign = await prisma.campaign.create({
     data: {
       organizationId: organization.id,
@@ -88,7 +96,7 @@ export async function createCampaign(formData: FormData) {
       enableMap: parsed.data.enableMap,
       enableSocial: parsed.data.enableSocial,
       provider: parsed.data.provider ? parsed.data.provider : null,
-      emailAccountId: parsed.data.emailAccountId || null,
+      emailAccountId,
       followUpSteps: stepsFromText(parsed.data.followUps || "3,7,14"),
       requireApproval: true,
       autoFollowUp: false,

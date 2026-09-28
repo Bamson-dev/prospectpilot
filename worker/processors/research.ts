@@ -1,14 +1,13 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { queueJob, recordActivity } from "@/lib/jobs";
-import { assertResolvedPublicUrl } from "@/lib/network";
+import { fetchPublic } from "@/lib/network";
+import { routePublicBrowserTraffic } from "@/lib/research/public-browser";
 import { httpStatusFromError, pageAccessBlocked, shouldUsePlaywright } from "@/lib/research/browser-decision";
 import { extractPage, type PageSignals } from "@/lib/research/extract";
 import { crawlCompanySite, crawlHasEvidence } from "@/lib/research/crawl";
 import { socialLinks } from "@/lib/domains";
 import { logInfo } from "@/lib/logger";
-
-const MAX_REDIRECTS = 3;
 
 export async function processResearch(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({ where: { id: prospectId }, include: { campaign: true } });
@@ -17,16 +16,12 @@ export async function processResearch(prospectId: string) {
     await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "SKIPPED" } });
     throw new AppError("This prospect has no public website to research.");
   }
-  if (prospect.campaign) {
-    const start = new Date();
-    start.setUTCHours(0, 0, 0, 0);
-    const researched = await prisma.researchRecord.count({
-      where: { prospect: { campaignId: prospect.campaignId }, createdAt: { gte: start } },
-    });
-    if (researched >= prospect.campaign.dailyResearchLimit) {
-      throw new AppError("The daily research limit has been reached.");
-    }
-  }
+  const slot = await reserveResearchSlot({
+    id: prospect.id,
+    website: prospect.website,
+    campaignId: prospect.campaignId,
+    campaign: prospect.campaign,
+  });
   await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "IN_PROGRESS" } });
   logInfo("research.started", { prospectId: prospect.id, domain: prospect.domain });
   const crawl = prospect.domain
@@ -39,9 +34,9 @@ export async function processResearch(prospectId: string) {
     : null;
   if (crawl && crawlHasEvidence(crawl)) {
     const page = crawl.pages.find((item) => (item.text ?? "").length >= 280) ?? crawl.pages[0];
-    await prisma.researchRecord.create({
+    await prisma.researchRecord.update({
+      where: { id: slot.id },
       data: {
-        prospectId: prospect.id,
         url: page?.url ?? prospect.website,
         fetchMethod: "scrapy",
         title: page?.title || crawl.companyName || null,
@@ -113,9 +108,9 @@ export async function processResearch(prospectId: string) {
     }
   }
   if (method !== "playwright" && (!html || pageAccessBlocked({ status: httpStatus, html }))) {
-    await prisma.researchRecord.create({
+    await prisma.researchRecord.update({
+      where: { id: slot.id },
       data: {
-        prospectId: prospect.id,
         url: finalUrl,
         fetchMethod: "blocked",
         excerpt: "",
@@ -136,9 +131,9 @@ export async function processResearch(prospectId: string) {
     return;
   }
   const extracted = extractPage(html, finalUrl);
-  await prisma.researchRecord.create({
+  await prisma.researchRecord.update({
+    where: { id: slot.id },
     data: {
-      prospectId: prospect.id,
       url: finalUrl,
       fetchMethod: method,
       title: extracted.title,
@@ -200,38 +195,61 @@ async function finishResearch(
   });
 }
 
-async function fetchPublicHtml(input: string, hops = 0): Promise<{ url: string; html: string }> {
-  if (hops > MAX_REDIRECTS) throw new AppError("The website redirected too many times.");
-  const url = await assertResolvedPublicUrl(input);
-  const response = await fetch(url, {
-    redirect: "manual",
-    signal: AbortSignal.timeout(12000),
-    headers: { "User-Agent": "ProspectPilotResearch/0.1", Accept: "text/html" },
-  });
-  if (response.status >= 300 && response.status < 400) {
-    const location = response.headers.get("location");
-    if (!location) throw new AppError("The website redirected without a destination.");
-    return fetchPublicHtml(new URL(location, url).toString(), hops + 1);
-  }
-  if (!response.ok) throw new AppError(`The website returned status ${response.status}.`);
-  const type = response.headers.get("content-type") ?? "";
+async function fetchPublicHtml(input: string): Promise<{ url: string; html: string }> {
+  const response = await fetchPublic(input);
+  if (response.status < 200 || response.status >= 300) throw new AppError(`The website returned status ${response.status}.`);
+  const type = response.headers["content-type"] ?? "";
   if (!type.includes("text/html") && !type.includes("text/plain") && type) {
     throw new AppError("The website did not return an HTML page.");
   }
-  return { url: url.toString(), html: await response.text() };
+  return { url: response.url, html: response.body.toString("utf8") };
 }
 
 async function renderWithPlaywright(url: string) {
-  await assertResolvedPublicUrl(url);
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const page = await context.newPage();
+    await routePublicBrowserTraffic(page);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
     return await page.content();
   } finally {
     await browser.close();
   }
+}
+
+async function reserveResearchSlot(prospect: {
+  id: string;
+  website: string;
+  campaignId: string | null;
+  campaign: { dailyResearchLimit: number } | null;
+}) {
+  return prisma.$transaction(async (tx) => {
+    if (prospect.campaign && prospect.campaignId) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`research:${prospect.campaignId}`}))`;
+      const start = new Date();
+      start.setUTCHours(0, 0, 0, 0);
+      const researched = await tx.researchRecord.count({
+        where: { prospect: { campaignId: prospect.campaignId }, createdAt: { gte: start } },
+      });
+      if (researched >= prospect.campaign.dailyResearchLimit) {
+        throw new AppError("The daily research limit has been reached.");
+      }
+    }
+    return tx.researchRecord.create({
+      data: {
+        prospectId: prospect.id,
+        url: prospect.website,
+        fetchMethod: "pending",
+        excerpt: "",
+        headings: [],
+        signals: { note: "Research slot reserved." },
+        sourceType: "website",
+        confidence: 0,
+      },
+    });
+  });
 }
 
 function emptySignals(): PageSignals {
@@ -240,19 +258,23 @@ function emptySignals(): PageSignals {
 
 async function storeObservedContacts(organizationId: string, prospectId: string, sourceUrl: string, signals: PageSignals) {
   const generic = /^(info|hello|contact|sales|admin|support|office|enquiries|inquiries)@/i;
-  for (const [index, email] of signals.emails.entries()) {
-    const existing = await prisma.contact.findFirst({ where: { prospectId, email } });
-    if (existing) continue;
-    await prisma.contact.create({
-      data: {
-        organizationId,
-        prospectId,
-        email,
-        source: "website",
-        sourceUrl,
-        confidence: generic.test(email) ? 45 : 30,
-        isPrimary: index === 0,
-      },
-    });
-  }
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${prospectId}))`;
+    for (const [index, email] of signals.emails.entries()) {
+      const existing = await tx.contact.findFirst({ where: { prospectId, email } });
+      if (existing) continue;
+      const primary = await tx.contact.findFirst({ where: { prospectId, isPrimary: true }, select: { id: true } });
+      await tx.contact.create({
+        data: {
+          organizationId,
+          prospectId,
+          email,
+          source: "website",
+          sourceUrl,
+          confidence: generic.test(email) ? 45 : 30,
+          isPrimary: index === 0 && !primary,
+        },
+      });
+    }
+  });
 }

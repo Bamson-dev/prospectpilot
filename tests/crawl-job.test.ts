@@ -1,8 +1,10 @@
 import { createServer, type Server } from "node:http";
 import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { crawlCompanySite, crawlHasEvidence } from "@/lib/research/crawl";
+import { crawlCompanySite } from "@/lib/research/crawl";
 import { extractPage } from "@/lib/research/extract";
+import { routePublicBrowserTraffic } from "@/lib/research/public-browser";
 
 const python = process.env.CRAWLER_PYTHON || "/tmp/pp-crawl-venv/bin/python";
 const scrapyReady = existsSync(python);
@@ -44,38 +46,66 @@ describe("scrapy crawl job", () => {
     await Promise.all([close(allowed), close(blocked)]);
   });
 
-  it.skipIf(!scrapyReady)("extracts a public page and records crawl counts", async () => {
+  it.skipIf(!scrapyReady)("does not open a socket to a loopback address", async () => {
+    let connections = 0;
+    allowed.on("connection", () => {
+      connections += 1;
+    });
     const result = await crawlCompanySite({
       website: `http://127.0.0.1:${allowedPort}/`,
       domain: "127.0.0.1",
       maxPages: 2,
       maxDepth: 1,
     });
-    expect(result?.pages.length).toBeGreaterThan(0);
-    expect(crawlHasEvidence(result!)).toBe(true);
-    expect(result?.metrics?.urlsRequested).toBeGreaterThan(0);
-    expect(result?.metrics?.responsesReceived).toBeGreaterThan(0);
-    expect(result?.metrics?.pagesExtracted).toBe(result?.pages.length);
-    expect(result?.emails.some((item) => item.value === "sales@vered.co.za")).toBe(true);
-    expect((result?.metrics?.emailsFound ?? 0)).toBeGreaterThan(0);
-    expect((result?.metrics?.phonesFound ?? 0)).toBeGreaterThan(0);
-    expect((result?.metrics?.socialLinksFound ?? 0)).toBeGreaterThan(0);
-    expect(result?.note).not.toBe("");
+    expect(connections).toBe(0);
+    expect(result?.pages).toEqual([]);
+    expect(result?.note).toBe("private-network");
+    expect(result?.metrics?.urlsRequested).toBe(0);
+    expect(result?.metrics?.responsesReceived).toBe(0);
   }, 30000);
 
-  it.skipIf(!scrapyReady)("records HTTP 403 without saving the page", async () => {
+  it.skipIf(!scrapyReady)("does not open a socket when the loopback target returns 403", async () => {
+    let connections = 0;
+    blocked.on("connection", () => {
+      connections += 1;
+    });
     const result = await crawlCompanySite({
       website: `http://127.0.0.1:${blockedPort}/`,
       domain: "127.0.0.1",
       maxPages: 2,
       maxDepth: 1,
     });
+    expect(connections).toBe(0);
     expect(result?.pages).toEqual([]);
-    expect(result?.metrics?.http403).toBeGreaterThan(0);
-    expect(result?.metrics?.pagesFailed).toBeGreaterThan(0);
-    expect(result?.metrics?.urlsRequested).toBeGreaterThan(0);
-    expect(result?.note).toBe("http-403");
+    expect(result?.note).toBe("private-network");
   }, 30000);
+});
+
+describe("scrapy response parsing", () => {
+  it.skipIf(!scrapyReady)("extracts evidence from usable HTML and counts a forbidden response", () => {
+    const script = `
+import json
+import run as crawler
+from scrapy.http import HtmlResponse, Request
+crawler.RESULT = {"domain":"vered.co.za","pages":[],"emails":[],"phones":[],"socialProfiles":[],"companyName":"","description":"","services":[],"technologySignals":[],"advertisingSignals":[],"contactPages":[],"teamPages":[],"note":"","metrics":{"pagesFailed":0,"http403":0}}
+spider = crawler.CompanySpider("https://vered.co.za/", "vered.co.za", 2, 1)
+html = b'<html><head><title>Vered Properties</title><meta name="description" content="Johannesburg estate agency"></head><body><p>Vered Properties provides real estate services in Johannesburg. Email sales@vered.co.za or call +27 11 555 0199.</p><a href="https://www.linkedin.com/company/vered">LinkedIn</a></body></html>'
+request = Request("https://vered.co.za/")
+list(spider.parse(HtmlResponse(request.url, request=request, body=html, encoding="utf-8")))
+forbidden = HtmlResponse(request.url, request=request, body=b"Forbidden", status=403, encoding="utf-8")
+list(spider.parse(forbidden))
+print(json.dumps({"pages":crawler.RESULT["pages"],"emails":crawler.RESULT["emails"],"phones":crawler.RESULT["phones"],"social":crawler.RESULT["socialProfiles"],"failed":crawler.RESULT["metrics"]["pagesFailed"],"http403":crawler.RESULT["metrics"]["http403"]}))
+`;
+    const output = execFileSync(python, ["-c", script], { cwd: "crawler", encoding: "utf8" });
+    const parsed = JSON.parse(output) as { pages: Array<{ text: string }>; emails: Array<{ value: string }>; phones: Array<{ value: string }>; social: Array<{ url: string }>; failed: number; http403: number };
+    expect(parsed.pages).toHaveLength(1);
+    expect(parsed.pages[0]?.text).toContain("Johannesburg");
+    expect(parsed.emails[0]?.value).toBe("sales@vered.co.za");
+    expect(parsed.phones.length).toBeGreaterThan(0);
+    expect(parsed.social[0]?.url).toContain("linkedin.com/company/vered");
+    expect(parsed.failed).toBe(1);
+    expect(parsed.http403).toBe(1);
+  });
 });
 
 describe("playwright rendered page", () => {
@@ -103,6 +133,24 @@ describe("playwright rendered page", () => {
     } finally {
       await browser.close();
       await close(server);
+    }
+  }, 30000);
+
+  it("routes every subresource through the public fetch gate", async () => {
+    const browser = await launchChromium();
+    const page = await browser.newPage();
+    const requested: string[] = [];
+    try {
+      await routePublicBrowserTraffic(page, async (url) => {
+        requested.push(url);
+        throw new Error("private target blocked");
+      });
+      await page.setContent('<img src="http://intranet.example/private.png">');
+      await page.waitForFunction(() => document.querySelector("img")?.complete === true);
+      expect(requested).toContain("http://intranet.example/private.png");
+      expect(await page.locator("img").evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(0);
+    } finally {
+      await browser.close();
     }
   }, 30000);
 });

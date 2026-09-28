@@ -9,7 +9,7 @@ import { crawlCompanySite, crawlHasEvidence } from "@/lib/research/crawl";
 import { socialLinks } from "@/lib/domains";
 import { logInfo } from "@/lib/logger";
 import { QUOTA_LEASE_MS } from "@/lib/campaign-quota";
-import { JOB_HEARTBEAT_MS } from "@/lib/job-state";
+import { watchLease } from "@/lib/independent-heartbeat";
 
 export async function processResearch(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({ where: { id: prospectId }, include: { campaign: true } });
@@ -25,9 +25,7 @@ export async function processResearch(prospectId: string) {
     campaign: prospect.campaign,
   });
   let kept = false;
-  const lease = setInterval(() => {
-    void refreshResearchLease(slot.id).catch(() => undefined);
-  }, JOB_HEARTBEAT_MS);
+  const stopLease = watchLease({ kind: "research", id: slot.id }, () => refreshResearchLease(slot.id));
   try {
   await prisma.prospect.update({ where: { id: prospect.id }, data: { researchStatus: "IN_PROGRESS" } });
   logInfo("research.started", { prospectId: prospect.id, domain: prospect.domain });
@@ -167,7 +165,7 @@ export async function processResearch(prospectId: string) {
   await storeObservedContacts(prospect.organizationId, prospect.id, finalUrl, extracted.signals);
   await finishResearch(prospect, method, finalUrl, extracted.metaDescription, extracted.signals.phones[0], extracted.signals.socialUrls);
   } finally {
-    clearInterval(lease);
+    stopLease();
     if (!kept) await releaseResearchSlot(slot.id);
   }
 }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { OutreachState } from "@prisma/client";
 
 const DISMISSABLE = new Set(["DRAFT", "PENDING_APPROVAL", "APPROVED", "QUEUED", "SCHEDULED"]);
@@ -56,8 +57,23 @@ export function inboundReplyDecision(existingIds: string[], eventId: string) {
   return "store" as const;
 }
 
-export function prospectOutreachAfterBounce(current: string) {
-  const write = providerEventWrite("email.bounced");
+export function prospectOutreachAfterProviderEvent(current: string, type: string) {
+  const write = providerEventWrite(type);
   if (!write || !write.from.includes(current as OutreachState)) return current;
   return write.state;
+}
+
+export function prospectOutreachAfterBounce(current: string) {
+  return prospectOutreachAfterProviderEvent(current, "email.bounced");
+}
+
+export function classifyJobId(replyId: string) {
+  const digest = createHash("sha256").update(replyId).digest("hex").slice(0, 32);
+  return `classify_${digest}`;
+}
+
+export function replyWorkDecision(classification: string, suppression: boolean) {
+  if (suppression) return "suppress" as const;
+  if (classification === "UNCLASSIFIED") return "classify" as const;
+  return "skip" as const;
 }

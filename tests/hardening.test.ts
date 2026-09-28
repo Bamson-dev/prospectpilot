@@ -8,9 +8,9 @@ import {
   webhookTimestampFresh,
 } from "@/lib/email/message-policy";
 import { qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
-import { ACTIVE_JOB_STALE_MS, isPermanentJobError, JOB_HEARTBEAT_MS, jobDeliveryDecision, retryQueueJobId, shouldExecuteJob } from "@/lib/job-state";
+import { ACTIVE_JOB_STALE_MS, claimAfterIndependentHeartbeats, isPermanentJobError, JOB_HEARTBEAT_MS, jobDeliveryDecision, retryQueueJobId, shouldExecuteJob } from "@/lib/job-state";
 import { QUOTA_LEASE_MS, releasePendingReservation, researchQuotaDecision, reserveAgainstCap, takeDailySlots } from "@/lib/campaign-quota";
-import { inboundReplyDecision, inboundReplyId, prospectOutreachAfterBounce, webhookStateTransition } from "@/lib/email/message-policy";
+import { classifyJobId, inboundReplyDecision, inboundReplyId, prospectOutreachAfterBounce, prospectOutreachAfterProviderEvent, replyWorkDecision, webhookStateTransition } from "@/lib/email/message-policy";
 import { routePublicBrowserTraffic } from "@/lib/research/public-browser";
 import { isBlockedIp } from "@/lib/network";
 import { GMAIL_STATE_PURPOSE } from "@/lib/email/gmail";
@@ -69,7 +69,22 @@ describe("provider webhooks", () => {
     expect(prospectOutreachAfterBounce("SENT")).toBe("FAILED");
     expect(prospectOutreachAfterBounce("REPLIED")).toBe("REPLIED");
     expect(prospectOutreachAfterBounce("DRAFT")).toBe("DRAFT");
+    expect(prospectOutreachAfterProviderEvent("SENT", "email.delivered")).toBe("DELIVERED");
+    expect(prospectOutreachAfterProviderEvent("DELIVERED", "email.opened")).toBe("OPENED");
+    expect(prospectOutreachAfterProviderEvent("SENT", "email.opened")).toBe("OPENED");
+    expect(prospectOutreachAfterProviderEvent("REPLIED", "email.opened")).toBe("REPLIED");
+    expect(prospectOutreachAfterProviderEvent("OPENED", "email.delivered")).toBe("OPENED");
+    expect(prospectOutreachAfterProviderEvent("FAILED", "email.delivered")).toBe("FAILED");
+    expect(prospectOutreachAfterProviderEvent("SUPPRESSED", "email.opened")).toBe("SUPPRESSED");
     const eventId = "msg_123";
+    const replyId = inboundReplyId(eventId);
+    expect(classifyJobId(replyId)).toBe(classifyJobId(replyId));
+    expect(classifyJobId(replyId)).not.toBe(classifyJobId(inboundReplyId("msg_other")));
+    expect(classifyJobId(replyId).includes(":")).toBe(false);
+    expect(replyWorkDecision("UNCLASSIFIED", false)).toBe("classify");
+    expect(replyWorkDecision("INTERESTED", false)).toBe("skip");
+    expect(replyWorkDecision("UNSUBSCRIBE", true)).toBe("suppress");
+    expect(replyWorkDecision("UNCLASSIFIED", true)).toBe("suppress");
     expect(inboundReplyDecision([], eventId)).toBe("store");
     expect(inboundReplyDecision([inboundReplyId(eventId)], eventId)).toBe("duplicate");
     expect(inboundReplyDecision([inboundReplyId("msg_other")], eventId)).toBe("store");
@@ -115,7 +130,10 @@ describe("job retries and research targets", () => {
       startedAtMs: now - JOB_HEARTBEAT_MS,
       nowMs: now,
     })).toBe("busy");
-    expect(JOB_HEARTBEAT_MS < ACTIVE_JOB_STALE_MS).toBe(true);
+    expect(JOB_HEARTBEAT_MS * 2 < ACTIVE_JOB_STALE_MS).toBe(true);
+    const claimedAt = now - 50_000;
+    expect(claimAfterIndependentHeartbeats({ claimedAtMs: claimedAt, nowMs: now, heartbeats: true })).toBe("busy");
+    expect(claimAfterIndependentHeartbeats({ claimedAtMs: claimedAt, nowMs: now, heartbeats: false })).toBe("reclaim");
     expect(isPermanentJobError("Job is already active.")).toBe(false);
     expect(isPermanentJobError("Outreach sending is turned off. No email was sent.")).toBe(true);
     expect(isPermanentJobError("The daily research limit has been reached.")).toBe(true);
@@ -169,6 +187,27 @@ describe("job retries and research targets", () => {
     expect(shouldStoreQualificationDraft(["DRAFT"])).toBe(false);
     expect(shouldStoreQualificationDraft(["FAILED"])).toBe(false);
     expect(shouldStoreQualificationDraft([])).toBe(true);
+  });
+
+  it("keeps an independent timer running while this thread is blocked", async () => {
+    const { Worker } = await import("node:worker_threads");
+    const worker = new Worker(
+      `const { parentPort } = require("node:worker_threads");
+       const timer = setInterval(() => parentPort.postMessage(Date.now()), 15);
+       parentPort.on("message", () => { clearInterval(timer); });`,
+      { eval: true },
+    );
+    const ticks: number[] = [];
+    worker.on("message", (value: number) => ticks.push(value));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const started = Date.now();
+    while (Date.now() - started < 90) {
+      // Block the caller. The worker thread has its own event loop.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    worker.postMessage("stop");
+    await worker.terminate();
+    expect(ticks.some((tick) => tick >= started && tick <= started + 90)).toBe(true);
   });
 
   it("uses a new queue id when a failed job is retried", () => {

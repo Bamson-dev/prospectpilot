@@ -1,5 +1,7 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
+import { classifyJobId } from "@/lib/email/message-policy";
 import { AppError } from "@/lib/errors";
 import { queueJob } from "@/lib/jobs";
 
@@ -43,6 +45,9 @@ async function importGmailMessage(organizationId: string, accessToken: string, m
     include: { prospect: true },
   });
   if (!contact) return;
+  const replyId = `gmail:${messageId}`;
+  const stored = await prisma.reply.findUnique({ where: { id: replyId }, select: { id: true } });
+  if (stored) return;
   const existing = await prisma.reply.findFirst({
     where: { prospectId: contact.prospectId, fromEmail: email, subject },
   });
@@ -56,17 +61,24 @@ async function importGmailMessage(organizationId: string, accessToken: string, m
       data: { organizationId, prospectId: contact.prospectId, subject: subject || contact.prospect.companyName },
     });
   }
-  const reply = await prisma.reply.create({
-    data: {
-      organizationId,
-      conversationId: conversation.id,
-      prospectId: contact.prospectId,
-      contactId: contact.id,
-      fromEmail: email,
-      subject,
-      body: payload.snippet || "(No preview was returned by Gmail.)",
-    },
-  });
+  let reply: { id: string };
+  try {
+    reply = await prisma.reply.create({
+      data: {
+        id: replyId,
+        organizationId,
+        conversationId: conversation.id,
+        prospectId: contact.prospectId,
+        contactId: contact.id,
+        fromEmail: email,
+        subject,
+        body: payload.snippet || "(No preview was returned by Gmail.)",
+      },
+    });
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+    reply = { id: replyId };
+  }
   await prisma.prospect.update({ where: { id: contact.prospectId }, data: { outreachState: "REPLIED" } });
   await prisma.outreachMessage.updateMany({
     where: { prospectId: contact.prospectId, state: { in: ["SENT", "DELIVERED", "OPENED"] } },
@@ -77,6 +89,7 @@ async function importGmailMessage(organizationId: string, accessToken: string, m
     data: { state: "CANCELLED" },
   });
   await queueJob({
+    id: classifyJobId(reply.id),
     organizationId,
     prospectId: contact.prospectId,
     queue: "reply-analysis",

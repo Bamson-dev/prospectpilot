@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logInfo } from "@/lib/logger";
 import { queueJob } from "@/lib/jobs";
-import { inboundReplyId, onlyMatchingContact, providerEventWrite, webhookTimestampFresh } from "@/lib/email/message-policy";
+import { classifyJobId, inboundReplyId, onlyMatchingContact, providerEventWrite, webhookTimestampFresh } from "@/lib/email/message-policy";
 import { isSuppressionRequest } from "@/lib/suppression";
 
 export const dynamic = "force-dynamic";
@@ -42,10 +42,10 @@ export async function POST(request: Request) {
           ...(write.state === "OPENED" ? { openedAt: new Date() } : {}),
         },
       });
-      if (updated.count > 0 && write.state === "FAILED") {
+      if (updated.count > 0) {
         await prisma.prospect.updateMany({
           where: { id: { in: [...new Set(pending.map((item) => item.prospectId))] }, outreachState: { in: write.from } },
-          data: { outreachState: "FAILED" },
+          data: { outreachState: write.state },
         });
       }
     }
@@ -72,29 +72,17 @@ export async function POST(request: Request) {
           };
           try {
             await prisma.reply.create({ data: replyData });
-            await queueJob({
-              organizationId: contact.organizationId,
-              prospectId: contact.prospectId,
-              queue: "reply-analysis",
-              name: "reply.classify",
-              payload: { replyId },
-            });
           } catch (error) {
             if (!isUnique(error)) throw error;
-            const queued = await prisma.backgroundJob.findFirst({
-              where: { name: "reply.classify", payload: { path: ["replyId"], equals: replyId } },
-              select: { id: true },
-            });
-            if (!queued) {
-              await queueJob({
-                organizationId: contact.organizationId,
-                prospectId: contact.prospectId,
-                queue: "reply-analysis",
-                name: "reply.classify",
-                payload: { replyId },
-              });
-            }
           }
+          await queueJob({
+            id: classifyJobId(replyId),
+            organizationId: contact.organizationId,
+            prospectId: contact.prospectId,
+            queue: "reply-analysis",
+            name: "reply.classify",
+            payload: { replyId },
+          });
         }
       } else if (contacts.length > 1) {
         logInfo("resend.webhook.ambiguous_sender", { matches: contacts.length });

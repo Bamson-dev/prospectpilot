@@ -1,7 +1,8 @@
 import { UnrecoverableError } from "bullmq";
 import { prisma } from "@/lib/db";
 import { isAppError } from "@/lib/errors";
-import { isPermanentJobError, JOB_HEARTBEAT_MS, jobDeliveryDecision } from "@/lib/job-state";
+import { watchLease } from "@/lib/independent-heartbeat";
+import { isPermanentJobError, jobDeliveryDecision } from "@/lib/job-state";
 import { logError, logInfo } from "@/lib/logger";
 
 export async function runJob(jobId: string, work: () => Promise<void>) {
@@ -42,12 +43,10 @@ export async function runJob(jobId: string, work: () => Promise<void>) {
   }
   const started = Date.now();
   const attempt = existing.attempts + 1;
-  const heartbeat = setInterval(() => {
-    void prisma.backgroundJob.updateMany({
-      where: { id: jobId, state: "ACTIVE", attempts: attempt },
-      data: { startedAt: new Date() },
-    }).catch(() => undefined);
-  }, JOB_HEARTBEAT_MS);
+  const stopHeartbeat = watchLease({ kind: "job", id: jobId, attempt }, () => prisma.backgroundJob.updateMany({
+    where: { id: jobId, state: "ACTIVE", attempts: attempt },
+    data: { startedAt: new Date() },
+  }));
   try {
     try {
       await work();
@@ -70,6 +69,6 @@ export async function runJob(jobId: string, work: () => Promise<void>) {
       throw error;
     }
   } finally {
-    clearInterval(heartbeat);
+    stopHeartbeat();
   }
 }

@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { logError } from "@/lib/logger";
@@ -27,6 +27,7 @@ export async function recordActivity(input: {
 }
 
 export async function queueJob(input: {
+  id?: string;
   organizationId: string;
   campaignId?: string | null;
   prospectId?: string | null;
@@ -34,16 +35,26 @@ export async function queueJob(input: {
   name: string;
   payload?: Prisma.InputJsonValue;
 }) {
-  const job = await prisma.backgroundJob.create({
-    data: {
-      organizationId: input.organizationId,
-      campaignId: input.campaignId ?? null,
-      prospectId: input.prospectId ?? null,
-      queue: input.queue,
-      name: input.name,
-      payload: input.payload,
-    },
-  });
+  let job;
+  try {
+    job = await prisma.backgroundJob.create({
+      data: {
+        ...(input.id ? { id: input.id } : {}),
+        organizationId: input.organizationId,
+        campaignId: input.campaignId ?? null,
+        prospectId: input.prospectId ?? null,
+        queue: input.queue,
+        name: input.name,
+        payload: input.payload,
+      },
+    });
+  } catch (error) {
+    if (input.id && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const existing = await prisma.backgroundJob.findUnique({ where: { id: input.id } });
+      if (existing) return existing;
+    }
+    throw error;
+  }
   const extra: Record<string, string> = {};
   if (input.payload && typeof input.payload === "object" && !Array.isArray(input.payload)) {
     for (const [key, value] of Object.entries(input.payload)) {

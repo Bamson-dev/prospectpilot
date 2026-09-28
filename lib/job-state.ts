@@ -27,6 +27,24 @@ export function retryQueueJobId(jobId: string, attempts: number) {
   return `${jobId}:retry:${attempts}`;
 }
 
+export function claimAfterIndependentHeartbeats(input: {
+  claimedAtMs: number;
+  nowMs: number;
+  heartbeats: boolean;
+  heartbeatMs?: number;
+}) {
+  const heartbeatMs = input.heartbeatMs ?? JOB_HEARTBEAT_MS;
+  const elapsed = Math.max(0, input.nowMs - input.claimedAtMs);
+  const beats = input.heartbeats ? Math.floor(elapsed / heartbeatMs) : 0;
+  return jobDeliveryDecision({
+    state: "ACTIVE",
+    attempts: 1,
+    maxAttempts: 3,
+    startedAtMs: input.claimedAtMs + beats * heartbeatMs,
+    nowMs: input.nowMs,
+  });
+}
+
 const PERMANENT_JOB_ERROR = /not configured|stopped|blocked|denied|private network|not a public|quota|rate limit|limit has been reached|turned off|policy|restricted|credentials|did not return|malformed|no company results|not approved/i;
 
 export function isPermanentJobError(message: string) {

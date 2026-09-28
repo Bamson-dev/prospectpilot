@@ -7,7 +7,7 @@ import { recordActivity } from "@/lib/jobs";
 import { logInfo } from "@/lib/logger";
 import { analysisRetryDecision, qualificationEvidence, qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
 import { QUOTA_LEASE_MS } from "@/lib/campaign-quota";
-import { JOB_HEARTBEAT_MS } from "@/lib/job-state";
+import { watchLease } from "@/lib/independent-heartbeat";
 
 export async function processQualification(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({
@@ -31,10 +31,8 @@ export async function processQualification(prospectId: string) {
     return;
   }
   const slotId = await reserveQualificationSlot(prospect);
-  const lease = slotId
-    ? setInterval(() => {
-        void refreshQualificationLease(slotId).catch(() => undefined);
-      }, JOB_HEARTBEAT_MS)
+  const stopLease = slotId
+    ? watchLease({ kind: "qualification", id: slotId }, () => refreshQualificationLease(slotId))
     : null;
   try {
   const sources = await prisma.discoverySource.findMany({ where: { prospectId: prospect.id }, orderBy: { createdAt: "desc" }, take: 5 });
@@ -165,7 +163,7 @@ export async function processQualification(prospectId: string) {
     await releaseQualificationSlot(slotId);
     throw error;
   } finally {
-    if (lease) clearInterval(lease);
+    stopLease?.();
   }
 }
 

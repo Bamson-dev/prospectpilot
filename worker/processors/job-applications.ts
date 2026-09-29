@@ -34,7 +34,7 @@ export async function processJobDiscovery(organizationId: string, query: string)
     summary.analyzed += 1;
     summary.requirements += assessed.requirements.length;
     if (assessed.state === "QUALIFIED") summary.qualified += 1;
-    else if (assessed.state === "NOT_READY") summary.notReady += 1;
+    else if (assessed.state === "NOT_A_FIT") summary.notAFit += 1;
     else summary.review += 1;
   }
   summary.analysisMs = summary.analyzed ? Date.now() - analysisStarted : 0;
@@ -51,6 +51,7 @@ export async function processJobDiscovery(organizationId: string, query: string)
       qualified: summary.qualified,
       review: summary.review,
       notReady: summary.notReady,
+      notAFit: summary.notAFit,
       failed: summary.failed,
       failures: summary.failures,
       sources: summary.sources,

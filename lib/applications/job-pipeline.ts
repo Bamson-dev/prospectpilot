@@ -1,10 +1,21 @@
 import { duplicateDecision, type IdentityInput } from "@/lib/applications/dedupe";
+import type { EvidenceSelection } from "@/lib/applications/evidence-selection";
 import { matchesQuery, normalizeVacancy, type NormalizedVacancy, type RawDiscoveredVacancy } from "@/lib/applications/job-normalize";
 import { scoreJobFit, type FitResult } from "@/lib/applications/fit";
 import { extractRequirements } from "@/lib/applications/requirements";
-import type { CandidateRecord, ExtractedRequirement, JobInput } from "@/lib/applications/types";
+import type { CandidateRecord, ExtractedRequirement, JobInput, RequirementRole } from "@/lib/applications/types";
 
-export type FitState = "QUALIFIED" | "REVIEW" | "NOT_READY";
+export type FitState = "QUALIFIED" | "REVIEW" | "NOT_A_FIT";
+
+export type QualificationExplanation = {
+  state: FitState;
+  direct: Array<{ requirement: string; evidence: string; reason: string }>;
+  transferable: Array<{ requirement: string; evidence: string; reason: string }>;
+  missingHard: Array<{ requirement: string; reason: string }>;
+  uncertainHard: Array<{ requirement: string; reason: string }>;
+  preferred: Array<{ requirement: string; match: string; evidence: string | null; reason: string }>;
+  responsibilities: string[];
+};
 
 export type DiscoverySummary = {
   discovered: number;
@@ -17,6 +28,7 @@ export type DiscoverySummary = {
   qualified: number;
   review: number;
   notReady: number;
+  notAFit: number;
   failed: number;
   failures: Array<{ source: string; reason: string }>;
   sources: Record<string, number>;
@@ -51,12 +63,64 @@ export function prepareDiscoveredVacancies(jobs: RawDiscoveredVacancy[], query: 
 export function assessVacancy(job: JobInput, candidate: CandidateRecord) {
   const requirements = extractRequirements(job.description);
   const fit = scoreJobFit(job, candidate, requirements);
-  return { requirements, fit, state: fitState(fit) };
+  const explanation = explainQualification(requirements, fit.selections);
+  return { requirements, fit, explanation, state: explanation.state };
 }
 
-export function fitState(fit: Pick<FitResult, "recommendation">): FitState {
+export function explainQualification(requirements: ExtractedRequirement[], selections: EvidenceSelection[]): QualificationExplanation {
+  const byText = new Map(selections.map((item) => [item.requirement, item]));
+  const direct: QualificationExplanation["direct"] = [];
+  const transferable: QualificationExplanation["transferable"] = [];
+  const missingHard: QualificationExplanation["missingHard"] = [];
+  const uncertainHard: QualificationExplanation["uncertainHard"] = [];
+  const preferred: QualificationExplanation["preferred"] = [];
+  for (const requirement of requirements) {
+    const role = roleOf(requirement);
+    const selection = byText.get(requirement.text);
+    if (role === "PREFERRED_REQUIREMENT") {
+      preferred.push({
+        requirement: requirement.text,
+        match: selection?.match ?? "UNCERTAIN",
+        evidence: selection?.evidence ?? null,
+        reason: selection?.reason ?? "Preferred requirement.",
+      });
+      if (selection?.match === "TRANSFERABLE" && selection.evidence) {
+        transferable.push({ requirement: requirement.text, evidence: selection.evidence, reason: selection.reason });
+      }
+      continue;
+    }
+    if (role !== "HARD_REQUIREMENT" || !selection) continue;
+    if (selection.match === "DIRECT" && selection.evidence) direct.push({ requirement: requirement.text, evidence: selection.evidence, reason: selection.reason });
+    else if (selection.match === "TRANSFERABLE" && selection.evidence) transferable.push({ requirement: requirement.text, evidence: selection.evidence, reason: selection.reason });
+    else if (selection.match === "MISSING") missingHard.push({ requirement: requirement.text, reason: selection.reason });
+    else uncertainHard.push({ requirement: requirement.text, reason: selection.reason });
+  }
+  const hardCount = requirements.filter((requirement) => roleOf(requirement) === "HARD_REQUIREMENT").length;
+  const state: FitState = missingHard.length ? "NOT_A_FIT" : uncertainHard.length || transferable.some((item) => requirements.some((requirement) => requirement.text === item.requirement && roleOf(requirement) === "HARD_REQUIREMENT")) || hardCount === 0 ? "REVIEW" : "QUALIFIED";
+  return {
+    state,
+    direct,
+    transferable,
+    missingHard,
+    uncertainHard,
+    preferred,
+    responsibilities: requirements.filter((requirement) => roleOf(requirement) === "RESPONSIBILITY").map((requirement) => requirement.text),
+  };
+}
+
+function roleOf(requirement: ExtractedRequirement): RequirementRole {
+  if (requirement.role) return requirement.role;
+  if (requirement.certainty === "responsibility" || requirement.kind === "RESPONSIBILITY") return "RESPONSIBILITY";
+  if (requirement.certainty === "preferred" || requirement.kind === "NICE_TO_HAVE") return "PREFERRED_REQUIREMENT";
+  if (requirement.certainty === "uncertain") return "UNKNOWN";
+  if (requirement.required || requirement.certainty === "required" || requirement.kind === "MUST_HAVE" || requirement.kind === "EDUCATION" || requirement.kind === "EXPERIENCE_YEARS" || requirement.kind === "TECHNOLOGY") return "HARD_REQUIREMENT";
+  return "UNKNOWN";
+}
+
+export function fitState(fit: { qualification?: FitState; recommendation?: string }): FitState {
+  if (fit.qualification === "QUALIFIED" || fit.qualification === "REVIEW" || fit.qualification === "NOT_A_FIT") return fit.qualification;
   if (fit.recommendation === "PREPARE") return "QUALIFIED";
-  if (fit.recommendation === "DO_NOT_PREPARE" || fit.recommendation === "SKIP") return "NOT_READY";
+  if (fit.recommendation === "DO_NOT_PREPARE" || fit.recommendation === "SKIP") return "NOT_A_FIT";
   return "REVIEW";
 }
 
@@ -102,6 +166,7 @@ export function emptySummary(): DiscoverySummary {
     qualified: 0,
     review: 0,
     notReady: 0,
+    notAFit: 0,
     failed: 0,
     failures: [],
     sources: {},

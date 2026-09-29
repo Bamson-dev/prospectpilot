@@ -1,6 +1,7 @@
 import type { CandidateFactInput, CandidateProjectInput, CandidateRecord, CareerProfile, ExtractedRequirement, JobInput } from "@/lib/applications/types";
 import { selectEvidence, type EvidenceSelection } from "@/lib/applications/evidence-selection";
 import { contactIsReady } from "@/lib/applications/seed-data";
+import { canonicalTechnology, technologiesMentioned } from "@/lib/applications/technologies";
 
 const PROFILE_TERMS: Record<CareerProfile, string[]> = {
   SOFTWARE: ["software", "engineer", "backend", "frontend", "full-stack", "fullstack", "api", "developer"],
@@ -56,7 +57,7 @@ export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requireme
   const responsibilities = requirements.filter((item) => item.certainty === "responsibility" || item.kind === "RESPONSIBILITY").map((item) => item.text);
   for (const requirement of required) {
     const years = yearsVerdict(requirement, candidate, verifiedFacts);
-    if (years === "unknown" || (/\d+\s*(?:years|yrs)/i.test(requirement.text) && statedYears(candidate, verifiedFacts) == null)) {
+    if (years === "unknown" || (/\d+\+?\s*(?:years|yrs)/i.test(requirement.text) && statedYears(candidate, verifiedFacts, requirement) == null)) {
       uncertain.push(`${requirement.text} Experience duration: UNKNOWN.`);
       continue;
     }
@@ -70,7 +71,7 @@ export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requireme
   const preferredGaps: string[] = [];
   for (const requirement of preferred) {
     const years = yearsVerdict(requirement, candidate, verifiedFacts);
-    if (years === "unknown" || (/\d+\s*(?:years|yrs)/i.test(requirement.text) && statedYears(candidate, verifiedFacts) == null)) {
+    if (years === "unknown" || (/\d+\+?\s*(?:years|yrs)/i.test(requirement.text) && statedYears(candidate, verifiedFacts, requirement) == null)) {
       uncertain.push(`${requirement.text} Experience duration: UNKNOWN.`);
       continue;
     }
@@ -101,12 +102,14 @@ export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requireme
   const selectedProjects = (projectHits.length ? projectHits : rankProjects(verifiedProjects, job)).slice(0, 3);
   const skills = unique(selectedFacts.flatMap((fact) => fact.skills ?? []).concat(selectedProjects.flatMap((project) => project.technologies)));
   const legalUnknown = uncertain.some((item) => /authorization|visa|salary|notice|location/i.test(item)) || missingInformation.includes("work authorization");
-  const selections = [...required, ...preferred].map((requirement) => selectionFor(requirement, verifiedFacts));
-  const covered = new Set(selections.map((item) => item.requirement));
-  const requirementSelections = [
-    ...selections,
-    ...requirements.filter((item) => !covered.has(item.text)).map((item) => selectionFor(item, verifiedFacts)),
-  ];
+  const evidenceFacts = candidate.yearsExperience == null
+    ? verifiedFacts
+    : [...verifiedFacts, { fact: `${candidate.yearsExperience} years are recorded on the candidate profile.`, technologies: [] as string[] }];
+  const selections = requirements.flatMap((requirement) => {
+    const selection = selectionFor(requirement, evidenceFacts);
+    return selection ? [selection] : [];
+  });
+  const requirementSelections = selections;
   const recommendation = selectedFacts.length === 0 && selectedProjects.length === 0
     ? "DO_NOT_PREPARE"
     : blockers.length || missing.length
@@ -169,16 +172,19 @@ function isRequired(item: ExtractedRequirement) {
 }
 
 function selectionFor(requirement: ExtractedRequirement, facts: Parameters<typeof selectEvidence>[1]) {
-  const skill = requirement.kind === "TECHNOLOGY" || requirement.kind === "MUST_HAVE" || requirement.kind === "NICE_TO_HAVE" || requirement.kind === "EDUCATION" || requirement.kind === "EXPERIENCE_YEARS";
-  if (skill) return selectEvidence(requirement.text, facts);
-  return {
-    requirement: requirement.text,
-    evidence: null,
-    source: null,
-    match: "UNCERTAIN" as const,
-    confidence: 0.5,
-    reason: "This is employer context, so it is not matched to candidate evidence.",
-  };
+  const role = requirement.role;
+  if (role === "RESPONSIBILITY" || role === "CONTEXT") return null;
+  if (role === "UNKNOWN") {
+    return {
+      requirement: requirement.text,
+      evidence: null,
+      source: null,
+      match: "UNCERTAIN" as const,
+      confidence: 0.4,
+      reason: "The employer wording does not state a concrete hard requirement.",
+    };
+  }
+  return selectEvidence(requirement.text, facts);
 }
 
 function usableFact(fact: CandidateFactInput) {
@@ -187,7 +193,7 @@ function usableFact(fact: CandidateFactInput) {
 
 function yearsVerdict(requirement: ExtractedRequirement, candidate: CandidateRecord, facts: CandidateFactInput[]) {
   if (requirement.kind !== "EXPERIENCE_YEARS" || !requirement.years) return "other" as const;
-  const stated = statedYears(candidate, facts);
+  const stated = statedYears(candidate, facts, requirement);
   if (stated == null) return "unknown" as const;
   return stated >= requirement.years ? "matched" as const : "short" as const;
 }
@@ -199,10 +205,17 @@ function yearsEvidence(requirement: ExtractedRequirement, candidate: CandidateRe
   return undefined;
 }
 
-function statedYears(candidate: CandidateRecord, facts: CandidateFactInput[]) {
-  if (candidate.yearsExperience != null) return candidate.yearsExperience;
-  const fact = facts.map((item) => item.fact.match(/(\d{1,2})\+?\s*(?:years|yrs)/i)).find(Boolean);
-  return fact ? Number(fact[1]) : null;
+function statedYears(candidate: CandidateRecord, facts: CandidateFactInput[], requirement?: ExtractedRequirement) {
+  const named = requirement ? technologiesMentioned(requirement.text) : [];
+  const fact = facts.map((item) => {
+    const match = item.fact.match(/(\d{1,2})\+?\s*(?:years|yrs)/i);
+    if (!match) return null;
+    if (named.length && !named.some((name) => (item.technologies ?? []).some((tech) => canonicalTechnology(tech) === name) || canonicalTechnology(item.fact) === name)) return null;
+    return Number(match[1]);
+  }).find((value) => value != null);
+  if (fact != null) return fact;
+  if (named.length) return null;
+  return candidate.yearsExperience ?? null;
 }
 
 function hasEvidence(project: CandidateProjectInput) {
@@ -276,8 +289,8 @@ function overlapCount(fact: string, text: string) {
 }
 
 function sameName(requirement: string, technology: string) {
-  const wanted = technology.toLowerCase().replace(/[^a-z0-9+#]+/g, "");
-  return wanted.length > 1 && requirement.toLowerCase().replace(/[^a-z0-9+#]+/g, " ").split(/\s+/).some((token) => token.replace(/[^a-z0-9+#]+/g, "") === wanted);
+  const wanted = canonicalTechnology(technology);
+  return wanted.length > 1 && requirement.toLowerCase().split(/[^a-z0-9+#.]+/).some((token) => canonicalTechnology(token) === wanted);
 }
 
 function unique(values: string[]) {

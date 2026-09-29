@@ -93,12 +93,15 @@ export type CandidateRecord = {
 
 export type RequirementCertainty = "required" | "preferred" | "responsibility" | "uncertain";
 
+export type RequirementRole = "HARD_REQUIREMENT" | "PREFERRED_REQUIREMENT" | "RESPONSIBILITY" | "CONTEXT" | "UNKNOWN";
+
 export type ExtractedRequirement = {
   kind: RequirementKind;
   text: string;
   years?: number;
   required: boolean;
   certainty?: RequirementCertainty;
+  role?: RequirementRole;
 };
 
 export type JobInput = {

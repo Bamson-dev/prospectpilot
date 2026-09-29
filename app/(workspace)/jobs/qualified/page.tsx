@@ -1,9 +1,7 @@
 import { JobsNav } from "@/components/jobs-nav";
 import { Empty, PageHeader, Panel } from "@/components/ui";
 import { requireOrganization } from "@/lib/current-user";
-import { selectionCounts } from "@/lib/applications/job-pipeline";
 import { fitState } from "@/lib/applications/job-pipeline";
-import type { FitResult } from "@/lib/applications/fit";
 import { prisma } from "@/lib/db";
 
 export const metadata = { title: "Qualified jobs" };
@@ -27,7 +25,7 @@ export default async function QualifiedJobsPage({ searchParams }: { searchParams
     include: { fit: true },
     take: 80,
   });
-  const visible = jobs.filter((job) => !query.fit || fitLabel(job.fit?.recommendation) === query.fit);
+  const visible = jobs.filter((job) => !query.fit || fitLabel(job) === query.fit);
   return (
     <div>
       <PageHeader title="Qualified jobs" detail="Missing requirements stay visible. The fit state comes from verified evidence, not an unexplained score." />
@@ -38,7 +36,7 @@ export default async function QualifiedJobsPage({ searchParams }: { searchParams
             <option value="">Any fit</option>
             <option value="QUALIFIED">Qualified</option>
             <option value="REVIEW">Review</option>
-            <option value="NOT_READY">Not ready</option>
+            <option value="NOT_A_FIT">Not a fit</option>
           </select>
           <input name="location" defaultValue={query.location ?? ""} placeholder="Location" />
           <select name="remote" defaultValue={query.remote ?? ""}>
@@ -56,12 +54,11 @@ export default async function QualifiedJobsPage({ searchParams }: { searchParams
         </form>
       </Panel>
       {visible.length === 0 ? <Empty title="No jobs" detail="Discovery has not stored a vacancy for this filter." /> : visible.map((job) => {
-        const counts = countsFrom(job.fit?.analysis);
         return (
           <Panel key={job.id} className="mb-3">
             <p className="font-display text-2xl"><a className="text-tide" href={`/jobs/vacancies/${job.id}`}>{job.title}</a></p>
             <p className="text-sm text-muted">{job.companyName} · {job.location || "Location unknown"} · {job.remoteType || "Workplace unknown"} · {job.source}</p>
-            <p className="mt-2 text-sm">Fit {fitLabel(job.fit?.recommendation)}. Direct {counts.direct}. Transferable {counts.transferable}. Uncertain {counts.uncertain}. Missing {counts.missing}.</p>
+            <p className="mt-2 text-sm">Fit {fitLabel(job)}. Direct {list(explanation(job).direct)}. Missing {list(explanation(job).missingHard)}. Uncertain {list(explanation(job).uncertainHard)}.</p>
             <p className="text-sm"><a className="text-tide" href={job.applicationUrl}>Application URL</a> · Discovered {job.discoveredAt.toISOString().slice(0, 10)}</p>
           </Panel>
         );
@@ -70,14 +67,47 @@ export default async function QualifiedJobsPage({ searchParams }: { searchParams
   );
 }
 
-function fitLabel(recommendation: string | null | undefined) {
-  if (!recommendation) return "REVIEW";
-  return fitState({ recommendation } as Pick<FitResult, "recommendation">);
+function fitLabel(job: { fit: { recommendation: string; analysis: unknown } | null }) {
+  const stored = readExplanation(job.fit?.analysis);
+  if (stored?.state) return stored.state;
+  if (!job.fit?.recommendation) return "REVIEW";
+  return fitState({ recommendation: job.fit.recommendation });
 }
 
-function countsFrom(analysis: unknown) {
-  if (!analysis || typeof analysis !== "object" || Array.isArray(analysis)) return { direct: 0, transferable: 0, uncertain: 0, missing: 0 };
-  const selections = (analysis as { selections?: unknown }).selections;
-  if (!Array.isArray(selections)) return { direct: 0, transferable: 0, uncertain: 0, missing: 0 };
-  return selectionCounts({ selections } as FitResult);
+function explanation(job: { fit: { analysis: unknown } | null }) {
+  return readExplanation(job.fit?.analysis) ?? { direct: [], missingHard: [], uncertainHard: [] };
 }
+
+function list(items: Array<{ requirement: string }>) {
+  if (!items.length) return "none";
+  return items.map((item) => clip(item.requirement)).join("; ");
+}
+
+function clip(value: string) {
+  return value.length > 80 ? `${value.slice(0, 77)}...` : value;
+}
+
+function readExplanation(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as { explanation?: unknown; qualification?: unknown };
+  const explanation = row.explanation;
+  if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return null;
+  const item = explanation as { state?: unknown; direct?: unknown; missingHard?: unknown; uncertainHard?: unknown };
+  const state = item.state === "QUALIFIED" || item.state === "REVIEW" || item.state === "NOT_A_FIT" ? item.state : row.qualification === "QUALIFIED" || row.qualification === "REVIEW" || row.qualification === "NOT_A_FIT" ? row.qualification : null;
+  return {
+    state,
+    direct: rows(item.direct),
+    missingHard: rows(item.missingHard),
+    uncertainHard: rows(item.uncertainHard),
+  };
+}
+
+function rows(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as { requirement?: unknown };
+    return typeof row.requirement === "string" ? [{ requirement: row.requirement }] : [];
+  });
+}
+

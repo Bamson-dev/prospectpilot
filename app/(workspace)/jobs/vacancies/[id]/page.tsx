@@ -3,7 +3,6 @@ import { JobsNav } from "@/components/jobs-nav";
 import { PageHeader, Panel } from "@/components/ui";
 import { requireOrganization } from "@/lib/current-user";
 import { fitState } from "@/lib/applications/job-pipeline";
-import type { FitResult } from "@/lib/applications/fit";
 import { prisma } from "@/lib/db";
 
 export const metadata = { title: "Vacancy" };
@@ -16,11 +15,13 @@ export default async function VacancyPage({ params }: { params: Promise<{ id: st
     include: { requirements: true, fit: true },
   });
   if (!job) notFound();
+  const explanation = readExplanation(job.fit?.analysis);
   const selections = readSelections(job.fit?.analysis);
   const original = readOriginal(job.rawData);
+  const state = explanation?.state ?? fitState({ recommendation: job.fit?.recommendation ?? "REVIEW" });
   return (
     <div>
-      <PageHeader title={job.title} detail={`${job.companyName} · ${fitState({ recommendation: job.fit?.recommendation ?? "REVIEW" } as Pick<FitResult, "recommendation">)}`} />
+      <PageHeader title={job.title} detail={`${job.companyName} · ${label(state)}`} />
       <JobsNav />
       <Panel className="mb-3">
         <p className="text-sm">{job.location || "Location unknown"} · {job.remoteType || "Workplace unknown"} · {job.employmentType || "Employment type unknown"}</p>
@@ -35,8 +36,15 @@ export default async function VacancyPage({ params }: { params: Promise<{ id: st
         ))}
       </Panel>
       <Panel className="mb-3">
-        <h2 className="font-display text-2xl">Candidate fit</h2>
-        {selections.length === 0 ? <p className="mt-2 text-sm text-muted">Fit has not been stored.</p> : selections.map((item) => (
+        <h2 className="font-display text-2xl">{label(state)}</h2>
+        <Group title="Direct matches" items={explanation?.direct ?? []} />
+        <Group title="Transferable matches" items={explanation?.transferable ?? []} />
+        <Group title="Missing hard requirements" items={explanation?.missingHard ?? []} />
+        <Group title="Uncertain hard requirements" items={explanation?.uncertainHard ?? []} />
+        <Group title="Preferred requirements" items={explanation?.preferred ?? []} />
+        <h3 className="mt-4 text-sm font-medium">Responsibilities</h3>
+        {(explanation?.responsibilities.length ?? 0) === 0 ? <p className="mt-2 text-sm text-muted">None separated from the requirements.</p> : explanation?.responsibilities.map((item) => <p key={item} className="mt-2 text-sm">{item}</p>)}
+        {explanation ? null : selections.map((item) => (
           <p key={`${item.requirement}-${item.match}`} className="mt-2 text-sm">Requirement: {item.requirement}. Classification: {item.match}. Evidence: {item.evidence || "None"}. Reason: {item.reason || "No reason stored."}</p>
         ))}
       </Panel>
@@ -46,6 +54,49 @@ export default async function VacancyPage({ params }: { params: Promise<{ id: st
       </Panel>
     </div>
   );
+}
+
+function label(state: string) {
+  if (state === "NOT_A_FIT") return "NOT A FIT";
+  return state;
+}
+
+function Group({ title, items }: { title: string; items: Array<{ requirement: string; evidence?: string | null; reason?: string }> }) {
+  return (
+    <div className="mt-4">
+      <h3 className="text-sm font-medium">{title}</h3>
+      {items.length === 0 ? <p className="mt-2 text-sm text-muted">None</p> : items.map((item) => (
+        <p key={`${title}-${item.requirement}`} className="mt-2 text-sm">{item.requirement}{item.evidence ? ` Evidence: ${item.evidence}.` : ""}{item.reason ? ` ${item.reason}` : ""}</p>
+      ))}
+    </div>
+  );
+}
+
+function readExplanation(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const explanation = (value as { explanation?: unknown }).explanation;
+  if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return null;
+  const row = explanation as Record<string, unknown>;
+  const state = row.state === "QUALIFIED" || row.state === "REVIEW" || row.state === "NOT_A_FIT" ? row.state : "REVIEW";
+  return {
+    state,
+    direct: detailRows(row.direct),
+    transferable: detailRows(row.transferable),
+    missingHard: detailRows(row.missingHard),
+    uncertainHard: detailRows(row.uncertainHard),
+    preferred: detailRows(row.preferred),
+    responsibilities: Array.isArray(row.responsibilities) ? row.responsibilities.filter((item): item is string => typeof item === "string") : [],
+  };
+}
+
+function detailRows(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as { requirement?: unknown; evidence?: unknown; reason?: unknown };
+    if (typeof row.requirement !== "string") return [];
+    return [{ requirement: row.requirement, evidence: typeof row.evidence === "string" ? row.evidence : null, reason: typeof row.reason === "string" ? row.reason : "" }];
+  });
 }
 
 function readSelections(value: unknown) {

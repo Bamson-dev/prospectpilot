@@ -276,8 +276,8 @@ export async function analyzeVacancy(organizationId: string, vacancyId: string) 
   }
   await prisma.jobFitSnapshot.upsert({
     where: { vacancyId },
-    update: fitData(candidateRow.id, assessed.fit),
-    create: { vacancyId, ...fitData(candidateRow.id, assessed.fit) },
+    update: fitData(candidateRow.id, assessed.fit, assessed.explanation),
+    create: { vacancyId, ...fitData(candidateRow.id, assessed.fit, assessed.explanation) },
   });
   await prisma.jobVacancy.update({
     where: { id: vacancyId },
@@ -493,7 +493,7 @@ export async function applicationStats(organizationId: string) {
   return { discovered, qualified, prepared, submitted, verified, failed, blocked, manual, cvs };
 }
 
-function fitData(candidateId: string, fit: ReturnType<typeof scoreJobFit>): Omit<Prisma.JobFitSnapshotUncheckedCreateInput, "vacancyId"> {
+function fitData(candidateId: string, fit: ReturnType<typeof scoreJobFit>, explanation?: { state: string }): Omit<Prisma.JobFitSnapshotUncheckedCreateInput, "vacancyId"> {
   return {
     candidateId,
     profile: fit.profile,
@@ -516,6 +516,8 @@ function fitData(candidateId: string, fit: ReturnType<typeof scoreJobFit>): Omit
       uncertain: fit.uncertain,
       selections: fit.selections,
       responsibilities: fit.responsibilities,
+      qualification: explanation?.state ?? null,
+      explanation: explanation ?? null,
       transferable: fit.transferable,
       skills: fit.recommendedSkills,
       structure: fit.cvStructure,

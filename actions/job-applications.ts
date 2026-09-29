@@ -183,6 +183,14 @@ export async function enqueueJobSearch(formData: FormData) {
   if (!jobDiscoveryEnabled()) redirect("/jobs/discover?error=Job+discovery+is+disabled.");
   const query = String(formData.get("query") ?? "").trim().slice(0, 180);
   if (query.length < 3) redirect("/jobs/discover?error=Enter+a+search.");
+  const active = await prisma.backgroundJob.findMany({
+    where: { organizationId: organization.id, queue: "job-discovery", state: { in: ["QUEUED", "ACTIVE"] } },
+    select: { payload: true },
+    take: 20,
+  });
+  if (active.some((job) => discoveryQuery(job.payload) === query.toLowerCase())) {
+    redirect("/jobs/discover?notice=That+search+is+already+running.");
+  }
   try {
     await queueJob({
       organizationId: organization.id,
@@ -194,6 +202,12 @@ export async function enqueueJobSearch(formData: FormData) {
     redirect(`/jobs/discover?error=${encodeURIComponent(errorMessage(error))}`);
   }
   redirect("/jobs/discover?notice=Job+search+queued.");
+}
+
+function discoveryQuery(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
+  const query = (payload as { query?: unknown }).query;
+  return typeof query === "string" ? query.trim().toLowerCase() : "";
 }
 
 export async function enqueueApplicationPreparation(formData: FormData) {

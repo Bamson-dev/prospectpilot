@@ -4,10 +4,8 @@ import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { logInfo } from "@/lib/logger";
 import { completeJson } from "@/lib/ai/client";
-import { applicationIdentity, sameVacancy } from "@/lib/applications/dedupe";
 import { assessWriting } from "@/lib/applications/writing-quality";
 import { nextPackageVersion, safeAuditDetail } from "@/lib/applications/package-version";
-import { normalizeWorkMode } from "@/lib/applications/normalize";
 import { emptyTimings, packageReadiness } from "@/lib/applications/throughput";
 import { scoreJobFit } from "@/lib/applications/fit";
 import { buildCoverLetter } from "@/lib/applications/cover-letter";
@@ -20,7 +18,10 @@ import { CAREER_PROFILES, contactIsReady, seedCandidateRecord, seedWritingProfil
 import type { CandidateRecord, JobInput } from "@/lib/applications/types";
 import { DateValidator, FormattingValidator } from "@/lib/applications/validators";
 import { CV_SYSTEM_PROMPT, evidencePrompt } from "@/lib/applications/prompts";
-import { dedupeDiscovered, type DiscoveredJob } from "@/lib/applications/providers";
+import { duplicateDecision } from "@/lib/applications/dedupe";
+import { assessVacancy } from "@/lib/applications/job-pipeline";
+import { normalizeVacancy, type NormalizedVacancy } from "@/lib/applications/job-normalize";
+import type { DiscoveredJob } from "@/lib/applications/providers";
 import { cvGenerationEnabled, coverLetterGenerationEnabled } from "@/lib/applications/config";
 
 export async function ensureCandidate(organizationId: string) {
@@ -191,47 +192,98 @@ function salaryText(preference: { salaryMin: number | null; salaryTarget: number
 }
 
 export async function storeDiscoveredJobs(organizationId: string, jobs: DiscoveredJob[]) {
-  const stored: string[] = [];
+  const normalized = jobs.flatMap((job) => {
+    const next = normalizeVacancy({ ...job, description: job.description, originalDescription: job.description });
+    return next ? [next] : [];
+  });
+  return (await persistNormalizedVacancies(organizationId, normalized)).ids;
+}
+
+export async function persistNormalizedVacancies(organizationId: string, jobs: NormalizedVacancy[]) {
+  const ids: string[] = [];
+  const duplicateReasons: string[] = [];
   const existing = await prisma.jobVacancy.findMany({
     where: { organizationId },
-    select: { companyName: true, title: true, applicationUrl: true, location: true, externalId: true },
+    select: { companyName: true, title: true, applicationUrl: true, sourceUrl: true, location: true, externalId: true },
     orderBy: { createdAt: "desc" },
     take: 500,
   });
-  for (const job of dedupeDiscovered(jobs)) {
-    const identity = applicationIdentity(job);
-    if (existing.some((row) => sameVacancy(row, { ...job, externalId: job.externalId ?? identity }))) continue;
-    const mode = normalizeWorkMode(job.location);
-    const created = await prisma.jobVacancy.create({
-      data: {
-        organizationId,
-        source: job.source,
-        sourceUrl: canonicalOr(job.sourceUrl),
-        applicationUrl: canonicalOr(job.applicationUrl),
-        externalId: job.externalId ?? identity,
-        companyName: job.companyName,
-        companyDomain: job.companyDomain,
-        title: job.title,
-        location: mode.geographicRestriction ?? job.location,
-        remoteType: mode.remoteType,
-        description: job.description,
-        status: "DISCOVERED",
-      },
-    });
-    stored.push(created.id);
-    existing.push({ companyName: job.companyName, title: job.title, applicationUrl: job.applicationUrl, location: job.location ?? null, externalId: job.externalId ?? identity });
+  for (const job of jobs) {
+    const match = existing.find((row) => duplicateDecision(row, job).merge);
+    if (match) {
+      duplicateReasons.push(duplicateDecision(match, job).reason ?? "duplicate");
+      continue;
+    }
+    try {
+      const created = await prisma.jobVacancy.create({
+        data: {
+          organizationId,
+          source: job.source,
+          sourceUrl: job.originalSourceUrl,
+          applicationUrl: job.applicationUrl,
+          externalId: job.externalId,
+          companyName: job.companyName,
+          title: job.title,
+          location: job.location,
+          remoteType: job.remoteType,
+          employmentType: job.employmentType,
+          salaryMin: job.salaryMin,
+          salaryMax: job.salaryMax,
+          salaryCurrency: job.salaryCurrency,
+          description: job.description,
+          postedAt: job.postedAt ? new Date(job.postedAt) : null,
+          status: "DISCOVERED",
+          rawData: {
+            originalSourceUrl: job.originalSourceUrl,
+            originalApplicationUrl: job.originalApplicationUrl,
+            originalDescription: job.originalDescription,
+            technologies: job.technologies,
+          },
+        },
+      });
+      ids.push(created.id);
+      existing.push(job);
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+        duplicateReasons.push("canonical application URL");
+        continue;
+      }
+      throw error;
+    }
   }
-  return stored;
+  return { ids, duplicateReasons };
 }
 
-function canonicalOr(value: string) {
-  try {
-    const url = new URL(value);
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return value;
+export async function analyzeVacancy(organizationId: string, vacancyId: string) {
+  const vacancy = await prisma.jobVacancy.findFirst({ where: { id: vacancyId, organizationId } });
+  if (!vacancy) return null;
+  const candidateRow = await ensureCandidate(organizationId);
+  const candidate = await loadCandidateRecord(candidateRow.id);
+  const job: JobInput = {
+    title: vacancy.title,
+    companyName: vacancy.companyName,
+    description: vacancy.description,
+    location: vacancy.location,
+    remoteType: vacancy.remoteType,
+    applicationUrl: vacancy.applicationUrl,
+  };
+  const assessed = assessVacancy(job, candidate);
+  await prisma.jobRequirement.deleteMany({ where: { vacancyId } });
+  if (assessed.requirements.length) {
+    await prisma.jobRequirement.createMany({
+      data: assessed.requirements.map((item) => ({ vacancyId, kind: item.kind, text: item.text, years: item.years, required: item.required })),
+    });
   }
+  await prisma.jobFitSnapshot.upsert({
+    where: { vacancyId },
+    update: fitData(candidateRow.id, assessed.fit),
+    create: { vacancyId, ...fitData(candidateRow.id, assessed.fit) },
+  });
+  await prisma.jobVacancy.update({
+    where: { id: vacancyId },
+    data: { status: assessed.state === "QUALIFIED" ? "QUALIFIED" : "ANALYZED" },
+  });
+  return assessed;
 }
 
 export async function prepareApplication(organizationId: string, vacancyId: string) {

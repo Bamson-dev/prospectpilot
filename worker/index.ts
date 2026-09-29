@@ -5,6 +5,7 @@ import { ipv4Get } from "@/lib/search/ipv4";
 import { jobRetryDelayMs } from "@/lib/research/failure";
 import { applicationWorkerConcurrency } from "@/lib/applications/config";
 import { getQueue, getRedis } from "@/lib/queues";
+import { analyzeVacancy } from "@/lib/applications/service";
 import { processApplicationFollowUp, processApplicationPreparation, processApplicationSubmit, processJobDiscovery } from "@/worker/processors/job-applications";
 import { processDiscovery } from "@/worker/processors/discovery";
 import { processDueFollowUps, processReply } from "@/worker/processors/follow-up";
@@ -114,7 +115,14 @@ start("job-discovery", async (data) => {
   await processJobDiscovery(data.organizationId, data.query || "software engineer remote");
 });
 
-for (const name of ["job-analysis", "job-fit", "cv-generation", "cover-letter", "application-preparation", "application-verification"] as const) {
+for (const name of ["job-analysis", "job-fit"] as const) {
+  start(name, async (data) => {
+    if (!data.organizationId || !data.vacancyId) throw new Error("Application job is missing its target.");
+    await analyzeVacancy(data.organizationId, data.vacancyId);
+  });
+}
+
+for (const name of ["cv-generation", "cover-letter", "application-preparation", "application-verification"] as const) {
   start(name, async (data) => {
     if (!data.organizationId || !data.vacancyId) throw new Error("Application job is missing its target.");
     await processApplicationPreparation(data.organizationId, data.vacancyId);

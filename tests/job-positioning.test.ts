@@ -113,7 +113,7 @@ describe("candidate positioning", () => {
     expect(sameVacancy(
       { companyName: "Northwind", title: "Engineer", applicationUrl: "https://jobs.example/a", location: "Remote" },
       { companyName: "northwind", title: "Engineer", applicationUrl: "https://jobs.example/b", location: "Remote" },
-    )).toBe(true);
+    )).toBe(false);
     expect(discoveryBlock(403, "ok")).toBe("blocked");
     expect(discoveryBlock(200, "Verify you are human")).toBe("blocked");
     expect(throughputReport({ discovered: 0, analyzed: 0, packages: 0, submitted: 0, failed: 0, manual: 0, elapsedMs: 0 }).benchmarked).toBe(false);

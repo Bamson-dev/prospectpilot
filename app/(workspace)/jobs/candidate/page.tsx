@@ -1,9 +1,10 @@
-import { addCandidateFact, saveCandidateProfile } from "@/actions/job-applications";
+import { addCandidateFact, saveCandidateDocument, saveCandidateProfile } from "@/actions/job-applications";
 import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { requireOrganization } from "@/lib/current-user";
 import { missingCandidateFields, settingValue } from "@/lib/applications/candidate-fields";
+import { evidenceLibrary } from "@/lib/applications/evidence-library";
 import { candidateReadiness } from "@/lib/applications/readiness";
 import { ensureCandidate } from "@/lib/applications/service";
 import { prisma } from "@/lib/db";
@@ -16,7 +17,7 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
   const row = await ensureCandidate(organization.id);
   const candidate = await prisma.candidate.findFirst({
     where: { id: row.id, organizationId: organization.id },
-    include: { profiles: true, experiences: true, projects: true, facts: true, writing: true, preference: true, education: true, certifications: true },
+    include: { profiles: true, experiences: true, projects: true, facts: true, writing: true, preference: true, education: true, certifications: true, baseDocuments: { select: { id: true, kind: true, fileName: true, createdAt: true }, orderBy: { createdAt: "desc" } } },
   });
   if (!candidate) return null;
   const readiness = candidateReadiness({
@@ -102,12 +103,34 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Readiness</h2>
-        <p className="mt-2 text-sm">{readiness.status}. Missing values stay unknown and are not replaced with a default.</p>
-        <ul className="mt-2 list-disc pl-5 text-sm">
-          {readiness.fields.map((field) => <li key={field.field}>{field.group} · {field.field} · {field.state}</li>)}
-        </ul>
-        <p className="mt-2 text-sm text-muted">{readiness.missing.length ? `Missing: ${readiness.missing.join(", ")}` : "Every listed field is on file."}</p>
-        <p className="mt-2 text-sm text-muted">A CV can still be generated when salary is unknown. A salary question stays review-required until you save one.</p>
+        <p className="mt-2 text-sm">Profile {readiness.status}. CV {readiness.cvStatus}. Unknown values stay unknown.</p>
+        {(["IDENTITY", "PROFESSIONAL", "EMPLOYMENT", "EDUCATION", "CERTIFICATIONS", "COMPENSATION"] as const).map((group) => (
+          <div key={group} className="mt-3">
+            <p className="text-sm text-muted">{group}</p>
+            <ul className="mt-1 list-disc pl-5 text-sm">
+              {readiness.fields.filter((field) => field.group === group).map((field) => (
+                <li key={field.field}>{field.field}: {field.state}. {purposeLabel(field.purpose)}. {field.note}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Evidence library</h2>
+        <p className="mt-2 text-sm text-muted">Only verified facts appear here. Generated CV text is not evidence.</p>
+        {evidenceLibrary({ facts: candidate.facts, projects: candidate.projects }).map((item) => (
+          <p key={`${item.group}-${item.value}`} className="mt-2 text-sm">{item.group} · {item.value} · {item.source} · {item.verification}{item.usableFor.length ? ` · ${item.usableFor.join(", ")}` : ""}</p>
+        ))}
+      </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Documents</h2>
+        <p className="mt-2 text-sm text-muted">Base documents stay in this organization. Generated application files stay tied to a vacancy.</p>
+        {candidate.baseDocuments.map((document) => <p key={document.id} className="mt-2 text-sm">{document.kind} · <a className="text-tide" href={`/api/jobs/candidate-documents/${document.id}`}>{document.fileName}</a></p>)}
+        <form action={saveCandidateDocument} className="mt-3 grid gap-2">
+          <select name="kind"><option value="BASE_CV">Base CV</option><option value="PORTFOLIO">Portfolio</option><option value="CERTIFICATE">Certificate</option><option value="OTHER">Other</option></select>
+          <input name="file" type="file" required />
+          <SubmitButton pendingLabel="Saving">Save document</SubmitButton>
+        </form>
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Not on file</h2>
@@ -120,6 +143,12 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
       </Panel>
     </div>
   );
+}
+
+function purposeLabel(purpose: "CV" | "APPLICATION" | "OPTIONAL") {
+  if (purpose === "CV") return "Required for CV";
+  if (purpose === "APPLICATION") return "Required when an employer asks";
+  return "Optional";
 }
 
 function dateValue(value: Date | null | undefined) {

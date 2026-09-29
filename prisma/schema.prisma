@@ -168,6 +168,7 @@ model Organization {
   jobVacancies  JobVacancy[]
   jobApplications JobApplication[]
   generatedDocuments GeneratedDocument[]
+  candidateDocuments CandidateDocument[]
 }
 
 model Membership {
@@ -741,12 +742,25 @@ enum ApplicationEventType {
   CAPTCHA_DETECTED
   RATE_LIMITED
   MANUAL_ACTION_REQUIRED
+  PACKAGE_PREPARED
+  BROWSER_OPENED
+  FIELDS_CLASSIFIED
+  QUESTIONS_GENERATED
+  APPROVED
+  REJECTED
 }
 
 enum GeneratedDocumentKind {
   CV
   COVER_LETTER
   SUPPORTING
+}
+
+enum CandidateDocumentKind {
+  BASE_CV
+  PORTFOLIO
+  CERTIFICATE
+  OTHER
 }
 
 enum ApplicationQuestionKind {
@@ -799,6 +813,7 @@ model Candidate {
   writing        CandidateWritingProfile?
   preference     CandidatePreference?
   documents      GeneratedDocument[]
+  baseDocuments  CandidateDocument[]
   applications   JobApplication[]
 
   @@unique([organizationId, email])
@@ -1041,9 +1056,26 @@ model ApplicationPackage {
   fitSummary     String
   strategy       String
   status         ApplicationPackageStatus @default(PREPARED)
+  version        Int                      @default(1)
   warnings       String[]                 @default([])
   timings        Json?
   application    JobApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model CandidateDocument {
+  id             String                @id @default(cuid())
+  organizationId String
+  candidateId    String
+  kind           CandidateDocumentKind
+  fileName       String
+  fileType       String
+  checksum       String
+  content        Bytes
+  createdAt      DateTime              @default(now())
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  candidate      Candidate             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, candidateId, kind])
 }
 
 model JobApplication {

@@ -11,6 +11,8 @@ import { optionalCandidateFacts } from "@/lib/applications/candidate-fields";
 import { validateCandidateProfile } from "@/lib/applications/profile-validation";
 import { canTransition } from "@/lib/applications/state";
 import { evaluateSubmissionGate } from "@/lib/applications/submission-gate";
+import { preparationDecision, safeAuditDetail } from "@/lib/applications/package-version";
+import { checksum } from "@/lib/applications/documents";
 import type { ApplicationStatus } from "@/lib/applications/types";
 
 export async function saveCandidateProfile(formData: FormData) {
@@ -185,6 +187,11 @@ export async function enqueueApplicationPreparation(formData: FormData) {
   const vacancyId = String(formData.get("vacancyId") ?? "");
   const vacancy = await prisma.jobVacancy.findFirst({ where: { id: vacancyId, organizationId: organization.id }, select: { id: true } });
   if (!vacancy) redirect("/jobs?error=Vacancy+not+found.");
+  const candidate = await ensureCandidate(organization.id);
+  const existing = await prisma.jobApplication.findFirst({ where: { organizationId: organization.id, vacancyId, candidateId: candidate.id }, select: { id: true } });
+  if (preparationDecision(Boolean(existing), formData.get("reprepare") === "on") === "REUSE" && existing) {
+    redirect(`/jobs/applications/${existing.id}?notice=An+application+already+exists.+Regenerate+creates+the+next+version.`);
+  }
   try {
     await queueJob({
       organizationId: organization.id,
@@ -210,7 +217,7 @@ export async function decideApplication(formData: FormData) {
   }
   await prisma.jobApplication.update({ where: { id: application.id }, data: { status: decision } });
   await prisma.applicationEvent.create({
-    data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: decision === "APPROVED" ? "Approved for review. Not submitted." : "Rejected before submission." },
+    data: { applicationId: application.id, type: decision === "APPROVED" ? "APPROVED" : "REJECTED", detail: safeAuditDetail(decision === "APPROVED" ? "Approved for review. Not submitted." : "Rejected before submission.") },
   });
   redirect(`/jobs/applications/${id}?notice=Status+saved.+Nothing+was+submitted.`);
 }
@@ -263,6 +270,32 @@ export async function recordSubmissionConfirmation(formData: FormData) {
     data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: "Confirmation recorded. Nothing was submitted." },
   });
   redirect(`/jobs/applications/${id}?notice=Confirmation+recorded.+Nothing+was+submitted.`);
+}
+
+export async function saveCandidateDocument(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const candidate = await ensureCandidate(organization.id);
+  const kind = String(formData.get("kind") ?? "");
+  if (kind !== "BASE_CV" && kind !== "PORTFOLIO" && kind !== "CERTIFICATE" && kind !== "OTHER") {
+    redirect("/jobs/candidate?error=Choose+a+document+type.");
+  }
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) redirect("/jobs/candidate?error=Choose+a+file.");
+  if (file.size > 2_000_000) redirect("/jobs/candidate?error=Documents+are+limited+to+2+MB.");
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const fileName = file.name.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 80) || "document";
+  await prisma.candidateDocument.create({
+    data: {
+      organizationId: organization.id,
+      candidateId: candidate.id,
+      kind,
+      fileName,
+      fileType: file.type || "application/octet-stream",
+      checksum: checksum(bytes),
+      content: new Uint8Array(bytes),
+    },
+  });
+  redirect("/jobs/candidate?notice=Document+saved.+It+is+visible+only+inside+this+organization.");
 }
 
 export async function archiveGeneratedDocument(formData: FormData) {

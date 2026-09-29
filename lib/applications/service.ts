@@ -5,6 +5,8 @@ import { AppError } from "@/lib/errors";
 import { logInfo } from "@/lib/logger";
 import { completeJson } from "@/lib/ai/client";
 import { applicationIdentity, sameVacancy } from "@/lib/applications/dedupe";
+import { assessWriting } from "@/lib/applications/writing-quality";
+import { nextPackageVersion, safeAuditDetail } from "@/lib/applications/package-version";
 import { normalizeWorkMode } from "@/lib/applications/normalize";
 import { emptyTimings, packageReadiness } from "@/lib/applications/throughput";
 import { scoreJobFit } from "@/lib/applications/fit";
@@ -316,6 +318,8 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
       fullName: candidate.fullName,
       extension: "pdf",
     });
+    const writing = assessWriting({ text: letter, jobDescription: vacancy.description });
+    if (writing.status === "REVIEW_REQUIRED") warnings.push("Cover letter writing needs review.");
     coverLetterMs = Date.now() - letterStarted;
   }
   const readiness = packageReadiness({
@@ -340,6 +344,11 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   timings.packageMs = timings.totalMs;
   timings.manualReview = status === "REQUIRES_REVIEW" || fit.recommendation === "MANUAL_REVIEW";
   timings.failureReason = stopped ? fit.recommendation : null;
+  const previous = await prisma.jobApplication.findUnique({
+    where: { organizationId_vacancyId_candidateId: { organizationId, vacancyId, candidateId: candidateRow.id } },
+    include: { package: true },
+  });
+  const version = nextPackageVersion(previous?.package?.version);
   const application = await prisma.jobApplication.upsert({
     where: { organizationId_vacancyId_candidateId: { organizationId, vacancyId, candidateId: candidateRow.id } },
     update: { profile: fit.profile, status, cvId, coverLetterId, source: vacancy.source, applicationUrl: vacancy.applicationUrl },
@@ -357,8 +366,8 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   });
   await prisma.applicationPackage.upsert({
     where: { applicationId: application.id },
-    update: { profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings, timings },
-    create: { applicationId: application.id, profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings, timings },
+    update: { profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings, timings, version },
+    create: { applicationId: application.id, profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings, timings, version },
   });
   await prisma.applicationAnswer.deleteMany({ where: { applicationId: application.id } });
   if (answers.length) {
@@ -366,8 +375,11 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
       data: answers.map((answer) => ({ applicationId: application.id, question: answer.question, kind: answer.kind, answer: answer.answer, status: answer.status })),
     });
   }
-  await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "FIT_CALCULATED", detail: fit.recommendation } });
-  if (cvId) await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "CV_GENERATED" } });
+  await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "FIT_CALCULATED", detail: safeAuditDetail(fit.recommendation) } });
+  if (cvId) await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "CV_GENERATED", detail: safeAuditDetail(`v${version}`) } });
+  if (coverLetterId) await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "COVER_LETTER_GENERATED", detail: safeAuditDetail(`v${version}`) } });
+  if (answers.length) await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "QUESTIONS_GENERATED", detail: safeAuditDetail(`${answers.length}`) } });
+  await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "PACKAGE_PREPARED", detail: safeAuditDetail(`v${version}`) } });
   const followUp = await prisma.applicationFollowUp.findFirst({ where: { applicationId: application.id } });
   if (!followUp) {
     await prisma.applicationFollowUp.create({
@@ -426,6 +438,7 @@ function fitData(candidateId: string, fit: ReturnType<typeof scoreJobFit>): Omit
       blockers: fit.blockers,
       missingInformation: fit.missingInformation,
       uncertain: fit.uncertain,
+      selections: fit.selections,
       responsibilities: fit.responsibilities,
       transferable: fit.transferable,
       skills: fit.recommendedSkills,

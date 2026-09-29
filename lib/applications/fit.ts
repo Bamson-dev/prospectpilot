@@ -1,4 +1,5 @@
 import type { CandidateFactInput, CandidateProjectInput, CandidateRecord, CareerProfile, ExtractedRequirement, JobInput } from "@/lib/applications/types";
+import { selectEvidence, type EvidenceSelection } from "@/lib/applications/evidence-selection";
 import { contactIsReady } from "@/lib/applications/seed-data";
 
 const PROFILE_TERMS: Record<CareerProfile, string[]> = {
@@ -38,6 +39,7 @@ export type FitResult = {
   cvStructure: string[];
   responsibilities: string[];
   recommendation: "PREPARE" | "REVIEW" | "MANUAL_REVIEW" | "DO_NOT_PREPARE" | "SKIP";
+  selections: EvidenceSelection[];
 };
 
 export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requirements: ExtractedRequirement[]): FitResult {
@@ -99,6 +101,7 @@ export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requireme
   const selectedProjects = (projectHits.length ? projectHits : rankProjects(verifiedProjects, job)).slice(0, 3);
   const skills = unique(selectedFacts.flatMap((fact) => fact.skills ?? []).concat(selectedProjects.flatMap((project) => project.technologies)));
   const legalUnknown = uncertain.some((item) => /authorization|visa|salary|notice|location/i.test(item)) || missingInformation.includes("work authorization");
+  const selections = [...required, ...preferred].map((requirement) => selectEvidence(requirement.text, verifiedFacts));
   const recommendation = selectedFacts.length === 0 && selectedProjects.length === 0
     ? "DO_NOT_PREPARE"
     : blockers.length || missing.length
@@ -131,6 +134,7 @@ export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requireme
     cvStructure: ["Summary", "Skills", "Experience", "Projects"],
     responsibilities: unique(responsibilities).slice(0, 8),
     recommendation,
+    selections,
   };
 }
 
@@ -197,8 +201,8 @@ function supportingFact(requirement: ExtractedRequirement, facts: CandidateFactI
     return fact?.fact;
   }
   if (requirement.kind === "TECHNOLOGY") {
-    const fact = facts.find((item) => (item.technologies ?? []).some((tech) => requirement.text.toLowerCase().includes(tech.toLowerCase())));
-    if (fact) return fact.fact;
+    const fact = facts.find((item) => (item.technologies ?? []).some((tech) => sameName(requirement.text, tech)));
+    return fact?.fact;
   }
   if (!overlaps(requirement.text, corpus)) return undefined;
   const ranked = rankFacts(facts, { title: requirement.text, companyName: "", description: requirement.text, applicationUrl: "" });
@@ -251,6 +255,11 @@ function rankProjects(projects: CandidateProjectInput[], job: JobInput) {
 
 function overlapCount(fact: string, text: string) {
   return tokenize(fact).filter((token) => text.includes(token)).length;
+}
+
+function sameName(requirement: string, technology: string) {
+  const wanted = technology.toLowerCase().replace(/[^a-z0-9+#]+/g, "");
+  return wanted.length > 1 && requirement.toLowerCase().replace(/[^a-z0-9+#]+/g, " ").split(/\s+/).some((token) => token.replace(/[^a-z0-9+#]+/g, "") === wanted);
 }
 
 function unique(values: string[]) {

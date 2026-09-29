@@ -4,6 +4,8 @@ import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { applicationPreview } from "@/lib/applications/preview";
+import { applicationReadinessReport } from "@/lib/applications/application-readiness";
+import { assessWriting } from "@/lib/applications/writing-quality";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
 
@@ -32,6 +34,20 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
   const analysis = readAnalysis(application.vacancy.fit?.analysis);
   const cv = documents.find((document) => document.kind === "CV");
   const letter = documents.find((document) => document.kind === "COVER_LETTER");
+  const report = applicationReadinessReport({
+    candidateName: application.candidate.fullName,
+    jobTitle: application.vacancy.title,
+    cvReady: Boolean(cv),
+    coverLetterReady: Boolean(letter),
+    contactReady: !application.candidate.email.endsWith("@invalid.test"),
+    workAuthorization: application.candidate.workAuthorization,
+    salary: application.answers.find((answer) => answer.kind === "SALARY")?.answer ?? null,
+    salaryAsked: application.answers.some((answer) => answer.kind === "SALARY"),
+    educationKnown: false,
+    reviewQuestions: application.answers.filter((answer) => answer.status !== "ANSWERED").length,
+    writing: letter ? assessWriting({ text: letter.text, jobDescription: application.vacancy.description }).status : "REVIEW_REQUIRED",
+    facts: application.package?.warnings.some((warning) => /unsupported/i.test(warning)) ? "FAIL" : "PASS",
+  });
   const preview = applicationPreview({
     company: application.vacancy.companyName,
     role: application.vacancy.title,
@@ -68,6 +84,15 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <p className="mt-2 text-sm">Source {application.source}. <a className="text-tide" href={application.applicationUrl} target="_blank" rel="noreferrer">Open application URL</a></p>
       </Panel>
       <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Final readiness</h2>
+        <p className="mt-2 text-sm">CV {report.cv}. Cover letter {report.coverLetter}. Contact {report.contact}. Work authorization {report.workAuthorization}. Salary {report.salary}.</p>
+        <p className="text-sm">Writing {report.writing}. Facts {report.facts}. Questions {report.requiredQuestions} review-required. Security {report.security}. CAPTCHA {report.captcha}.</p>
+        <p className="mt-2 text-sm">Overall {report.overall}. Package version {application.package?.version ?? 1}.</p>
+        <ul className="mt-2 list-disc pl-5 text-sm">
+          {report.blockers.map((item) => <li key={`${item.class}-${item.label}`}>{item.class}: {item.label}</li>)}
+        </ul>
+      </Panel>
+      <Panel className="mb-3">
         <h2 className="font-display text-2xl">Application preview</h2>
         <pre className="mt-2 whitespace-pre-wrap text-sm">{preview.text}</pre>
       </Panel>
@@ -81,7 +106,8 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <List title="Uncertain" items={analysis?.uncertain} />
         <List title="Blockers" items={analysis?.blockers} />
         <List title="Missing candidate information" items={analysis?.missingInformation} />
-        {analysis?.evidence?.length ? analysis.evidence.map((item) => <p key={item.requirement} className="mt-2 text-sm">{item.requirement} — {item.fact}</p>) : null}
+        {analysis?.evidence?.length ? analysis.evidence.map((item) => <p key={item.requirement} className="mt-2 text-sm">{item.requirement}: {item.fact}</p>) : null}
+        {analysis?.selections?.length ? analysis.selections.map((item) => <p key={`${item.requirement}-${item.match}`} className="mt-2 text-sm">{item.requirement}: {item.match}{item.evidence ? ` · ${item.evidence}` : ""}</p>) : null}
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Package</h2>
@@ -103,8 +129,8 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
           <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="APPROVED" /><SubmitButton pendingLabel="Saving">Approve</SubmitButton></form>
           <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="REJECTED" /><SubmitButton pendingLabel="Saving" variant="secondary">Reject</SubmitButton></form>
           <a className="inline-flex items-center rounded border border-line px-3 py-2 text-sm" href="/jobs/candidate">Edit</a>
-          <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="part" value="cv" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate CV</SubmitButton></form>
-          <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="part" value="letter" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate letter</SubmitButton></form>
+          <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="reprepare" value="on" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate CV</SubmitButton></form>
+          <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="reprepare" value="on" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate letter</SubmitButton></form>
         </div>
       </Panel>
       <Panel className="mb-3">
@@ -177,6 +203,14 @@ function readAnalysis(value: unknown) {
     blockers: strings(row.blockers),
     uncertain: strings(row.uncertain),
     missingInformation: strings(row.missingInformation),
+    selections: Array.isArray(row.selections)
+      ? row.selections.flatMap((item) => {
+          if (!item || typeof item !== "object") return [];
+          const entry = item as { requirement?: unknown; evidence?: unknown; match?: unknown };
+          if (typeof entry.requirement !== "string" || typeof entry.match !== "string") return [];
+          return [{ requirement: entry.requirement, evidence: typeof entry.evidence === "string" ? entry.evidence : "", match: entry.match }];
+        })
+      : [],
     evidence: Array.isArray(row.evidence)
       ? row.evidence.flatMap((item) => {
           if (!item || typeof item !== "object") return [];

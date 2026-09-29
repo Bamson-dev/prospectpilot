@@ -125,7 +125,7 @@ export async function ensureCandidate(organizationId: string) {
 export async function loadCandidateRecord(candidateId: string): Promise<CandidateRecord> {
   const candidate = await prisma.candidate.findUnique({
     where: { id: candidateId },
-    include: { facts: true, projects: true, experiences: true },
+    include: { facts: true, projects: true, experiences: true, preference: true, education: true, certifications: true },
   });
   if (!candidate) throw new AppError("Candidate not found.");
   return {
@@ -137,6 +137,16 @@ export async function loadCandidateRecord(candidateId: string): Promise<Candidat
     location: candidate.location,
     yearsExperience: candidate.yearsExperience,
     workAuthorization: candidate.workAuthorization,
+    sponsorship: candidate.sponsorship,
+    availability: candidate.availability,
+    noticePeriod: candidate.noticePeriod,
+    linkedinUrl: candidate.linkedinUrl,
+    githubUrl: candidate.githubUrl,
+    portfolioUrl: candidate.portfolioUrl,
+    institution: candidate.education[0]?.institution ?? null,
+    degree: candidate.education[0]?.degree ?? null,
+    certification: candidate.certifications[0]?.name ?? null,
+    salaryExpectation: salaryText(candidate.preference),
     facts: candidate.facts.map((fact) => ({
       id: fact.id,
       category: fact.category,
@@ -169,6 +179,13 @@ export async function loadCandidateRecord(candidateId: string): Promise<Candidat
       profiles: item.profiles,
     })),
   };
+}
+
+function salaryText(preference: { salaryMin: number | null; salaryTarget: number | null; salaryCurrency: string | null; salaryPeriod: string | null } | null) {
+  if (!preference?.salaryCurrency || !preference.salaryPeriod) return null;
+  if (preference.salaryMin == null && preference.salaryTarget == null) return null;
+  const amount = [preference.salaryMin, preference.salaryTarget].filter((value) => value != null).join("-");
+  return `${amount} ${preference.salaryCurrency} per ${preference.salaryPeriod}`;
 }
 
 export async function storeDiscoveredJobs(organizationId: string, jobs: DiscoveredJob[]) {
@@ -306,6 +323,12 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
     contactReady: contactIsReady(candidate.email),
     unresolvedQuestions: answers.some((answer) => answer.status !== "ANSWERED"),
     documentError: warnings.some((warning) => /document|readability/i.test(warning)),
+    workAuthorizationKnown: Boolean(candidate.workAuthorization?.trim()),
+    sponsorshipKnown: Boolean(candidate.sponsorship?.trim()),
+    salaryKnown: Boolean(candidate.salaryExpectation?.trim()),
+    noticeKnown: Boolean(candidate.noticePeriod?.trim()),
+    uncertainRequirement: fit.uncertain.length > 0,
+    ambiguousQuestion: answers.some((answer) => answer.status === "REVIEW_REQUIRED"),
   });
   const status = stopped ? "FAILED" : readiness;
   const timings = emptyTimings(Date.now() - started);

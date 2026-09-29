@@ -26,15 +26,25 @@ export function classifyQuestion(question: string): ApplicationQuestionKind {
   return "OTHER";
 }
 
+function known(value: string | null | undefined) {
+  const text = (value ?? "").trim();
+  return text ? text : null;
+}
+
 function storedFact(candidate: CandidateRecord, pattern: RegExp) {
   return candidate.facts.find((fact) => fact.verified && pattern.test(fact.fact))?.fact ?? null;
 }
 
 export function answerQuestion(question: string, job: JobInput, candidate: CandidateRecord, fit: FitResult): QuestionDraft {
   const kind = classifyQuestion(question);
+  if (/sponsor/i.test(question)) {
+    const answer = known(candidate.sponsorship) ?? storedFact(candidate, /^sponsorship:/i);
+    return { question, kind: "WORK_AUTHORIZATION", answer, status: answer ? "ANSWERED" : "REVIEW_REQUIRED" };
+  }
   if (kind === "SALARY" || kind === "WORK_AUTHORIZATION" || kind === "AVAILABILITY") {
     const pattern = kind === "SALARY" ? /^salary expectation:/i : kind === "WORK_AUTHORIZATION" ? /^work authorization:/i : /^(notice period|availability):/i;
-    const answer = storedFact(candidate, pattern);
+    const direct = kind === "SALARY" ? known(candidate.salaryExpectation) : kind === "WORK_AUTHORIZATION" ? known(candidate.workAuthorization) : known(candidate.noticePeriod) ?? known(candidate.availability);
+    const answer = direct ?? storedFact(candidate, pattern);
     return { question, kind, answer, status: answer ? "ANSWERED" : "REVIEW_REQUIRED" };
   }
   if (kind === "BEHAVIORAL" || kind === "COMPANY_SPECIFIC") {

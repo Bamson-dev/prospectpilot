@@ -76,6 +76,16 @@ export type CandidateRecord = {
   location?: string | null;
   yearsExperience?: number | null;
   workAuthorization?: string | null;
+  sponsorship?: string | null;
+  availability?: string | null;
+  noticePeriod?: string | null;
+  linkedinUrl?: string | null;
+  githubUrl?: string | null;
+  portfolioUrl?: string | null;
+  salaryExpectation?: string | null;
+  institution?: string | null;
+  degree?: string | null;
+  certification?: string | null;
   facts: CandidateFactInput[];
   projects: CandidateProjectInput[];
   experiences: CandidateExperienceInput[];
@@ -131,4 +141,6 @@ export type ApplicationStatus =
   | "REJECTED"
   | "VERIFIED"
   | "PREPARING"
-  | "FIT_EVALUATED";
+  | "FIT_EVALUATED"
+  | "READY_FOR_SUBMISSION"
+  | "VERIFICATION_PENDING";

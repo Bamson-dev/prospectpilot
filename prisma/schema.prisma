@@ -720,6 +720,8 @@ enum ApplicationPackageStatus {
   VERIFIED
   PREPARING
   FIT_EVALUATED
+  READY_FOR_SUBMISSION
+  VERIFICATION_PENDING
 }
 
 enum ApplicationEventType {

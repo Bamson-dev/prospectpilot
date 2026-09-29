@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { decideApplication, enqueueApplicationPreparation } from "@/actions/job-applications";
+import { decideApplication, enqueueApplicationPreparation, recordSubmissionConfirmation } from "@/actions/job-applications";
 import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -70,7 +70,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Review</h2>
-        <p className="mt-2 text-sm text-muted">Approval does not submit the application.</p>
+        <p className="mt-2 text-sm text-muted">Approve does not submit. Submission needs a separate confirmation, and this build still will not send the application.</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="APPROVED" /><SubmitButton pendingLabel="Saving">Approve</SubmitButton></form>
           <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="REJECTED" /><SubmitButton pendingLabel="Saving" variant="secondary">Reject</SubmitButton></form>
@@ -78,6 +78,27 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
           <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="part" value="cv" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate CV</SubmitButton></form>
           <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="part" value="letter" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate letter</SubmitButton></form>
         </div>
+      </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Confirm submission</h2>
+        <ul className="mt-2 list-disc pl-5 text-sm">
+          <li>Company: {application.vacancy.companyName}</li>
+          <li>Role: {application.vacancy.title}</li>
+          <li>Application URL: {application.applicationUrl}</li>
+          <li>Selected CV: {cv?.fileName ?? "No CV stored"}</li>
+          <li>Cover letter: {letter?.fileName ?? "No cover letter stored"}</li>
+          <li>Work authorization: {application.candidate.workAuthorization || "Unknown"}</li>
+          <li>Sponsorship: {application.candidate.sponsorship || "Unknown"}</li>
+          <li>Salary: {application.answers.find((answer) => answer.kind === "SALARY")?.answer || "Unknown"}</li>
+        </ul>
+        <p className="mt-2 text-sm">Answers</p>
+        {application.answers.map((answer) => <p key={`${answer.id}-confirm`} className="text-sm">{answer.question} · {answer.status}</p>)}
+        <p className="mt-2 text-sm text-muted">Review-required answers stay listed. Typing the confirmation phrase records the request and does not submit.</p>
+        <form action={recordSubmissionConfirmation} className="mt-3 grid gap-2">
+          <input type="hidden" name="id" value={application.id} />
+          <input name="phrase" placeholder="Type CONFIRM SUBMISSION" autoComplete="off" />
+          <SubmitButton pendingLabel="Checking">Confirm submission</SubmitButton>
+        </form>
       </Panel>
       <Panel>
         <h2 className="font-display text-2xl">History</h2>

@@ -4,6 +4,7 @@ import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { requireOrganization } from "@/lib/current-user";
 import { missingCandidateFields, settingValue } from "@/lib/applications/candidate-fields";
+import { candidateReadiness } from "@/lib/applications/readiness";
 import { ensureCandidate } from "@/lib/applications/service";
 import { prisma } from "@/lib/db";
 
@@ -18,6 +19,24 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
     include: { profiles: true, experiences: true, projects: true, facts: true, writing: true, preference: true, education: true, certifications: true },
   });
   if (!candidate) return null;
+  const readiness = candidateReadiness({
+    email: candidate.email,
+    phone: candidate.phone,
+    location: candidate.location,
+    linkedinUrl: candidate.linkedinUrl ?? settingValue(candidate.facts, "linkedin"),
+    portfolioUrl: candidate.portfolioUrl,
+    githubUrl: candidate.githubUrl,
+    workAuthorization: candidate.workAuthorization ?? settingValue(candidate.facts, "work-authorization"),
+    sponsorship: candidate.sponsorship,
+    availability: candidate.availability,
+    noticePeriod: candidate.noticePeriod ?? settingValue(candidate.facts, "notice-period"),
+    institution: candidate.education[0]?.institution,
+    degree: candidate.education[0]?.degree,
+    certification: candidate.certifications[0]?.name,
+    salaryExpectation: candidate.preference?.salaryCurrency && candidate.preference.salaryPeriod && (candidate.preference.salaryMin != null || candidate.preference.salaryTarget != null)
+      ? `${candidate.preference.salaryMin ?? ""} ${candidate.preference.salaryCurrency}`
+      : settingValue(candidate.facts, "salary-expectation"),
+  });
   return (
     <div>
       <PageHeader title="Candidate" detail="Generated CVs use verified facts only. New facts need a source and are unverified until you mark them." />
@@ -80,6 +99,15 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
           <label className="text-sm"><input name="verified" type="checkbox" /> Mark verified</label>
           <SubmitButton pendingLabel="Saving">Add fact</SubmitButton>
         </form>
+      </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Readiness</h2>
+        <p className="mt-2 text-sm">{readiness.status}. Missing values stay unknown and are not replaced with a default.</p>
+        <ul className="mt-2 list-disc pl-5 text-sm">
+          {readiness.fields.map((field) => <li key={field.field}>{field.group} · {field.field} · {field.state}</li>)}
+        </ul>
+        <p className="mt-2 text-sm text-muted">{readiness.missing.length ? `Missing: ${readiness.missing.join(", ")}` : "Every listed field is on file."}</p>
+        <p className="mt-2 text-sm text-muted">A CV can still be generated when salary is unknown. A salary question stays review-required until you save one.</p>
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Not on file</h2>

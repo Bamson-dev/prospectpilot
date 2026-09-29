@@ -10,6 +10,7 @@ import { ensureCandidate } from "@/lib/applications/service";
 import { optionalCandidateFacts } from "@/lib/applications/candidate-fields";
 import { validateCandidateProfile } from "@/lib/applications/profile-validation";
 import { canTransition } from "@/lib/applications/state";
+import { evaluateSubmissionGate } from "@/lib/applications/submission-gate";
 import type { ApplicationStatus } from "@/lib/applications/types";
 
 export async function saveCandidateProfile(formData: FormData) {
@@ -212,6 +213,56 @@ export async function decideApplication(formData: FormData) {
     data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: decision === "APPROVED" ? "Approved for review. Not submitted." : "Rejected before submission." },
   });
   redirect(`/jobs/applications/${id}?notice=Status+saved.+Nothing+was+submitted.`);
+}
+
+export async function recordSubmissionConfirmation(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const id = String(formData.get("id") ?? "");
+  const phrase = String(formData.get("phrase") ?? "");
+  const application = await prisma.jobApplication.findFirst({
+    where: { id, organizationId: organization.id },
+    include: { vacancy: true, answers: true, candidate: true },
+  });
+  if (!application) redirect("/jobs/applications?error=Application+not+found.");
+  const reviewRequired = application.answers.filter((answer) => answer.status !== "ANSWERED").map((answer) => answer.question);
+  const cv = application.cvId
+    ? await prisma.generatedDocument.findFirst({ where: { id: application.cvId, organizationId: organization.id }, select: { fileName: true } })
+    : null;
+  const letter = application.coverLetterId
+    ? await prisma.generatedDocument.findFirst({ where: { id: application.coverLetterId, organizationId: organization.id }, select: { fileName: true } })
+    : null;
+  const gate = evaluateSubmissionGate({
+    phrase,
+    company: application.vacancy.companyName,
+    role: application.vacancy.title,
+    applicationUrl: application.applicationUrl,
+    cvFileName: cv?.fileName ?? "",
+    coverLetterFileName: letter?.fileName ?? "",
+    answers: application.answers.map((answer) => ({ question: answer.question, answer: answer.answer, status: answer.status })),
+    workAuthorization: application.candidate.workAuthorization,
+    sponsorship: application.candidate.sponsorship,
+    salary: null,
+    reviewRequired,
+    security: null,
+  }, {
+    company: application.vacancy.companyName,
+    role: application.vacancy.title,
+    applicationUrl: application.applicationUrl,
+    cvFileName: cv?.fileName ?? "",
+  });
+  if (phrase !== "CONFIRM SUBMISSION" || gate.status === "REQUIRES_MANUAL_ACTION") {
+    redirect(`/jobs/applications/${id}?error=${encodeURIComponent(gate.reason)}`);
+  }
+  if (application.status !== "APPROVED" && application.status !== "READY_FOR_SUBMISSION") {
+    redirect(`/jobs/applications/${id}?error=Approve+the+package+before+confirming+submission.`);
+  }
+  if (application.status === "APPROVED" && canTransition(application.status, "READY_FOR_SUBMISSION")) {
+    await prisma.jobApplication.update({ where: { id: application.id }, data: { status: "READY_FOR_SUBMISSION", blockedReason: gate.reason } });
+  }
+  await prisma.applicationEvent.create({
+    data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: "Confirmation recorded. Nothing was submitted." },
+  });
+  redirect(`/jobs/applications/${id}?notice=Confirmation+recorded.+Nothing+was+submitted.`);
 }
 
 export async function archiveGeneratedDocument(formData: FormData) {

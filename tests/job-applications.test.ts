@@ -104,7 +104,9 @@ describe("job application evidence", () => {
   });
 
   it("stops submission on captcha and limits retries", () => {
-    expect(canTransition("READY_TO_SUBMIT", "SUBMITTING")).toBe(true);
+    expect(canTransition("READY_TO_SUBMIT", "SUBMITTING")).toBe(false);
+    expect(canTransition("READY_FOR_SUBMISSION", "SUBMITTING")).toBe(true);
+    expect(canTransition("APPROVED", "SUBMITTING")).toBe(false);
     expect(canTransition("SUBMITTING", "SUBMITTED")).toBe(true);
     expect(canTransition("PREPARED", "SUBMITTED")).toBe(false);
     expect(statusAfterBlock("captcha")).toBe("REQUIRES_MANUAL_ACTION");
@@ -158,8 +160,8 @@ describe("local application form", () => {
     try {
       const page = await browser.newPage();
       await page.goto(`http://127.0.0.1:${port}/`);
-      const result = await fillApplicationPage(page, { firstName: "Bamidele", email: "bamidele@example.com" }, { submit: false });
-      expect(result.status).toBe("READY_FOR_REVIEW");
+      const result = await fillApplicationPage(page, { firstName: "Bamidele", email: "bamidele@example.com" }, { mode: "PREPARE_ONLY", submit: false });
+      expect(result.status).toBe("READY_FOR_HUMAN_SUBMISSION");
       expect(result.submitted).toBe(false);
       expect(await page.locator("[name=first_name]").inputValue()).toBe("Bamidele");
     } finally {
@@ -185,8 +187,20 @@ describe("local application form", () => {
     try {
       const page = await browser.newPage();
       await page.goto(`http://127.0.0.1:${port}/`);
-      const submitted = await fillApplicationPage(page, { email: "bamidele@example.com" }, { submit: true });
-      expect(submitted.status).toBe("SUBMITTED");
+      const submitted = await fillApplicationPage(page, { email: "bamidele@example.com" }, { submit: true, mode: "PREPARE_ONLY" });
+      expect(submitted.submitted).toBe(false);
+      expect(submitted.status).toBe("READY_FOR_HUMAN_SUBMISSION");
+      const previous = process.env.APPLICATION_LIVE_SUBMIT;
+      process.env.APPLICATION_LIVE_SUBMIT = "true";
+      try {
+        await page.goto(`http://127.0.0.1:${port}/`);
+        const confirmed = await fillApplicationPage(page, { email: "bamidele@example.com" }, { mode: "CONFIRMED_SUBMIT", confirmationPhrase: "CONFIRM SUBMISSION" });
+        expect(confirmed.submitted).toBe(true);
+        expect(confirmed.status).toBe("SUBMITTED");
+      } finally {
+        if (previous === undefined) delete process.env.APPLICATION_LIVE_SUBMIT;
+        else process.env.APPLICATION_LIVE_SUBMIT = previous;
+      }
       await page.goto(`http://127.0.0.1:${port}/captcha`);
       const blocked = await fillApplicationPage(page, {}, { submit: true });
       expect(blocked.status).toBe("REQUIRES_MANUAL_ACTION");

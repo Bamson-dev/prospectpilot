@@ -16,6 +16,8 @@ export type StageTimings = {
   coverLetterMs: number;
   questionsMs: number;
   packageMs: number;
+  browserInspectionMs: number;
+  browserPreparationMs: number;
   totalMs: number;
   queueWaitMs: number;
   deepseekCalls: number;
@@ -33,6 +35,8 @@ export function emptyTimings(totalMs = 0): StageTimings {
     coverLetterMs: 0,
     questionsMs: 0,
     packageMs: 0,
+    browserInspectionMs: 0,
+    browserPreparationMs: 0,
     totalMs,
     queueWaitMs: 0,
     deepseekCalls: 0,
@@ -42,8 +46,21 @@ export function emptyTimings(totalMs = 0): StageTimings {
   };
 }
 
-export function packageReadiness(input: { claimsOk: boolean; contactReady: boolean; unresolvedQuestions: boolean; documentError: boolean }) {
-  if (input.claimsOk && input.contactReady && !input.unresolvedQuestions && !input.documentError) return "READY_FOR_REVIEW" as const;
+export function packageReadiness(input: {
+  claimsOk: boolean;
+  contactReady: boolean;
+  unresolvedQuestions: boolean;
+  documentError: boolean;
+  workAuthorizationKnown?: boolean;
+  sponsorshipKnown?: boolean;
+  salaryKnown?: boolean;
+  noticeKnown?: boolean;
+  uncertainRequirement?: boolean;
+  ambiguousQuestion?: boolean;
+}) {
+  const employmentUnknown = input.workAuthorizationKnown === false || input.sponsorshipKnown === false || input.salaryKnown === false || input.noticeKnown === false;
+  const needsReview = !input.claimsOk || !input.contactReady || input.unresolvedQuestions || input.documentError || employmentUnknown || input.uncertainRequirement === true || input.ambiguousQuestion === true;
+  if (!needsReview) return "READY_FOR_REVIEW" as const;
   return "REQUIRES_REVIEW" as const;
 }
 

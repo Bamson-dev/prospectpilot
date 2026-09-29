@@ -154,7 +154,11 @@ export function chooseProfile(job: JobInput): CareerProfile {
   if (/founder|co-founder/.test(title)) return "FOUNDER";
   if (/go-to-market|\bgtm\b|head of growth|growth lead/.test(title)) return "GROWTH";
   if (/performance marketing|growth marketing|digital marketing|marketing manager/.test(title)) return "MARKETING";
+  if (/technical project manager/.test(title)) return "HYBRID";
   if (/product manager|product engineer/.test(title)) return "SAAS";
+  if (/\bproject manager\b|\bprogram manager\b|\bdelivery manager\b/.test(title)) return "FOUNDER";
+  if (/business development|partnership manager|head of partnerships/.test(title)) return "GROWTH";
+  if (/operations manager|chief of staff|\bstrategy\b/.test(title)) return "FOUNDER";
   if (/frontend developer|front-end developer|web developer|website developer|landing page developer|e-?commerce developer|ui-focused/.test(title)) return "WEB";
   const software = scoreTerms(text, PROFILE_TERMS.SOFTWARE);
   const marketing = scoreTerms(text, PROFILE_TERMS.MARKETING) + scoreTerms(text, PROFILE_TERMS.GROWTH);

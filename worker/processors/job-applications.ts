@@ -33,7 +33,7 @@ export async function processJobDiscovery(organizationId: string, query: string)
     if (!assessed) continue;
     summary.analyzed += 1;
     summary.requirements += assessed.requirements.length;
-    if (assessed.state === "QUALIFIED") summary.qualified += 1;
+    if (assessed.state === "APPLY") summary.qualified += 1;
     else if (assessed.state === "NOT_A_FIT") summary.notAFit += 1;
     else summary.review += 1;
   }

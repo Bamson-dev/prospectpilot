@@ -18,7 +18,8 @@ export default async function VacancyPage({ params }: { params: Promise<{ id: st
   const explanation = readExplanation(job.fit?.analysis);
   const selections = readSelections(job.fit?.analysis);
   const original = readOriginal(job.rawData);
-  const state = explanation?.state ?? fitState({ recommendation: job.fit?.recommendation ?? "REVIEW" });
+  const opportunity = explanation?.opportunity ?? null;
+  const state = displayState(explanation?.state ?? fitState({ recommendation: job.fit?.recommendation ?? "REVIEW" }));
   return (
     <div>
       <PageHeader title={job.title} detail={`${job.companyName} · ${label(state)}`} />
@@ -37,6 +38,24 @@ export default async function VacancyPage({ params }: { params: Promise<{ id: st
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">{label(state)}</h2>
+        {opportunity ? (
+          <div className="mt-2 text-sm">
+            <p>Career lane: {opportunity.lanes.join(", ") || "Unknown"}</p>
+            <p>Primary profile: {opportunity.primaryProfile ?? "None"}</p>
+            <p>Secondary profiles: {opportunity.secondaryProfiles.join(", ") || "None"}</p>
+            <p>Document profile: {opportunity.documentProfile}</p>
+            <p className="mt-2">{opportunity.reason}</p>
+            <Group title="Direct evidence" items={opportunity.direct} />
+            <Group title="Transferable evidence" items={opportunity.transferable} />
+            <Group title="Adjacent evidence" items={opportunity.adjacent} />
+            <Group title="Experience-based evidence" items={opportunity.experienceBased} />
+            <Group title="Stretch evidence" items={opportunity.stretch} />
+            <Group title="Unknown requirements" items={opportunity.unknown} />
+            <Group title="Disqualifiers" items={opportunity.disqualifiers} />
+            <p className="mt-2">Missing preferred: {opportunity.missingPreferred.join("; ") || "None"}</p>
+            <p>Evidence gaps: {opportunity.gaps.join("; ") || "None"}</p>
+          </div>
+        ) : null}
         <Group title="Direct matches" items={explanation?.direct ?? []} />
         <Group title="Transferable matches" items={explanation?.transferable ?? []} />
         <Group title="Missing hard requirements" items={explanation?.missingHard ?? []} />
@@ -58,7 +77,12 @@ export default async function VacancyPage({ params }: { params: Promise<{ id: st
 
 function label(state: string) {
   if (state === "NOT_A_FIT") return "NOT A FIT";
+  if (state === "QUALIFIED") return "APPLY";
   return state;
+}
+
+function displayState(state: string) {
+  return state === "QUALIFIED" ? "APPLY" : state;
 }
 
 function Group({ title, items }: { title: string; items: Array<{ requirement: string; evidence?: string | null; reason?: string; source?: string | null; verification?: string | null }> }) {
@@ -77,15 +101,39 @@ function readExplanation(value: unknown) {
   const explanation = (value as { explanation?: unknown }).explanation;
   if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return null;
   const row = explanation as Record<string, unknown>;
-  const state = row.state === "QUALIFIED" || row.state === "REVIEW" || row.state === "NOT_A_FIT" ? row.state : "REVIEW";
+  const state = row.state === "APPLY" || row.state === "QUALIFIED" || row.state === "REVIEW" || row.state === "NOT_A_FIT" ? row.state : "REVIEW";
+  const opportunity = readOpportunity(row.opportunity);
   return {
     state,
+    opportunity,
     direct: detailRows(row.direct),
     transferable: detailRows(row.transferable),
     missingHard: detailRows(row.missingHard),
     uncertainHard: detailRows(row.uncertainHard),
     preferred: detailRows(row.preferred),
     responsibilities: Array.isArray(row.responsibilities) ? row.responsibilities.filter((item): item is string => typeof item === "string") : [],
+  };
+}
+
+function readOpportunity(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const links = (key: string) => detailRows(row[key]).map((item) => ({ requirement: item.requirement, evidence: item.evidence, reason: item.reason }));
+  return {
+    lanes: Array.isArray(row.lanes) ? row.lanes.filter((item): item is string => typeof item === "string") : [],
+    primaryProfile: typeof row.primaryProfile === "string" ? row.primaryProfile : null,
+    secondaryProfiles: Array.isArray(row.secondaryProfiles) ? row.secondaryProfiles.filter((item): item is string => typeof item === "string") : [],
+    documentProfile: typeof row.documentProfile === "string" ? row.documentProfile : "",
+    reason: typeof row.reason === "string" ? row.reason : "",
+    direct: links("direct"),
+    transferable: links("transferable"),
+    adjacent: links("adjacent"),
+    experienceBased: links("experienceBased"),
+    stretch: links("stretch"),
+    unknown: links("unknown"),
+    disqualifiers: links("disqualifiers"),
+    missingPreferred: Array.isArray(row.missingPreferred) ? row.missingPreferred.filter((item): item is string => typeof item === "string") : [],
+    gaps: Array.isArray(row.gaps) ? row.gaps.filter((item): item is string => typeof item === "string") : [],
   };
 }
 

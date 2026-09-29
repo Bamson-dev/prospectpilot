@@ -98,7 +98,7 @@ describe("job discovery", () => {
     const vue = assessed.fit.selections.find((item) => /vue/i.test(item.requirement));
     expect(vue?.match === "DIRECT" && /vue/i.test(vue.evidence ?? "")).not.toBe(true);
     expect(fitState({ recommendation: "REVIEW" })).toBe("REVIEW");
-    expect(fitState({ recommendation: "PREPARE" })).toBe("QUALIFIED");
+    expect(fitState({ recommendation: "PREPARE" })).toBe("APPLY");
     expect(fitState({ recommendation: "DO_NOT_PREPARE" })).toBe("NOT_A_FIT");
   });
 

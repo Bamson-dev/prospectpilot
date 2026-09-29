@@ -59,7 +59,7 @@ describe("qualification", () => {
 
   it("qualifies direct hard matches while preferred gaps stay visible", () => {
     const assessed = assessVacancy(job("Requirements\nExperience with TypeScript and PostgreSQL.\nGraphQL is preferred.\nYou will build APIs."), person);
-    expect(assessed.state).toBe("QUALIFIED");
+    expect(assessed.state).toBe("APPLY");
     expect(assessed.explanation.direct.some((item) => /typescript/i.test(item.requirement) && /typescript/i.test(item.evidence))).toBe(true);
     expect(assessed.explanation.preferred.some((item) => /graphql/i.test(item.requirement) && item.match === "MISSING")).toBe(true);
     expect(assessed.explanation.missingHard).toEqual([]);
@@ -92,7 +92,7 @@ describe("qualification", () => {
       [{ kind: "TECHNOLOGY", text: "TypeScript", required: true, role: "HARD_REQUIREMENT" }],
       [{ requirement: "TypeScript", evidence: "ProspectPilot uses TypeScript", source: "repository", match: "DIRECT", confidence: 0.9, reason: "Verified evidence names typescript." }],
     );
-    expect(explanation.state).toBe("QUALIFIED");
     expect(explanation.direct[0]?.evidence).toBe("ProspectPilot uses TypeScript");
+    expect(explanation.state).toBe("REVIEW");
   });
 });

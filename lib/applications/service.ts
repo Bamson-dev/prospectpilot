@@ -282,7 +282,7 @@ export async function analyzeVacancy(organizationId: string, vacancyId: string) 
   });
   await prisma.jobVacancy.update({
     where: { id: vacancyId },
-    data: { status: assessed.state === "QUALIFIED" ? "QUALIFIED" : "ANALYZED" },
+    data: { status: assessed.state === "APPLY" ? "QUALIFIED" : "ANALYZED" },
   });
   return assessed;
 }

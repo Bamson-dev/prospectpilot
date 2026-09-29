@@ -28,13 +28,13 @@ export default async function QualifiedJobsPage({ searchParams }: { searchParams
   const visible = jobs.filter((job) => !query.fit || fitLabel(job) === query.fit);
   return (
     <div>
-      <PageHeader title="Qualified jobs" detail="Missing requirements stay visible. The fit state comes from verified evidence, not an unexplained score." />
+      <PageHeader title="Opportunities" detail="APPLY means verified evidence supports preparing an application. REVIEW means a material uncertainty remains. NOT A FIT means a clear blocker. Preferred gaps stay visible." />
       <JobsNav />
       <Panel className="mb-3">
         <form className="grid gap-2 md:grid-cols-4">
           <select name="fit" defaultValue={query.fit ?? ""}>
             <option value="">Any fit</option>
-            <option value="QUALIFIED">Qualified</option>
+            <option value="APPLY">Apply</option>
             <option value="REVIEW">Review</option>
             <option value="NOT_A_FIT">Not a fit</option>
           </select>
@@ -93,7 +93,12 @@ function readExplanation(value: unknown) {
   const explanation = row.explanation;
   if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return null;
   const item = explanation as { state?: unknown; direct?: unknown; missingHard?: unknown; uncertainHard?: unknown };
-  const state = item.state === "QUALIFIED" || item.state === "REVIEW" || item.state === "NOT_A_FIT" ? item.state : row.qualification === "QUALIFIED" || row.qualification === "REVIEW" || row.qualification === "NOT_A_FIT" ? row.qualification : null;
+  const raw = item.state === "APPLY" || item.state === "QUALIFIED" || item.state === "REVIEW" || item.state === "NOT_A_FIT"
+    ? item.state
+    : row.qualification === "APPLY" || row.qualification === "QUALIFIED" || row.qualification === "REVIEW" || row.qualification === "NOT_A_FIT"
+      ? row.qualification
+      : null;
+  const state = raw === "QUALIFIED" ? "APPLY" : raw;
   return {
     state,
     direct: rows(item.direct),

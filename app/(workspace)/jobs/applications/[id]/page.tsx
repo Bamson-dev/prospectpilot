@@ -50,6 +50,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <List title="Required gaps" items={analysis?.requiredGaps} />
         <List title="Preferred matches" items={analysis?.preferredMatches} />
         <List title="Preferred gaps" items={analysis?.preferredGaps} />
+        <List title="Uncertain" items={analysis?.uncertain} />
         <List title="Blockers" items={analysis?.blockers} />
         <List title="Missing candidate information" items={analysis?.missingInformation} />
         {analysis?.evidence?.length ? analysis.evidence.map((item) => <p key={item.requirement} className="mt-2 text-sm">{item.requirement} — {item.fact}</p>) : null}
@@ -57,7 +58,8 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Package</h2>
         <p className="mt-2 text-sm">Selected profile {application.profile}.</p>
-        {cv ? <p className="mt-2 text-sm"><a className="text-tide" href={`/api/jobs/documents/${cv.id}`}>{cv.fileName}</a></p> : <p className="mt-2 text-sm text-muted">No CV stored. A placeholder email blocks document generation.</p>}
+        {documents.filter((document) => document.kind === "CV").map((document) => <p key={document.id} className="mt-2 text-sm"><a className="text-tide" href={`/api/jobs/documents/${document.id}`}>{document.fileName}</a></p>)}
+        {!cv ? <p className="mt-2 text-sm text-muted">No CV stored. A placeholder email blocks document generation.</p> : null}
         {cv ? <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-sm">{cv.text.slice(0, 1200)}</pre> : null}
         {letter ? <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap text-sm">{letter.text.slice(0, 1200)}</pre> : <p className="mt-2 text-sm text-muted">No cover letter stored.</p>}
       </Panel>
@@ -72,7 +74,9 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <div className="mt-3 flex flex-wrap gap-2">
           <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="APPROVED" /><SubmitButton pendingLabel="Saving">Approve</SubmitButton></form>
           <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="REJECTED" /><SubmitButton pendingLabel="Saving" variant="secondary">Reject</SubmitButton></form>
-          <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate</SubmitButton></form>
+          <a className="inline-flex items-center rounded border border-line px-3 py-2 text-sm" href="/jobs/candidate">Edit</a>
+          <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="part" value="cv" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate CV</SubmitButton></form>
+          <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="part" value="letter" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate letter</SubmitButton></form>
         </div>
       </Panel>
       <Panel>
@@ -108,6 +112,7 @@ function readAnalysis(value: unknown) {
     preferredMatches: strings(row.preferredMatches),
     preferredGaps: strings(row.preferredGaps),
     blockers: strings(row.blockers),
+    uncertain: strings(row.uncertain),
     missingInformation: strings(row.missingInformation),
     evidence: Array.isArray(row.evidence)
       ? row.evidence.flatMap((item) => {

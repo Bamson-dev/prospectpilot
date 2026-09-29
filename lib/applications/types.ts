@@ -38,6 +38,7 @@ export type CandidateFactInput = {
   skills?: string[];
   technologies?: string[];
   keywords?: string[];
+  sourceType?: "CANDIDATE_ENTERED" | "REPOSITORY_VERIFIED" | "DOCUMENT_VERIFIED" | "SYSTEM_GENERATED";
 };
 
 export type CandidateProjectInput = {
@@ -73,16 +74,21 @@ export type CandidateRecord = {
   email: string;
   phone?: string | null;
   location?: string | null;
+  yearsExperience?: number | null;
+  workAuthorization?: string | null;
   facts: CandidateFactInput[];
   projects: CandidateProjectInput[];
   experiences: CandidateExperienceInput[];
 };
+
+export type RequirementCertainty = "required" | "preferred" | "responsibility" | "uncertain";
 
 export type ExtractedRequirement = {
   kind: RequirementKind;
   text: string;
   years?: number;
   required: boolean;
+  certainty?: RequirementCertainty;
 };
 
 export type JobInput = {
@@ -118,6 +124,7 @@ export type ApplicationStatus =
   | "SUBMITTED"
   | "VERIFICATION_REQUIRED"
   | "FAILED"
+  | "REQUIRES_REVIEW"
   | "REQUIRES_MANUAL_ACTION"
   | "WITHDRAWN"
   | "APPROVED"

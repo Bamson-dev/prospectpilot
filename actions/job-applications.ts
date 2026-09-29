@@ -8,25 +8,50 @@ import { queueJob } from "@/lib/jobs";
 import { jobDiscoveryEnabled } from "@/lib/applications/config";
 import { ensureCandidate } from "@/lib/applications/service";
 import { optionalCandidateFacts } from "@/lib/applications/candidate-fields";
+import { validateCandidateProfile } from "@/lib/applications/profile-validation";
 import { canTransition } from "@/lib/applications/state";
 import type { ApplicationStatus } from "@/lib/applications/types";
 
 export async function saveCandidateProfile(formData: FormData) {
   const { organization } = await requireOrganization("MEMBER");
   const candidate = await ensureCandidate(organization.id);
-  const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const fullName = String(formData.get("fullName") ?? "").trim();
-  const location = String(formData.get("location") ?? "").trim();
-  const phone = String(formData.get("phone") ?? "").trim();
-  if (!fullName || !email || !email.includes("@") || email.endsWith("@invalid.test")) {
-    redirect("/jobs/candidate?error=Enter+a+real+name+and+email.");
-  }
+  if (!fullName) redirect("/jobs/candidate?error=Enter+a+real+name+and+email.");
+  const parsed = validateCandidateProfile(formData);
+  if (parsed.error || !parsed.draft) redirect(`/jobs/candidate?error=${encodeURIComponent(parsed.error ?? "Check the profile fields.")}`);
+  const draft = parsed.draft;
   const optional = optionalCandidateFacts(formData);
   if (optional.error) redirect(`/jobs/candidate?error=${encodeURIComponent(optional.error)}`);
   const [firstName, ...rest] = fullName.split(/\s+/);
   await prisma.candidate.update({
     where: { id: candidate.id },
-    data: { fullName, firstName, lastName: rest.join(" ") || firstName, email, location: location || null, phone: phone || null },
+    data: {
+      fullName,
+      firstName,
+      lastName: rest.join(" ") || firstName,
+      email: draft.email,
+      location: draft.location,
+      phone: draft.phone,
+      headline: draft.headline,
+      linkedinUrl: draft.linkedinUrl,
+      portfolioUrl: draft.portfolioUrl,
+      githubUrl: draft.githubUrl,
+      yearsExperience: draft.yearsExperience,
+      currentRole: draft.currentRole,
+      targetRoles: draft.targetRoles,
+      workAuthorization: draft.workAuthorization,
+      sponsorship: draft.sponsorship,
+      availability: draft.availability,
+      noticePeriod: draft.noticePeriod,
+      employmentPreference: draft.employmentPreference,
+      remotePreference: draft.remotePreference,
+      relocationPreference: draft.relocationPreference,
+    },
+  });
+  await prisma.candidatePreference.upsert({
+    where: { candidateId: candidate.id },
+    update: { salaryMin: draft.salaryMin, salaryTarget: draft.salaryTarget, salaryCurrency: draft.salaryCurrency, salaryPeriod: draft.salaryPeriod },
+    create: { candidateId: candidate.id, salaryMin: draft.salaryMin, salaryTarget: draft.salaryTarget, salaryCurrency: draft.salaryCurrency, salaryPeriod: draft.salaryPeriod },
   });
   for (const fact of optional.facts) {
     await prisma.candidateFact.deleteMany({
@@ -40,12 +65,58 @@ export async function saveCandidateProfile(formData: FormData) {
         subcategory: fact.subcategory,
         fact: fact.fact,
         source: "candidate-settings",
+        sourceType: "CANDIDATE_ENTERED",
         verified: true,
         confidence: 100,
       },
     });
   }
+  await replaceEnteredFact(candidate.id, "IDENTITY", "salary-expectation", draft.salaryCurrency ? `Salary expectation: ${[draft.salaryMin, draft.salaryTarget].filter((item) => item != null).join("-")} ${draft.salaryCurrency} per ${draft.salaryPeriod}` : "");
+  await replaceEnteredFact(candidate.id, "IDENTITY", "availability", draft.availability ? `Availability: ${draft.availability}` : "");
+  await replaceEnteredFact(candidate.id, "IDENTITY", "sponsorship", draft.sponsorship ? `Sponsorship: ${draft.sponsorship}` : "");
+  await replaceEnteredFact(candidate.id, "LINK", "github", draft.githubUrl ? `GitHub: ${draft.githubUrl}` : "");
+  await replaceEnteredFact(candidate.id, "LINK", "portfolio", draft.portfolioUrl ? `Portfolio: ${draft.portfolioUrl}` : "");
+  if (draft.yearsExperience != null) await replaceEnteredFact(candidate.id, "EXPERIENCE", "years", `Years of experience: ${draft.yearsExperience}`);
+  else await replaceEnteredFact(candidate.id, "EXPERIENCE", "years", "");
+  await prisma.candidateEducation.deleteMany({ where: { candidateId: candidate.id, source: "candidate-settings" } });
+  if (draft.institution) {
+    await prisma.candidateEducation.create({
+      data: {
+        candidateId: candidate.id,
+        institution: draft.institution,
+        degree: draft.degree,
+        field: draft.field,
+        startDate: draft.educationStart ? new Date(draft.educationStart) : null,
+        endDate: draft.educationEnd ? new Date(draft.educationEnd) : null,
+        source: "candidate-settings",
+      },
+    });
+    const education = ["Education", draft.institution, draft.degree, draft.field].filter(Boolean).join(", ");
+    await replaceEnteredFact(candidate.id, "EDUCATION", "education", education);
+  }
+  await prisma.candidateCertification.deleteMany({ where: { candidateId: candidate.id, source: "candidate-settings" } });
+  if (draft.certification) {
+    await prisma.candidateCertification.create({
+      data: {
+        candidateId: candidate.id,
+        name: draft.certification,
+        issuer: draft.issuer,
+        issuedAt: draft.certificationDate ? new Date(draft.certificationDate) : null,
+        credentialUrl: draft.credentialUrl,
+        source: "candidate-settings",
+      },
+    });
+    await replaceEnteredFact(candidate.id, "CERTIFICATION", "certifications", ["Certifications", draft.certification, draft.issuer].filter(Boolean).join(": "));
+  }
   redirect("/jobs/candidate?notice=Candidate+profile+saved.");
+}
+
+async function replaceEnteredFact(candidateId: string, category: "LINK" | "EXPERIENCE" | "EDUCATION" | "CERTIFICATION" | "IDENTITY", subcategory: string, fact: string) {
+  await prisma.candidateFact.deleteMany({ where: { candidateId, source: "candidate-settings", subcategory } });
+  if (!fact) return;
+  await prisma.candidateFact.create({
+    data: { candidateId, category, subcategory, fact, source: "candidate-settings", sourceType: "CANDIDATE_ENTERED", verified: true, confidence: 100 },
+  });
 }
 
 export async function addCandidateFact(formData: FormData) {

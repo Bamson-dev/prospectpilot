@@ -697,9 +697,17 @@ enum JobVacancyStatus {
   ARCHIVED
 }
 
+enum FactSourceType {
+  CANDIDATE_ENTERED
+  REPOSITORY_VERIFIED
+  DOCUMENT_VERIFIED
+  SYSTEM_GENERATED
+}
+
 enum ApplicationPackageStatus {
   PREPARED
   READY_FOR_REVIEW
+  REQUIRES_REVIEW
   READY_TO_SUBMIT
   SUBMITTING
   SUBMITTED
@@ -764,6 +772,19 @@ model Candidate {
   phone          String?
   location       String?
   headline       String?
+  linkedinUrl    String?
+  portfolioUrl   String?
+  githubUrl      String?
+  yearsExperience Int?
+  currentRole    String?
+  targetRoles    String[] @default([])
+  workAuthorization String?
+  sponsorship    String?
+  availability   String?
+  noticePeriod   String?
+  employmentPreference String?
+  remotePreference String?
+  relocationPreference String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -771,6 +792,8 @@ model Candidate {
   experiences    CandidateExperience[]
   projects       CandidateProject[]
   facts          CandidateFact[]
+  education      CandidateEducation[]
+  certifications CandidateCertification[]
   writing        CandidateWritingProfile?
   preference     CandidatePreference?
   documents      GeneratedDocument[]
@@ -841,6 +864,7 @@ model CandidateFact {
   subcategory    String?
   fact           String
   source         String
+  sourceType     FactSourceType    @default(CANDIDATE_ENTERED)
   sourceDocumentId String?
   verified       Boolean           @default(false)
   confidence     Int               @default(0)
@@ -879,7 +903,38 @@ model CandidatePreference {
   mode            String   @default("AUTO_PREPARE")
   locations       String[] @default([])
   remoteOnly      Boolean  @default(false)
+  salaryMin       Int?
+  salaryTarget    Int?
+  salaryCurrency  String?
+  salaryPeriod    String?
   candidate       Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidateEducation {
+  id          String    @id @default(cuid())
+  candidateId String
+  institution String
+  degree      String?
+  field       String?
+  startDate   DateTime?
+  endDate     DateTime?
+  source      String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model CandidateCertification {
+  id           String    @id @default(cuid())
+  candidateId  String
+  name         String
+  issuer       String?
+  issuedAt     DateTime?
+  credentialUrl String?
+  source       String
+  candidate    Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
 }
 
 model JobVacancy {
@@ -985,6 +1040,7 @@ model ApplicationPackage {
   strategy       String
   status         ApplicationPackageStatus @default(PREPARED)
   warnings       String[]                 @default([])
+  timings        Json?
   application    JobApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 }
 

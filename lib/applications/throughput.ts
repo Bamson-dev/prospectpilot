@@ -8,6 +8,45 @@ export type ThroughputSample = {
   elapsedMs: number;
 };
 
+export type StageTimings = {
+  discoveryMs: number;
+  analysisMs: number;
+  fitMs: number;
+  cvMs: number;
+  coverLetterMs: number;
+  questionsMs: number;
+  packageMs: number;
+  totalMs: number;
+  queueWaitMs: number;
+  deepseekCalls: number;
+  retryCount: number;
+  manualReview: boolean;
+  failureReason: string | null;
+};
+
+export function emptyTimings(totalMs = 0): StageTimings {
+  return {
+    discoveryMs: 0,
+    analysisMs: 0,
+    fitMs: 0,
+    cvMs: 0,
+    coverLetterMs: 0,
+    questionsMs: 0,
+    packageMs: 0,
+    totalMs,
+    queueWaitMs: 0,
+    deepseekCalls: 0,
+    retryCount: 0,
+    manualReview: false,
+    failureReason: null,
+  };
+}
+
+export function packageReadiness(input: { claimsOk: boolean; contactReady: boolean; unresolvedQuestions: boolean; documentError: boolean }) {
+  if (input.claimsOk && input.contactReady && !input.unresolvedQuestions && !input.documentError) return "READY_FOR_REVIEW" as const;
+  return "REQUIRES_REVIEW" as const;
+}
+
 export function throughputReport(sample: ThroughputSample) {
   const hours = sample.elapsedMs > 0 ? sample.elapsedMs / 3_600_000 : 0;
   const perHour = (count: number) => hours > 0 ? Math.round(count / hours) : 0;

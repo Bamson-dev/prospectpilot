@@ -7,15 +7,31 @@ const TECH: CareerProfile[] = ["SOFTWARE", "WEB", "SAAS", "HYBRID"];
 const GROWTH: CareerProfile[] = ["MARKETING", "GROWTH", "FOUNDER", "SAAS", "HYBRID"];
 const ALL: CareerProfile[] = ["SOFTWARE", "WEB", "MARKETING", "SAAS", "GROWTH", "FOUNDER", "HYBRID"];
 
-export const CAREER_PROFILES: Array<{ kind: CareerProfile; title: string; summary: string }> = [
-  { kind: "SOFTWARE", title: "Software Engineer", summary: "Full-stack evidence is limited to technologies and architecture verified in ProspectPilot." },
-  { kind: "WEB", title: "Web Developer", summary: "Web evidence is the ProspectPilot web application. Visual-design tools are not on file." },
-  { kind: "SAAS", title: "Product Engineer", summary: "Product evidence is ProspectPilot's web and worker product, plus PromptEarn product operations where those facts are non-technical." },
-  { kind: "MARKETING", title: "Growth Marketer", summary: "Growth and affiliate evidence comes from the PromptEarn founder record." },
-  { kind: "GROWTH", title: "Growth and GTM", summary: "Go-to-market, acquisition, and partnership evidence comes from the PromptEarn founder record." },
-  { kind: "FOUNDER", title: "Founder", summary: "Founder evidence is ownership of PromptEarn, including users, revenue, and platform operations from the candidate brief." },
-  { kind: "HYBRID", title: "Technical and Growth", summary: "This presentation uses ProspectPilot for technical evidence and PromptEarn for growth evidence. It does not merge unverified stacks into either." },
+const STACK = ["TypeScript", "Next.js", "React", "PostgreSQL", "Prisma", "Redis", "BullMQ", "Playwright", "Python", "Tailwind", "Scrapy"];
+
+export const CAREER_PROFILES: Array<{
+  kind: CareerProfile;
+  title: string;
+  summary: string;
+  headline: string;
+  summaryStrategy: string;
+  projectOrder: string[];
+  preferredTechnologies: string[];
+  excluded: string[];
+  targetTitles: string[];
+}> = [
+  { kind: "SOFTWARE", title: "Software Engineer", headline: "Software Engineer", summary: "Full-stack evidence is limited to technologies and architecture verified in ProspectPilot.", summaryStrategy: "Lead with ProspectPilot. Do not copy technologies from the vacancy.", projectOrder: ["ProspectPilot"], preferredTechnologies: STACK, excluded: ["$1.5 million", "100,000"], targetTitles: ["Software Engineer", "Full Stack Developer", "Backend Developer"] },
+  { kind: "WEB", title: "Web Developer", headline: "Web Developer", summary: "Web evidence is the ProspectPilot web application. Visual-design tools are not on file.", summaryStrategy: "Use the verified web application. Do not add design-tool names.", projectOrder: ["ProspectPilot"], preferredTechnologies: STACK, excluded: ["WordPress", "Figma", "Webflow", "Shopify"], targetTitles: ["Web Developer", "Web Designer", "Frontend Developer"] },
+  { kind: "SAAS", title: "Product Engineer", headline: "Product Engineer", summary: "Product evidence is ProspectPilot's web and worker product, plus PromptEarn product operations where those facts are non-technical.", summaryStrategy: "Put the product record first. Keep PromptEarn non-technical.", projectOrder: ["ProspectPilot"], preferredTechnologies: STACK, excluded: [], targetTitles: ["Product Engineer", "SaaS Engineer"] },
+  { kind: "MARKETING", title: "Growth Marketer", headline: "Growth Marketer", summary: "Growth and affiliate evidence comes from the PromptEarn founder record.", summaryStrategy: "Use PromptEarn growth evidence. Leave the software stack off unless the vacancy names a verified technology.", projectOrder: [], preferredTechnologies: [], excluded: STACK, targetTitles: ["Growth Marketer", "Performance Marketing Manager", "Digital Marketing Manager"] },
+  { kind: "GROWTH", title: "Growth and GTM", headline: "Growth and GTM", summary: "Go-to-market, acquisition, and partnership evidence comes from the PromptEarn founder record.", summaryStrategy: "Use go-to-market and partnership evidence from PromptEarn.", projectOrder: [], preferredTechnologies: [], excluded: STACK, targetTitles: ["GTM Manager", "Head of Growth", "Acquisition Manager"] },
+  { kind: "FOUNDER", title: "Founder", headline: "Founder", summary: "Founder evidence is ownership of PromptEarn, including users, revenue, and platform operations from the candidate brief.", summaryStrategy: "Use founder ownership facts only.", projectOrder: [], preferredTechnologies: [], excluded: [], targetTitles: ["Founder"] },
+  { kind: "HYBRID", title: "Technical and Growth", headline: "Technical and Growth", summary: "This presentation uses ProspectPilot for technical evidence and PromptEarn for growth evidence. It does not merge unverified stacks into either.", summaryStrategy: "Keep ProspectPilot technical facts and PromptEarn growth facts in separate sections.", projectOrder: ["ProspectPilot"], preferredTechnologies: STACK, excluded: [], targetTitles: ["Growth Engineer"] },
 ];
+
+export function careerStrategy(kind: CareerProfile) {
+  return CAREER_PROFILES.find((profile) => profile.kind === kind);
+}
 
 export function contactIsReady(email: string | null | undefined) {
   return Boolean(email && !email.endsWith("@invalid.test"));

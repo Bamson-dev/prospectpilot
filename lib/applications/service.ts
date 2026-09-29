@@ -4,7 +4,9 @@ import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { logInfo } from "@/lib/logger";
 import { completeJson } from "@/lib/ai/client";
-import { applicationIdentity } from "@/lib/applications/dedupe";
+import { applicationIdentity, sameVacancy } from "@/lib/applications/dedupe";
+import { normalizeWorkMode } from "@/lib/applications/normalize";
+import { emptyTimings, packageReadiness } from "@/lib/applications/throughput";
 import { scoreJobFit } from "@/lib/applications/fit";
 import { buildCoverLetter } from "@/lib/applications/cover-letter";
 import { buildCvDraft, validateCvText } from "@/lib/applications/cv";
@@ -52,12 +54,13 @@ export async function ensureCandidate(organizationId: string) {
   for (const fact of seed.facts) {
     await prisma.candidateFact.upsert({
       where: { candidateId_category_fact: { candidateId: candidate.id, category: fact.category, fact: fact.fact } },
-      update: { verified: true, profiles: fact.profiles, skills: fact.skills ?? [], technologies: fact.technologies ?? [], keywords: fact.keywords ?? [] },
+      update: { verified: true, profiles: fact.profiles, skills: fact.skills ?? [], technologies: fact.technologies ?? [], keywords: fact.keywords ?? [], sourceType: fact.fact.startsWith("ProspectPilot") ? "REPOSITORY_VERIFIED" : "CANDIDATE_ENTERED" },
       create: {
         candidateId: candidate.id,
         category: fact.category,
         fact: fact.fact,
         source: fact.fact.startsWith("ProspectPilot") ? "prospectpilot-repository" : "operator-supplied candidate brief",
+        sourceType: fact.fact.startsWith("ProspectPilot") ? "REPOSITORY_VERIFIED" : "CANDIDATE_ENTERED",
         verified: true,
         confidence: 80,
         profiles: fact.profiles,
@@ -132,11 +135,14 @@ export async function loadCandidateRecord(candidateId: string): Promise<Candidat
     email: candidate.email,
     phone: candidate.phone,
     location: candidate.location,
+    yearsExperience: candidate.yearsExperience,
+    workAuthorization: candidate.workAuthorization,
     facts: candidate.facts.map((fact) => ({
       id: fact.id,
       category: fact.category,
       fact: fact.fact,
       verified: fact.verified,
+      sourceType: fact.sourceType,
       profiles: fact.profiles,
       skills: fact.skills,
       technologies: fact.technologies,
@@ -167,31 +173,46 @@ export async function loadCandidateRecord(candidateId: string): Promise<Candidat
 
 export async function storeDiscoveredJobs(organizationId: string, jobs: DiscoveredJob[]) {
   const stored: string[] = [];
+  const existing = await prisma.jobVacancy.findMany({
+    where: { organizationId },
+    select: { companyName: true, title: true, applicationUrl: true, location: true, externalId: true },
+    orderBy: { createdAt: "desc" },
+    take: 500,
+  });
   for (const job of dedupeDiscovered(jobs)) {
     const identity = applicationIdentity(job);
-    const duplicate = await prisma.jobVacancy.findFirst({
-      where: { organizationId, OR: [{ applicationUrl: job.applicationUrl }, { externalId: identity }] },
-      select: { id: true },
-    });
-    if (duplicate) continue;
+    if (existing.some((row) => sameVacancy(row, { ...job, externalId: job.externalId ?? identity }))) continue;
+    const mode = normalizeWorkMode(job.location);
     const created = await prisma.jobVacancy.create({
       data: {
         organizationId,
         source: job.source,
-        sourceUrl: job.sourceUrl,
-        applicationUrl: job.applicationUrl,
+        sourceUrl: canonicalOr(job.sourceUrl),
+        applicationUrl: canonicalOr(job.applicationUrl),
         externalId: job.externalId ?? identity,
         companyName: job.companyName,
         companyDomain: job.companyDomain,
         title: job.title,
-        location: job.location,
+        location: mode.geographicRestriction ?? job.location,
+        remoteType: mode.remoteType,
         description: job.description,
         status: "DISCOVERED",
       },
     });
     stored.push(created.id);
+    existing.push({ companyName: job.companyName, title: job.title, applicationUrl: job.applicationUrl, location: job.location ?? null, externalId: job.externalId ?? identity });
   }
   return stored;
+}
+
+function canonicalOr(value: string) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return value;
+  }
 }
 
 export async function prepareApplication(organizationId: string, vacancyId: string) {
@@ -208,14 +229,18 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
     remoteType: vacancy.remoteType,
     applicationUrl: vacancy.applicationUrl,
   };
+  const analysisStarted = Date.now();
   const requirements = extractRequirements(vacancy.description);
+  const analysisMs = Date.now() - analysisStarted;
   await prisma.jobRequirement.deleteMany({ where: { vacancyId } });
   if (requirements.length) {
     await prisma.jobRequirement.createMany({
       data: requirements.map((item) => ({ vacancyId, kind: item.kind, text: item.text, years: item.years, required: item.required })),
     });
   }
+  const fitStarted = Date.now();
   const fit = scoreJobFit(job, candidate, requirements);
+  const fitMs = Date.now() - fitStarted;
   await prisma.jobFitSnapshot.upsert({
     where: { vacancyId },
     update: fitData(candidateRow.id, fit),
@@ -223,12 +248,18 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   });
   const warnings = [...fit.gaps.map((gap) => `Missing requirement: ${gap}`)];
   if (!contactIsReady(candidate.email)) warnings.push("Candidate email is still a placeholder.");
+  const questionStarted = Date.now();
   const questions = vacancy.description.split("\n").map((line) => line.trim()).filter((line) => line.endsWith("?")).slice(0, 8);
   const answers = questions.map((question) => answerQuestion(question, job, candidate, fit));
-  if (answers.some((answer) => answer.status === "NEEDS_USER_INPUT")) warnings.push("A question needs user input.");
+  const questionsMs = Date.now() - questionStarted;
+  if (answers.some((answer) => answer.status !== "ANSWERED")) warnings.push("A question needs review.");
+  const stopped = fit.recommendation === "SKIP" || fit.recommendation === "DO_NOT_PREPARE";
   let cvId: string | null = null;
   let coverLetterId: string | null = null;
-  if (cvGenerationEnabled() && contactIsReady(candidate.email) && fit.recommendation !== "SKIP") {
+  let cvMs = 0;
+  let coverLetterMs = 0;
+  if (cvGenerationEnabled() && contactIsReady(candidate.email) && !stopped) {
+    const cvStarted = Date.now();
     const cv = buildCvDraft(job, candidate, fit);
     const rewritten = await maybeRewrite(cv.text, candidate);
     const rewrittenOk = rewritten !== cv.text && validateCvText(rewritten, candidate, [], [job.companyName]).ok && DateValidator(rewritten, candidate).ok;
@@ -248,8 +279,10 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
         await storeDocument({ organizationId, candidateId: candidateRow.id, vacancyId, profile: fit.profile, kind: "CV", text, bytes: docx, fileType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", headline: cv.headline, companyName: job.companyName, fullName: candidate.fullName, extension: "docx" });
       }
     }
+    cvMs = Date.now() - cvStarted;
   }
-  if (coverLetterGenerationEnabled() && contactIsReady(candidate.email) && fit.recommendation !== "SKIP") {
+  if (coverLetterGenerationEnabled() && contactIsReady(candidate.email) && !stopped) {
+    const letterStarted = Date.now();
     const letter = buildCoverLetter(job, candidate, fit);
     const bytes = await renderPdf(letter);
     coverLetterId = await storeDocument({
@@ -266,8 +299,24 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
       fullName: candidate.fullName,
       extension: "pdf",
     });
+    coverLetterMs = Date.now() - letterStarted;
   }
-  const status = fit.recommendation === "SKIP" ? "FAILED" : warnings.length ? "READY_FOR_REVIEW" : "READY_TO_SUBMIT";
+  const readiness = packageReadiness({
+    claimsOk: !warnings.some((warning) => /unsupported/i.test(warning)),
+    contactReady: contactIsReady(candidate.email),
+    unresolvedQuestions: answers.some((answer) => answer.status !== "ANSWERED"),
+    documentError: warnings.some((warning) => /document|readability/i.test(warning)),
+  });
+  const status = stopped ? "FAILED" : readiness;
+  const timings = emptyTimings(Date.now() - started);
+  timings.analysisMs = analysisMs;
+  timings.fitMs = fitMs;
+  timings.cvMs = cvMs;
+  timings.coverLetterMs = coverLetterMs;
+  timings.questionsMs = questionsMs;
+  timings.packageMs = timings.totalMs;
+  timings.manualReview = status === "REQUIRES_REVIEW" || fit.recommendation === "MANUAL_REVIEW";
+  timings.failureReason = stopped ? fit.recommendation : null;
   const application = await prisma.jobApplication.upsert({
     where: { organizationId_vacancyId_candidateId: { organizationId, vacancyId, candidateId: candidateRow.id } },
     update: { profile: fit.profile, status, cvId, coverLetterId, source: vacancy.source, applicationUrl: vacancy.applicationUrl },
@@ -285,8 +334,8 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   });
   await prisma.applicationPackage.upsert({
     where: { applicationId: application.id },
-    update: { profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings },
-    create: { applicationId: application.id, profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings },
+    update: { profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings, timings },
+    create: { applicationId: application.id, profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings, timings },
   });
   await prisma.applicationAnswer.deleteMany({ where: { applicationId: application.id } });
   if (answers.length) {
@@ -310,9 +359,9 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   }
   await prisma.jobVacancy.update({
     where: { id: vacancyId },
-    data: { status: fit.recommendation === "SKIP" ? "REJECTED" : "QUALIFIED" },
+    data: { status: stopped ? "REJECTED" : "QUALIFIED" },
   });
-  logInfo("application.prepared", { organizationId, vacancyId, applicationId: application.id, durationMs: Date.now() - started, status });
+  logInfo("application.prepared", { organizationId, vacancyId, applicationId: application.id, durationMs: timings.totalMs, status, fitMs: timings.fitMs, cvMs: timings.cvMs, coverLetterMs: timings.coverLetterMs });
   return application.id;
 }
 
@@ -353,6 +402,8 @@ function fitData(candidateId: string, fit: ReturnType<typeof scoreJobFit>): Omit
       evidence: fit.evidence,
       blockers: fit.blockers,
       missingInformation: fit.missingInformation,
+      uncertain: fit.uncertain,
+      responsibilities: fit.responsibilities,
       transferable: fit.transferable,
       skills: fit.recommendedSkills,
       structure: fit.cvStructure,

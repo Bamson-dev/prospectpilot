@@ -1,5 +1,8 @@
 const BANNED = [
   "i am excited to apply",
+  "i am excited to bring",
+  "i am thrilled",
+  "with my extensive background",
   "i am passionate",
   "delighted to",
   "thrilled to",

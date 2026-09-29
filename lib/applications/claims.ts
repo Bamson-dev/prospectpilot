@@ -10,8 +10,8 @@ export type ClaimCheck = { ok: boolean; unsupported: string[] };
 export function unsupportedClaims(text: string, candidate: CandidateRecord, allowedNames: string[] = []): ClaimCheck {
   const corpus = [
     candidate.fullName,
-    ...candidate.facts.filter((fact) => fact.verified).map((fact) => fact.fact),
-    ...candidate.facts.filter((fact) => fact.verified).flatMap((fact) => [...(fact.technologies ?? []), ...(fact.skills ?? [])]),
+    ...candidate.facts.filter((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED").map((fact) => fact.fact),
+    ...candidate.facts.filter((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED").flatMap((fact) => [...(fact.technologies ?? []), ...(fact.skills ?? [])]),
     ...candidate.projects.filter((project) => project.verified).flatMap((project) => [project.name, project.description, project.role, ...project.technologies, ...project.features, ...project.outcomes, ...project.metrics]),
     ...candidate.experiences.filter((item) => item.verified).map((item) => `${item.title} ${item.organizationName} ${item.summary}`),
   ].join(" ").toLowerCase();

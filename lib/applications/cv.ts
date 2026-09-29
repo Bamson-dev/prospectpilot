@@ -1,6 +1,7 @@
 import type { CandidateRecord, CareerProfile, JobInput } from "@/lib/applications/types";
 import type { FitResult } from "@/lib/applications/fit";
 import { unsupportedClaims } from "@/lib/applications/claims";
+import { careerStrategy } from "@/lib/applications/seed-data";
 import { bannedPhrases } from "@/lib/applications/writing";
 
 export type CvDraft = {
@@ -23,7 +24,9 @@ const HEADLINES: Record<CareerProfile, string> = {
 };
 
 export function buildCvDraft(job: JobInput, candidate: CandidateRecord, fit: FitResult): CvDraft {
-  const headline = HEADLINES[fit.profile];
+  const strategy = careerStrategy(fit.profile);
+  const headline = strategy?.headline ?? HEADLINES[fit.profile];
+  const excluded = strategy?.excluded ?? [];
   const jobText = `${job.title} ${job.description}`.toLowerCase();
   const generic = new Set(["software", "product", "web", "marketing", "work", "digital", "business"]);
   const mentioned = (values: string[]) => unique(values).filter((skill) => jobText.includes(skill.toLowerCase()) && !generic.has(skill.toLowerCase()));
@@ -38,12 +41,12 @@ export function buildCvDraft(job: JobInput, candidate: CandidateRecord, fit: Fit
     .map((item) => ({
       title: item.title,
       organization: item.organizationName,
-      bullets: [item.summary, ...fit.selectedFacts.filter((fact) => fact.fact.toLowerCase().includes(item.organizationName.toLowerCase())).map((fact) => fact.fact)].slice(0, 4),
+      bullets: [item.summary, ...fit.selectedFacts.filter((fact) => fact.fact.toLowerCase().includes(item.organizationName.toLowerCase())).map((fact) => fact.fact)].filter((bullet) => allowedLine(bullet, excluded)).slice(0, 4),
     }));
   const listedSkills = visibleSkills;
   const projects = fit.selectedProjects.map((project) => ({
     name: project.name,
-    bullets: [project.description, project.role, ...project.outcomes, ...project.metrics].filter(Boolean).slice(0, 4),
+    bullets: [project.description, project.role, ...project.outcomes, ...project.metrics].filter((bullet) => bullet && allowedLine(bullet, excluded)).slice(0, 4),
   }));
   const summary = summaryFor(job, candidate, fit, visibleSkills);
   const text = renderText({ headline, summary, skills: listedSkills, experience, projects, candidate, job });
@@ -90,6 +93,11 @@ function renderText(input: { headline: string; summary: string; skills: string[]
     ...input.projects.flatMap((item) => [item.name, ...item.bullets]),
   ];
   return lines.filter(Boolean).join("\n");
+}
+
+function allowedLine(value: string, excluded: string[]) {
+  const lower = value.toLowerCase();
+  return !excluded.some((phrase) => lower.includes(phrase.toLowerCase()));
 }
 
 function unique(values: string[]) {

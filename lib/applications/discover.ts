@@ -2,6 +2,25 @@ import { searxngEnabled, searxngSearch, parseSearxngResults } from "@/lib/discov
 import { AppError } from "@/lib/errors";
 import { parseJobPage, type DiscoveredJob } from "@/lib/applications/providers";
 
+export const DISCOVERY_QUERIES = [
+  "Software Engineer",
+  "Full Stack Developer",
+  "Frontend Developer",
+  "Backend Developer",
+  "Web Developer",
+  "Web Designer",
+  "Product Engineer",
+  "SaaS Engineer",
+  "Technical Product Manager",
+  "Growth Engineer",
+  "Growth Marketer",
+  "Performance Marketing Manager",
+  "Digital Marketing Manager",
+  "Marketing Manager",
+  "GTM Manager",
+  "Acquisition Manager",
+];
+
 export async function searchPublicJobs(query: string): Promise<DiscoveredJob[]> {
   if (!searxngEnabled()) throw new AppError("SearXNG is not configured.");
   const payload = await searxngSearch({ query, limit: 10, language: "en" });

@@ -4,19 +4,15 @@ import { unsupportedClaims } from "@/lib/applications/claims";
 import { bannedPhrases } from "@/lib/applications/writing";
 
 export function buildCoverLetter(job: JobInput, candidate: CandidateRecord, fit: FitResult) {
-  const evidence = fit.strongEvidence.slice(0, 2);
+  const evidence = fit.strongEvidence.slice(0, 3);
   const project = fit.selectedProjects[0];
-  const companyNote = job.description.trim().length > 80
-    ? `The posting describes ${job.title} work at ${job.companyName}. I do not have a separate research note on the company, so this letter stays with the role.`
-    : `This letter stays with the ${job.title} role at ${job.companyName}.`;
   const paragraphs = [
     `I am applying for the ${job.title} role at ${job.companyName}.`,
-    companyNote,
-    evidence.length ? `The record I can use is ${evidence.join(" ")}` : "",
-    project ? `The project I would put first is ${project.name}: ${project.description}` : "",
-    fit.missingRequirements.length
-      ? `Open points, which I am not filling in: ${fit.missingRequirements.slice(0, 3).join("; ")}.`
-      : "The points above are already on the candidate record.",
+    evidence.length ? evidence.map((item) => item.endsWith(".") ? item : `${item}.`).join(" ") : "",
+    project ? `For this role I would point to ${project.name}. ${project.description}` : "",
+    fit.missingRequirements.length || fit.uncertain.length
+      ? "Some requirements are not on file, so I have not filled those in."
+      : "That is the evidence I can stand behind.",
   ].filter(Boolean);
   const text = paragraphs.join("\n\n");
   const check = unsupportedClaims(text, candidate, [job.companyName]);

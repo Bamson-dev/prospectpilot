@@ -38,7 +38,7 @@ export function planApplication(input: {
     return { provider: input.provider, steps: [...base, "manual"], submit: false, reason: "unknown required field" };
   }
   if (input.mode === "AUTO_SUBMIT") {
-    return { provider: input.provider, steps: [...base, "submit", "verify"], submit: true };
+    return { provider: input.provider, steps: [...base, "pause"], submit: false, reason: "live submission is disabled" };
   }
   return { provider: input.provider, steps: [...base, "pause"], submit: false, reason: "pause before submit" };
 }

@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { mapField, type FieldHint } from "@/lib/applications/fields";
+import { authenticationRequired } from "@/lib/applications/auth-detect";
 import { verificationFromPage } from "@/lib/applications/browser-plan";
 
 export async function readFormFields(page: Page): Promise<FieldHint[]> {
@@ -22,6 +23,9 @@ export async function fillApplicationPage(page: Page, values: Record<string, str
   const blocked = /captcha|cloudflare|verify you are human|access denied/i.test(body);
   if (blocked) return { filled: false, submitted: false, status: "REQUIRES_MANUAL_ACTION" as const, reason: "captcha" };
   const fields = await readFormFields(page);
+  if (authenticationRequired({ text: body, fieldTypes: fields.map((field) => field.type) })) {
+    return { filled: false, submitted: false, status: "REQUIRES_MANUAL_ACTION" as const, reason: "authentication" };
+  }
   const unknownRequired = fields.filter((field) => /required/i.test(`${field.label ?? ""} ${field.nearby ?? ""}`) && !mapField(field));
   if (unknownRequired.length > 0) {
     return { filled: false, submitted: false, status: "REQUIRES_MANUAL_ACTION" as const, reason: "unknown required field" };

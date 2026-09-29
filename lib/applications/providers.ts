@@ -1,3 +1,5 @@
+import { sameVacancy } from "@/lib/applications/dedupe";
+
 export type JobProviderName = "greenhouse" | "lever" | "ashby" | "smartrecruiters" | "workable" | "generic";
 
 export type DiscoveredJob = {
@@ -46,13 +48,12 @@ export function discoveryBlock(status: number, body: string) {
 }
 
 export function dedupeDiscovered(jobs: DiscoveredJob[]) {
-  const seen = new Set<string>();
-  return jobs.filter((job) => {
-    const key = `${job.companyName.toLowerCase()}|${job.title.toLowerCase()}|${job.applicationUrl}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const kept: DiscoveredJob[] = [];
+  for (const job of jobs) {
+    if (kept.some((existing) => sameVacancy(existing, job))) continue;
+    kept.push(job);
+  }
+  return kept;
 }
 
 function companyFromHost(url: string) {

@@ -33,42 +33,43 @@ function storedFact(candidate: CandidateRecord, pattern: RegExp) {
 export function answerQuestion(question: string, job: JobInput, candidate: CandidateRecord, fit: FitResult): QuestionDraft {
   const kind = classifyQuestion(question);
   if (kind === "SALARY" || kind === "WORK_AUTHORIZATION" || kind === "AVAILABILITY") {
-    const pattern = kind === "SALARY" ? /^salary expectation:/i : kind === "WORK_AUTHORIZATION" ? /^work authorization:/i : /^notice period:/i;
+    const pattern = kind === "SALARY" ? /^salary expectation:/i : kind === "WORK_AUTHORIZATION" ? /^work authorization:/i : /^(notice period|availability):/i;
     const answer = storedFact(candidate, pattern);
-    return { question, kind, answer, status: answer ? "ANSWERED" : "NEEDS_USER_INPUT" };
+    return { question, kind, answer, status: answer ? "ANSWERED" : "REVIEW_REQUIRED" };
   }
   if (kind === "BEHAVIORAL" || kind === "COMPANY_SPECIFIC") {
     return { question, kind, answer: null, status: "REVIEW_REQUIRED" };
   }
   if (kind === "EXPERIENCE" && /years/.test(question.toLowerCase())) {
-    return { question, kind, answer: null, status: "NEEDS_USER_INPUT" };
+    if (candidate.yearsExperience == null) return { question, kind, answer: null, status: "REVIEW_REQUIRED" };
+    return { question, kind, answer: `${candidate.yearsExperience} years are recorded on the candidate profile.`, status: "ANSWERED" };
   }
   if (/linkedin/i.test(question)) {
     const answer = storedFact(candidate, /linkedin/i);
-    return { question, kind, answer, status: answer ? "ANSWERED" : "NEEDS_USER_INPUT" };
+    return { question, kind, answer, status: answer ? "ANSWERED" : "REVIEW_REQUIRED" };
   }
   if (kind === "EDUCATION" || /certification|certificate/i.test(question)) {
     const category = /certification|certificate/i.test(question) ? "CERTIFICATION" : "EDUCATION";
-    const answer = candidate.facts.find((fact) => fact.verified && fact.category === category)?.fact ?? null;
-    return { question, kind, answer, status: answer ? "ANSWERED" : "NEEDS_USER_INPUT" };
+    const answer = candidate.facts.find((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED" && fact.category === category)?.fact ?? null;
+    return { question, kind, answer, status: answer ? "ANSWERED" : "REVIEW_REQUIRED" };
   }
   if (kind === "LOCATION") {
     return {
       question,
       kind,
       answer: candidate.location ? `Based in ${candidate.location}.` : null,
-      status: candidate.location ? "ANSWERED" : "NEEDS_USER_INPUT",
+      status: candidate.location ? "ANSWERED" : "REVIEW_REQUIRED",
     };
   }
   const evidence = fit.strongEvidence[0];
-  if (!evidence) return { question, kind, answer: null, status: "NEEDS_USER_INPUT" };
+  if (!evidence) return { question, kind, answer: null, status: "REVIEW_REQUIRED" };
   if (kind === "PORTFOLIO") {
     const project = fit.selectedProjects.find((item) => item.name);
     return {
       question,
       kind,
       answer: project ? `${project.name}: ${project.description}` : null,
-      status: project ? "ANSWERED" : "NEEDS_USER_INPUT",
+      status: project ? "ANSWERED" : "REVIEW_REQUIRED",
     };
   }
   return {

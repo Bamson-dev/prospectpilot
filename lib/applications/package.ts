@@ -10,8 +10,9 @@ export function assemblePackage(job: JobInput, candidate: CandidateRecord) {
   const requirements = extractRequirements(job.description);
   const fit = scoreJobFit(job, candidate, requirements);
   const questions = job.description.split("\n").map((line) => line.trim()).filter((line) => line.endsWith("?"));
-  const cv = contactIsReady(candidate.email) && fit.recommendation !== "SKIP" ? buildCvDraft(job, candidate, fit) : null;
-  const coverLetter = fit.recommendation === "SKIP" ? null : buildCoverLetter(job, candidate, fit);
+  const stopped = fit.recommendation === "SKIP" || fit.recommendation === "DO_NOT_PREPARE";
+  const cv = contactIsReady(candidate.email) && !stopped ? buildCvDraft(job, candidate, fit) : null;
+  const coverLetter = stopped ? null : buildCoverLetter(job, candidate, fit);
   return {
     requirements,
     fit,

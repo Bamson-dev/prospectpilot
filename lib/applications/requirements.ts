@@ -1,4 +1,4 @@
-import type { ExtractedRequirement, RequirementKind } from "@/lib/applications/types";
+import type { ExtractedRequirement, RequirementCertainty, RequirementKind } from "@/lib/applications/types";
 
 const TECH = [
   "typescript", "javascript", "react", "next.js", "nextjs", "node", "postgresql", "postgres", "prisma",
@@ -18,21 +18,29 @@ export function extractRequirements(description: string): ExtractedRequirement[]
     const years = line.match(YEAR);
     const preferred = /preferred|nice to have|bonus|plus|optional/.test(lower);
     const required = /required|must|minimum|at least/.test(lower) && !preferred;
+    const certainty = lineCertainty(lower, preferred, required);
     if (years) {
       found.push({
         kind: "EXPERIENCE_YEARS",
         text: line,
         years: Number(years[1]),
-        required,
+        required: certainty === "required",
+        certainty,
       });
     }
     const kind = classifyLine(lower, preferred, required);
     if (kind) {
-      const hard = kind === "MUST_HAVE" || kind === "EDUCATION" || (kind === "TECHNOLOGY" && required);
-      found.push({ kind, text: line, required: preferred ? false : hard });
+      found.push({ kind, text: line, required: certainty === "required" && kind !== "RESPONSIBILITY", certainty: kind === "RESPONSIBILITY" ? "responsibility" : certainty });
     }
   }
   return dedupeRequirements(found);
+}
+
+function lineCertainty(lower: string, preferred: boolean, required: boolean): RequirementCertainty {
+  if (/responsib|you will|you'll|own the/.test(lower) && !required && !preferred) return "responsibility";
+  if (preferred) return "preferred";
+  if (required) return "required";
+  return "uncertain";
 }
 
 function classifyLine(lower: string, preferred: boolean, required: boolean): RequirementKind | null {

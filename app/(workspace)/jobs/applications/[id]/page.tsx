@@ -3,6 +3,7 @@ import { decideApplication, enqueueApplicationPreparation, recordSubmissionConfi
 import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
+import { applicationPreview } from "@/lib/applications/preview";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
 
@@ -31,6 +32,29 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
   const analysis = readAnalysis(application.vacancy.fit?.analysis);
   const cv = documents.find((document) => document.kind === "CV");
   const letter = documents.find((document) => document.kind === "COVER_LETTER");
+  const preview = applicationPreview({
+    company: application.vacancy.companyName,
+    role: application.vacancy.title,
+    resumeFileName: cv?.fileName ?? null,
+    coverLetterFileName: letter?.fileName ?? null,
+    captcha: false,
+    authentication: false,
+    fields: [
+      fieldLine("Work authorization", application.candidate.workAuthorization),
+      fieldLine("Sponsorship", application.candidate.sponsorship),
+      ...application.answers.map((answer) => ({
+        name: answer.question,
+        classification: "CUSTOM_QUESTION" as const,
+        taxonomy: "CUSTOM_QUESTION" as const,
+        confidence: 1,
+        required: answer.status !== "ANSWERED",
+        status: answer.status === "ANSWERED" ? "ANSWERED" as const : "REVIEW_REQUIRED" as const,
+        value: answer.answer,
+        source: answer.status === "ANSWERED" ? "candidate" : null,
+        reason: answer.status === "ANSWERED" ? null : "needs review",
+      })),
+    ],
+  });
   return (
     <div>
       <PageHeader title={application.vacancy.title} detail={`${application.vacancy.companyName} · ${application.status}`} />
@@ -42,6 +66,10 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <p className="text-sm text-muted">{application.vacancy.location || "Location not listed"} · {application.vacancy.remoteType || "Remote policy not listed"} · {application.vacancy.employmentType || "Employment type not listed"}</p>
         <p className="text-sm text-muted">{salary(application.vacancy.salaryMin, application.vacancy.salaryMax, application.vacancy.salaryCurrency)}</p>
         <p className="mt-2 text-sm">Source {application.source}. <a className="text-tide" href={application.applicationUrl} target="_blank" rel="noreferrer">Open application URL</a></p>
+      </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Application preview</h2>
+        <pre className="mt-2 whitespace-pre-wrap text-sm">{preview.text}</pre>
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Fit</h2>
@@ -107,6 +135,20 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       </Panel>
     </div>
   );
+}
+
+function fieldLine(name: string, value: string | null) {
+  return {
+    name,
+    classification: "CUSTOM_QUESTION" as const,
+    taxonomy: "CUSTOM_QUESTION" as const,
+    confidence: 1,
+    required: !value,
+    status: value ? "ANSWERED" as const : "REVIEW_REQUIRED" as const,
+    value,
+    source: value ? "candidate" : null,
+    reason: value ? null : "unknown value",
+  };
 }
 
 function List({ title, items }: { title: string; items?: string[] }) {

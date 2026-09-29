@@ -16,7 +16,7 @@ export type ApplicationAdapter = {
   mapFields: (fields: InspectedField[], values: Record<string, string | null | undefined>) => MappedAnswer[];
   prepare: () => { mode: "PREPARE_ONLY"; submit: false };
   validate: (mapped: MappedAnswer[]) => { ok: boolean; review: string[] };
-  requiresManualAction: (input: { text: string; fieldTypes?: Array<string | null | undefined>; mapped: MappedAnswer[] }) => SecurityReason | "unknown-required-field" | null;
+  requiresManualAction: (input: { text: string; fieldTypes?: Array<string | null | undefined>; mapped: MappedAnswer[] }) => SecurityReason | "unknown-required-field" | "required-field-needs-review" | null;
 };
 
 const NAMES: PlatformName[] = ["GREENHOUSE", "LEVER", "ASHBY", "WORKABLE", "SMARTRECRUITERS", "GENERIC", "UNKNOWN"];
@@ -53,6 +53,7 @@ function buildAdapter(name: PlatformName): ApplicationAdapter {
       const security = detectSecurityBarrier(input);
       if (security) return security;
       if (input.mapped.some((item) => item.status === "UNSUPPORTED")) return "unknown-required-field";
+    if (input.mapped.some((item) => item.required && item.status !== "ANSWERED")) return "required-field-needs-review";
       return null;
     },
   };

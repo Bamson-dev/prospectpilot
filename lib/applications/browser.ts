@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { adapterFor } from "@/lib/applications/adapters";
-import { inspectFields, mapCandidateToFields, type RawField } from "@/lib/applications/form-map";
+import { classificationReport, inspectFields, mapCandidateToFields, type RawField } from "@/lib/applications/form-map";
 import { detectPlatform } from "@/lib/applications/platforms";
 import { detectSecurityBarrier, unexpectedRedirect } from "@/lib/applications/security";
 import { submissionAllowed } from "@/lib/applications/submission-gate";
@@ -17,6 +17,7 @@ export type PreparationAudit = {
   manualReason: string | null;
   finalState: "READY_FOR_HUMAN_SUBMISSION" | "REQUIRES_MANUAL_ACTION" | "SUBMITTED";
   submitted: boolean;
+  metrics: ReturnType<typeof classificationReport>;
 };
 
 export async function readFormFields(page: Page): Promise<RawField[]> {
@@ -30,10 +31,25 @@ export async function readFormFields(page: Page): Promise<RawField[]> {
       id: input.id,
       placeholder: input.getAttribute("placeholder"),
       ariaLabel: input.getAttribute("aria-label"),
+      autocomplete: input.getAttribute("autocomplete"),
+      section: (() => {
+        const legend = input.closest("fieldset")?.querySelector("legend")?.textContent ?? "";
+        if (legend.trim()) return legend.trim().slice(0, 120);
+        let node: Element | null = input;
+        while (node) {
+          let previous = node.previousElementSibling;
+          while (previous) {
+            if (/^H[1-3]$/.test(previous.tagName)) return (previous.textContent ?? "").trim().slice(0, 120);
+            previous = previous.previousElementSibling;
+          }
+          node = node.parentElement;
+        }
+        return "";
+      })(),
       type: input.getAttribute("type") || element.tagName.toLowerCase(),
       required: input.required || input.getAttribute("aria-required") === "true",
       nearby: input.parentElement?.textContent?.slice(0, 160) ?? "",
-      options: element.tagName === "SELECT" ? [...select.options].map((option) => option.text).slice(0, 20) : [],
+      options: element.tagName === "SELECT" ? [...select.options].map((option) => option.text).slice(0, 30) : [],
     };
   }));
 }
@@ -116,6 +132,7 @@ function audit(url: string, platform: string, inspected: ReturnType<typeof inspe
     manualReason: manual,
     finalState,
     submitted,
+    metrics: classificationReport(inspected, mapped),
   };
 }
 

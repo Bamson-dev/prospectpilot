@@ -17,6 +17,8 @@ export type StageTimings = {
   questionsMs: number;
   packageMs: number;
   browserInspectionMs: number;
+  fieldClassificationMs: number;
+  answerResolutionMs: number;
   browserPreparationMs: number;
   totalMs: number;
   queueWaitMs: number;
@@ -36,6 +38,8 @@ export function emptyTimings(totalMs = 0): StageTimings {
     questionsMs: 0,
     packageMs: 0,
     browserInspectionMs: 0,
+    fieldClassificationMs: 0,
+    answerResolutionMs: 0,
     browserPreparationMs: 0,
     totalMs,
     queueWaitMs: 0,

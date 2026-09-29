@@ -50,6 +50,16 @@ export function answerQuestion(question: string, job: JobInput, candidate: Candi
   if (kind === "BEHAVIORAL" || kind === "COMPANY_SPECIFIC") {
     return { question, kind, answer: null, status: "REVIEW_REQUIRED" };
   }
+  if (/rate your|from 1\s*[-–to]+\s*10|out of 10|skill level/i.test(question)) {
+    return { question, kind, answer: null, status: "REVIEW_REQUIRED" };
+  }
+  if (/have you used|have you worked with|do you have experience with/i.test(question)) {
+    const verified = candidate.projects.flatMap((project) => project.technologies).some((item) => question.toLowerCase().includes(item.toLowerCase()));
+    return { question, kind: "TECHNICAL", answer: verified ? "Yes" : null, status: verified ? "ANSWERED" : "REVIEW_REQUIRED" };
+  }
+  if (/years/.test(question.toLowerCase()) && /typescript|node|react|python|javascript|next\.js|postgresql/i.test(question)) {
+    return { question, kind: "EXPERIENCE", answer: null, status: "REVIEW_REQUIRED" };
+  }
   if (kind === "EXPERIENCE" && /years/.test(question.toLowerCase())) {
     if (candidate.yearsExperience == null) return { question, kind, answer: null, status: "REVIEW_REQUIRED" };
     return { question, kind, answer: `${candidate.yearsExperience} years are recorded on the candidate profile.`, status: "ANSWERED" };

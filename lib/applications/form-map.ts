@@ -1,3 +1,5 @@
+import { coarseClass, fieldMetrics, judgeField, resolveFieldAnswer, type FieldTaxonomy } from "@/lib/applications/field-taxonomy";
+
 export type FieldClass =
   | "CONTACT"
   | "PROFILE"
@@ -8,6 +10,7 @@ export type FieldClass =
   | "SALARY"
   | "EDUCATION"
   | "EXPERIENCE"
+  | "DEMOGRAPHIC"
   | "CUSTOM_QUESTION"
   | "UNKNOWN";
 
@@ -19,8 +22,11 @@ export type RawField = {
   required?: boolean;
   placeholder?: string | null;
   ariaLabel?: string | null;
+  autocomplete?: string | null;
+  section?: string | null;
   options?: string[];
   nearby?: string | null;
+  value?: string | null;
 };
 
 export type InspectedField = {
@@ -33,124 +39,157 @@ export type InspectedField = {
   ariaLabel: string;
   options: string[];
   question: string;
+  section: string;
   classification: FieldClass;
+  taxonomy: FieldTaxonomy;
+  confidence: number;
+  evidence: string[];
 };
 
 export type MappedAnswer = {
   name: string;
   classification: FieldClass;
+  taxonomy: FieldTaxonomy;
+  confidence: number;
+  required: boolean;
   status: "ANSWERED" | "REVIEW_REQUIRED" | "UNSUPPORTED";
   value: string | null;
+  source: string | null;
   reason: string | null;
 };
 
-const ORDER: Array<{ classification: FieldClass; pattern: RegExp }> = [
-  { classification: "RESUME", pattern: /resume|curriculum|\bcv\b/i },
-  { classification: "COVER_LETTER", pattern: /cover[\s_-]?letter/i },
-  { classification: "SPONSORSHIP", pattern: /sponsor/i },
-  { classification: "WORK_AUTH", pattern: /authori[sz]ed|work authorization|right to work|visa|eligible to work/i },
-  { classification: "SALARY", pattern: /salary|compensation|pay expectation|expected pay/i },
-  { classification: "EDUCATION", pattern: /education|degree|university|school/i },
-  { classification: "EXPERIENCE", pattern: /years of|experience/i },
-  { classification: "PROFILE", pattern: /linkedin|github|portfolio|personal site|website/i },
-  { classification: "CONTACT", pattern: /e-?mail|phone|mobile|first[\s_-]?name|last[\s_-]?name|full[\s_-]?name|^name$|location|city/i },
-];
-
 export function classifyField(field: RawField): FieldClass {
-  const text = fieldText(field);
-  if ((field.type ?? "").toLowerCase() === "file" && /resume|curriculum|\bcv\b/i.test(text)) return "RESUME";
-  if ((field.type ?? "").toLowerCase() === "file" && /cover/i.test(text)) return "COVER_LETTER";
-  const match = ORDER.find((item) => item.pattern.test(text));
-  if (match) return match.classification;
-  if (/\?/.test(text) || (field.type ?? "").toLowerCase() === "textarea") return "CUSTOM_QUESTION";
-  return "UNKNOWN";
+  return coarseClass(judgeField(field).taxonomy);
 }
 
 export function inspectFields(fields: RawField[]): InspectedField[] {
-  return fields.map((field) => {
+  const started = Date.now();
+  const inspected = groupControls(fields).filter((field) => !["hidden", "submit", "button", "image"].includes((field.type ?? "").toLowerCase())).map((field) => {
+    const judgment = judgeField(field);
     const question = clip(field.label || field.ariaLabel || field.nearby || field.placeholder || "");
     return {
       label: clip(field.label),
       name: clip(field.name),
       id: clip(field.id),
       type: clip(field.type).toLowerCase(),
-      required: Boolean(field.required) || /required/i.test(`${field.label ?? ""} ${field.ariaLabel ?? ""}`),
+      required: Boolean(field.required),
       placeholder: clip(field.placeholder),
       ariaLabel: clip(field.ariaLabel),
-      options: (field.options ?? []).map((option) => clip(option, 80)).filter(Boolean).slice(0, 20),
+      options: (field.options ?? []).map((option) => clip(option, 80)).filter(Boolean).slice(0, 30),
       question,
-      classification: classifyField(field),
+      section: clip(field.section),
+      classification: coarseClass(judgment.taxonomy),
+      taxonomy: judgment.taxonomy,
+      confidence: judgment.confidence,
+      evidence: judgment.evidence,
     };
   });
+  inspectedTime = Date.now() - started;
+  return inspected;
 }
 
-export function mapCandidateToFields(fields: InspectedField[], values: Record<string, string | null | undefined>) {
-  return fields.map((field) => mapOne(field, values));
+let inspectedTime = 0;
+
+export function lastClassificationMs() {
+  return inspectedTime;
 }
 
-function mapOne(field: InspectedField, values: Record<string, string | null | undefined>): MappedAnswer {
-  const key = candidateKey(field);
-  if (field.classification === "UNKNOWN") {
-    return { name: field.name || field.id || field.question, classification: field.classification, status: field.required ? "UNSUPPORTED" : "REVIEW_REQUIRED", value: null, reason: field.required ? "unknown required field" : "unclassified field" };
-  }
-  if (!key) {
-    return { name: field.name || field.question, classification: field.classification, status: "REVIEW_REQUIRED", value: null, reason: "ambiguous field" };
-  }
-  const value = (values[key] ?? "").trim();
-  if (!value) {
-    return { name: field.name || field.question, classification: field.classification, status: "REVIEW_REQUIRED", value: null, reason: "unknown value" };
-  }
-  return { name: field.name || field.question, classification: field.classification, status: "ANSWERED", value, reason: null };
+export function mapCandidateToFields(fields: InspectedField[], values: Record<string, string | null | undefined>, verifiedTechnologies: string[] = []) {
+  return fields.map((field) => mapOne(field, values, verifiedTechnologies));
 }
 
-export function candidateKey(field: InspectedField) {
-  const text = `${field.label} ${field.name} ${field.id} ${field.ariaLabel} ${field.placeholder} ${field.question}`;
-  if (field.classification === "RESUME") return "resume";
-  if (field.classification === "COVER_LETTER") return "coverLetter";
-  if (field.classification === "WORK_AUTH") return "workAuthorization";
-  if (field.classification === "SPONSORSHIP") return "sponsorship";
-  if (field.classification === "SALARY") return "salary";
-  if (field.classification === "EDUCATION") return "education";
-  if (field.classification === "EXPERIENCE") return /years/i.test(text) ? "yearsExperience" : null;
-  if (field.classification === "PROFILE") {
-    const hits = [
-      /linkedin/i.test(text) ? "linkedin" : "",
-      /github/i.test(text) ? "github" : "",
-      /portfolio|personal site|website/i.test(text) ? "portfolio" : "",
-    ].filter(Boolean);
-    return hits.length === 1 ? hits[0] : null;
-  }
-  if (field.classification === "CONTACT") {
-    if (/e-?mail/i.test(text)) return "email";
-    if (/phone|mobile/i.test(text)) return "phone";
-    if (/first/i.test(text)) return "firstName";
-    if (/last|surname/i.test(text)) return "lastName";
-    if (/full[\s_-]?name|^name\b/i.test(text)) return "fullName";
-    if (/location|city/i.test(text)) return "location";
-  }
-  if (field.classification === "CUSTOM_QUESTION") return null;
-  return null;
+function mapOne(field: InspectedField, values: Record<string, string | null | undefined>, verifiedTechnologies: string[]): MappedAnswer {
+  const judgment = judgeField({ ...field, options: field.options });
+  const answer = resolveFieldAnswer({
+    judgment,
+    required: field.required,
+    options: field.options,
+    questionText: `${field.label} ${field.ariaLabel} ${field.question} ${field.name} ${field.id}`,
+    values,
+    verifiedTechnologies,
+  });
+  return {
+    name: field.name || field.id || field.question,
+    classification: field.classification,
+    taxonomy: field.confidence < 0.85 && field.taxonomy !== "CUSTOM_QUESTION" ? "UNKNOWN" : field.taxonomy,
+    confidence: field.confidence,
+    required: field.required,
+    status: answer.status,
+    value: answer.value,
+    source: answer.source,
+    reason: answer.reason,
+  };
+}
+
+export function classificationReport(fields: InspectedField[], mapped: MappedAnswer[]) {
+  return fieldMetrics(fields.map((field, index) => ({
+    taxonomy: field.taxonomy,
+    required: field.required,
+    status: mapped[index]?.status ?? "REVIEW_REQUIRED",
+    confidence: field.confidence,
+  })), lastClassificationMs());
 }
 
 export function fieldsFromHtml(html: string): RawField[] {
   const fields: RawField[] = [];
-  const tags = html.match(/<(input|textarea|select)\b[^>]*>/gi) ?? [];
-  for (const tag of tags) {
+  let section = "";
+  const pattern = /<(h[1-3]|legend|label|input|textarea|select)\b[^>]*>/gi;
+  const marks = [...html.matchAll(pattern)];
+  for (let index = 0; index < marks.length; index += 1) {
+    const tag = marks[index][0];
+    const kind = (marks[index][1] ?? "").toLowerCase();
+    if (kind === "h1" || kind === "h2" || kind === "h3" || kind === "legend") {
+      const close = html.indexOf(`</${kind}>`, marks[index].index ?? 0);
+      section = strip(html.slice((marks[index].index ?? 0) + tag.length, close > 0 ? close : (marks[index].index ?? 0) + tag.length));
+      continue;
+    }
+    if (kind === "label") continue;
+    const type = attr(tag, "type") || (kind === "textarea" ? "textarea" : kind === "select" ? "select" : "text");
+    if (attr(tag, "aria-hidden") === "true") continue;
+    const start = marks[index].index ?? 0;
     const id = attr(tag, "id");
     const name = attr(tag, "name");
-    const type = attr(tag, "type") || (tag.toLowerCase().startsWith("<textarea") ? "textarea" : tag.toLowerCase().startsWith("<select") ? "select" : "text");
+    const directLabel = labelFor(html, id, name) || precedingLabel(html, start);
+    const label = genericControlLabel(directLabel) ? uploadLabel(html, id) || directLabel : directLabel;
     fields.push({
       id,
       name,
       type,
+      value: attr(tag, "value"),
       required: /\brequired\b/i.test(tag) || attr(tag, "aria-required") === "true",
       placeholder: attr(tag, "placeholder"),
       ariaLabel: attr(tag, "aria-label"),
-      label: labelFor(html, id, name),
-      options: tag.toLowerCase().startsWith("<select") ? optionsAfter(html, tag) : [],
+      autocomplete: attr(tag, "autocomplete"),
+      section,
+      label,
+      nearby: strip(html.slice(Math.max(0, start - 180), start)).slice(-160),
+      options: kind === "select" ? optionsAfter(html, tag) : [],
     });
   }
-  return fields;
+  return groupControls(fields);
+}
+
+export function groupControls(fields: RawField[]) {
+  const grouped = new Map<string, RawField>();
+  const ordered: RawField[] = [];
+  for (const field of fields) {
+    const type = (field.type ?? "").toLowerCase();
+    if ((type === "radio" || type === "checkbox") && field.name) {
+      const key = `${type}:${field.name}`;
+      const existing = grouped.get(key);
+      const option = field.label || field.value || "";
+      if (existing) {
+        existing.options = [...(existing.options ?? []), option].filter(Boolean);
+        continue;
+      }
+      const next = { ...field, options: option ? [option] : [] };
+      grouped.set(key, next);
+      ordered.push(next);
+      continue;
+    }
+    ordered.push(field);
+  }
+  return ordered;
 }
 
 function labelFor(html: string, id: string | null, name: string | null) {
@@ -177,8 +216,20 @@ function attr(tag: string, name: string) {
   return match?.[1] ?? "";
 }
 
-function fieldText(field: RawField) {
-  return [field.label, field.name, field.id, field.placeholder, field.ariaLabel, field.nearby].filter(Boolean).join(" ");
+function genericControlLabel(value: string) {
+  return /^(attach|enter manually)$/i.test(value.trim());
+}
+
+function uploadLabel(html: string, id: string | null) {
+  if (!id) return "";
+  const match = html.match(new RegExp(`id=["']upload-label-${escapeReg(id)}["'][^>]*>([\\s\\S]*?)</`, "i"));
+  return match ? strip(match[1] ?? "") : "";
+}
+
+function precedingLabel(html: string, index: number) {
+  const before = html.slice(Math.max(0, index - 400), index);
+  const labels = [...before.matchAll(/<label[^>]*>([\s\S]*?)<\/label>/gi)];
+  return labels.length ? strip(labels[labels.length - 1][1] ?? "") : "";
 }
 
 function clip(value: string | null | undefined, max = 180) {

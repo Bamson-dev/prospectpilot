@@ -70,6 +70,7 @@ export async function saveCandidateProfile(formData: FormData) {
         source: "candidate-settings",
         sourceType: "CANDIDATE_ENTERED",
         verified: true,
+        verification: "VERIFIED",
         confidence: 100,
       },
     });
@@ -132,7 +133,7 @@ async function replaceEnteredFact(candidateId: string, category: "LINK" | "EXPER
   await prisma.candidateFact.deleteMany({ where: { candidateId, source: "candidate-settings", subcategory } });
   if (!fact) return;
   await prisma.candidateFact.create({
-    data: { candidateId, category, subcategory, fact, source: "candidate-settings", sourceType: "CANDIDATE_ENTERED", verified: true, confidence: 100 },
+    data: { candidateId, category, subcategory, fact, source: "candidate-settings", sourceType: "CANDIDATE_ENTERED", verified: true, verification: "VERIFIED", confidence: 100 },
   });
 }
 
@@ -153,6 +154,7 @@ export async function addCandidateFact(formData: FormData) {
         fact,
         source,
         verified: formData.get("verified") === "on",
+        verification: formData.get("verified") === "on" ? "VERIFIED" : "UNVERIFIED",
         confidence: formData.get("verified") === "on" ? 70 : 20,
       },
     });

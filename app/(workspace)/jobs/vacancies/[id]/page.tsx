@@ -45,7 +45,7 @@ export default async function VacancyPage({ params }: { params: Promise<{ id: st
         <h3 className="mt-4 text-sm font-medium">Responsibilities</h3>
         {(explanation?.responsibilities.length ?? 0) === 0 ? <p className="mt-2 text-sm text-muted">None separated from the requirements.</p> : explanation?.responsibilities.map((item) => <p key={item} className="mt-2 text-sm">{item}</p>)}
         {explanation ? null : selections.map((item) => (
-          <p key={`${item.requirement}-${item.match}`} className="mt-2 text-sm">Requirement: {item.requirement}. Classification: {item.match}. Evidence: {item.evidence || "None"}. Reason: {item.reason || "No reason stored."}</p>
+          <p key={`${item.requirement}-${item.match}`} className="mt-2 text-sm">Requirement: {item.requirement}. Classification: {item.match}. Candidate evidence: {item.evidence || "None"}. Source: {item.source || "None"}. Verification: {item.evidence && (item.match === "DIRECT" || item.match === "TRANSFERABLE") ? "VERIFIED" : "Not used"}. Reason: {item.reason || "No reason stored."}</p>
         ))}
       </Panel>
       <Panel>
@@ -61,12 +61,12 @@ function label(state: string) {
   return state;
 }
 
-function Group({ title, items }: { title: string; items: Array<{ requirement: string; evidence?: string | null; reason?: string }> }) {
+function Group({ title, items }: { title: string; items: Array<{ requirement: string; evidence?: string | null; reason?: string; source?: string | null; verification?: string | null }> }) {
   return (
     <div className="mt-4">
       <h3 className="text-sm font-medium">{title}</h3>
       {items.length === 0 ? <p className="mt-2 text-sm text-muted">None</p> : items.map((item) => (
-        <p key={`${title}-${item.requirement}`} className="mt-2 text-sm">{item.requirement}{item.evidence ? ` Evidence: ${item.evidence}.` : ""}{item.reason ? ` ${item.reason}` : ""}</p>
+        <p key={`${title}-${item.requirement}`} className="mt-2 text-sm">Requirement: {item.requirement}.{item.evidence ? ` Candidate evidence: ${item.evidence}.` : ""}{item.source ? ` Source: ${item.source}.` : ""}{item.verification ? ` Verification: ${item.verification}.` : ""}{item.reason ? ` ${item.reason}` : ""}</p>
       ))}
     </div>
   );
@@ -93,9 +93,15 @@ function detailRows(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
-    const row = item as { requirement?: unknown; evidence?: unknown; reason?: unknown };
+    const row = item as { requirement?: unknown; evidence?: unknown; reason?: unknown; source?: unknown; verification?: unknown };
     if (typeof row.requirement !== "string") return [];
-    return [{ requirement: row.requirement, evidence: typeof row.evidence === "string" ? row.evidence : null, reason: typeof row.reason === "string" ? row.reason : "" }];
+    return [{
+      requirement: row.requirement,
+      evidence: typeof row.evidence === "string" ? row.evidence : null,
+      reason: typeof row.reason === "string" ? row.reason : "",
+      source: typeof row.source === "string" ? row.source : null,
+      verification: row.verification === "VERIFIED" ? "VERIFIED" : null,
+    }];
   });
 }
 
@@ -105,9 +111,9 @@ function readSelections(value: unknown) {
   if (!Array.isArray(selections)) return [];
   return selections.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
-    const row = item as { requirement?: unknown; match?: unknown; evidence?: unknown; reason?: unknown };
+    const row = item as { requirement?: unknown; match?: unknown; evidence?: unknown; reason?: unknown; source?: unknown };
     if (typeof row.requirement !== "string" || typeof row.match !== "string") return [];
-    return [{ requirement: row.requirement, match: row.match, evidence: typeof row.evidence === "string" ? row.evidence : "", reason: typeof row.reason === "string" ? row.reason : "" }];
+    return [{ requirement: row.requirement, match: row.match, evidence: typeof row.evidence === "string" ? row.evidence : "", reason: typeof row.reason === "string" ? row.reason : "", source: typeof row.source === "string" ? row.source : "" }];
   });
 }
 

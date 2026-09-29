@@ -705,6 +705,23 @@ enum FactSourceType {
   SYSTEM_GENERATED
 }
 
+enum EvidenceVerification {
+  VERIFIED
+  REVIEW_REQUIRED
+  UNVERIFIED
+  PENDING_REVIEW
+  REJECTED
+}
+
+enum EvidenceChange {
+  CREATED
+  UPDATED
+  REPLACED
+  REMOVED
+  VERIFICATION_CHANGED
+  PROFILE_ASSIGNMENT_CHANGED
+}
+
 enum ApplicationPackageStatus {
   PREPARED
   READY_FOR_REVIEW
@@ -808,6 +825,7 @@ model Candidate {
   experiences    CandidateExperience[]
   projects       CandidateProject[]
   facts          CandidateFact[]
+  factEvents     CandidateFactEvent[]
   education      CandidateEducation[]
   certifications CandidateCertification[]
   writing        CandidateWritingProfile?
@@ -884,6 +902,8 @@ model CandidateFact {
   sourceType     FactSourceType    @default(CANDIDATE_ENTERED)
   sourceDocumentId String?
   verified       Boolean           @default(false)
+  verification   EvidenceVerification @default(UNVERIFIED)
+  duration       String?
   confidence     Int               @default(0)
   startDate      DateTime?
   endDate        DateTime?
@@ -899,6 +919,18 @@ model CandidateFact {
 
   @@unique([candidateId, category, fact])
   @@index([candidateId, category])
+}
+
+model CandidateFactEvent {
+  id          String         @id @default(cuid())
+  candidateId String
+  factId      String?
+  action      EvidenceChange
+  detail      String
+  createdAt   DateTime       @default(now())
+  candidate   Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId, createdAt])
 }
 
 model CandidateWritingProfile {

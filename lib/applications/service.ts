@@ -57,7 +57,7 @@ export async function ensureCandidate(organizationId: string) {
   for (const fact of seed.facts) {
     await prisma.candidateFact.upsert({
       where: { candidateId_category_fact: { candidateId: candidate.id, category: fact.category, fact: fact.fact } },
-      update: { verified: true, profiles: fact.profiles, skills: fact.skills ?? [], technologies: fact.technologies ?? [], keywords: fact.keywords ?? [], sourceType: fact.fact.startsWith("ProspectPilot") ? "REPOSITORY_VERIFIED" : "CANDIDATE_ENTERED" },
+      update: { verified: true, verification: "VERIFIED", profiles: fact.profiles, skills: fact.skills ?? [], technologies: fact.technologies ?? [], keywords: fact.keywords ?? [], sourceType: fact.fact.startsWith("ProspectPilot") ? "REPOSITORY_VERIFIED" : "CANDIDATE_ENTERED" },
       create: {
         candidateId: candidate.id,
         category: fact.category,
@@ -65,6 +65,7 @@ export async function ensureCandidate(organizationId: string) {
         source: fact.fact.startsWith("ProspectPilot") ? "prospectpilot-repository" : "operator-supplied candidate brief",
         sourceType: fact.fact.startsWith("ProspectPilot") ? "REPOSITORY_VERIFIED" : "CANDIDATE_ENTERED",
         verified: true,
+        verification: "VERIFIED",
         confidence: 80,
         profiles: fact.profiles,
         skills: fact.skills ?? [],

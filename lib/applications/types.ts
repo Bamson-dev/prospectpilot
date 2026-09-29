@@ -39,6 +39,7 @@ export type CandidateFactInput = {
   technologies?: string[];
   keywords?: string[];
   sourceType?: "CANDIDATE_ENTERED" | "REPOSITORY_VERIFIED" | "DOCUMENT_VERIFIED" | "SYSTEM_GENERATED";
+  verification?: "VERIFIED" | "REVIEW_REQUIRED" | "UNVERIFIED" | "PENDING_REVIEW" | "REJECTED";
 };
 
 export type CandidateProjectInput = {

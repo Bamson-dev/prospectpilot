@@ -1,3 +1,4 @@
+import { factIsAutomaticEvidence } from "@/lib/applications/evidence-management";
 import type { CandidateRecord } from "@/lib/applications/types";
 
 const COMMON_TECH = [
@@ -10,8 +11,8 @@ export type ClaimCheck = { ok: boolean; unsupported: string[] };
 export function unsupportedClaims(text: string, candidate: CandidateRecord, allowedNames: string[] = []): ClaimCheck {
   const corpus = [
     candidate.fullName,
-    ...candidate.facts.filter((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED").map((fact) => fact.fact),
-    ...candidate.facts.filter((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED").flatMap((fact) => [...(fact.technologies ?? []), ...(fact.skills ?? [])]),
+    ...candidate.facts.filter((fact) => factIsAutomaticEvidence(fact)).map((fact) => fact.fact),
+    ...candidate.facts.filter((fact) => factIsAutomaticEvidence(fact)).flatMap((fact) => [...(fact.technologies ?? []), ...(fact.skills ?? [])]),
     ...candidate.projects.filter((project) => project.verified).flatMap((project) => [project.name, project.description, project.role, ...project.technologies, ...project.features, ...project.outcomes, ...project.metrics]),
     ...candidate.experiences.filter((item) => item.verified).map((item) => `${item.title} ${item.organizationName} ${item.summary}`),
   ].join(" ").toLowerCase();
@@ -28,7 +29,7 @@ export function unsupportedClaims(text: string, candidate: CandidateRecord, allo
       unsupported.add(name);
     }
   }
-  if (!candidate.facts.some((fact) => fact.category === "EDUCATION" && fact.verified)) {
+  if (!candidate.facts.some((fact) => fact.category === "EDUCATION" && factIsAutomaticEvidence(fact))) {
     for (const sentence of text.split(/[.\n]/)) {
       if (/\b(ph\.?d|mba|bachelor|master'?s degree)\b/i.test(sentence) && !/\b(required|preferred|missing|gap|open points|not claimed)\b/i.test(sentence)) {
         unsupported.add("education credential");
@@ -39,7 +40,7 @@ export function unsupportedClaims(text: string, candidate: CandidateRecord, allo
 }
 
 export function verifiedCorpus(candidate: CandidateRecord) {
-  return candidate.facts.filter((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED").map((fact) => fact.fact);
+  return candidate.facts.filter((fact) => factIsAutomaticEvidence(fact)).map((fact) => fact.fact);
 }
 
 export type CvClaimIssue = {

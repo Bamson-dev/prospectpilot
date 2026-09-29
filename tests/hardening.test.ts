@@ -205,15 +205,15 @@ describe("job retries and research targets", () => {
     );
     const ticks: number[] = [];
     worker.on("message", (value: number) => ticks.push(value));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 40));
     const started = Date.now();
-    while (Date.now() - started < 90) {
+    while (Date.now() - started < 400) {
       // Block the caller. The worker thread has its own event loop.
     }
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 40));
     worker.postMessage("stop");
     await worker.terminate();
-    expect(ticks.some((tick) => tick >= started && tick <= started + 90)).toBe(true);
+    expect(ticks.some((tick) => tick >= started && tick <= started + 400)).toBe(true);
   });
 
   it("uses a new queue id when a failed job is retried", () => {

@@ -5,6 +5,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { requireOrganization } from "@/lib/current-user";
 import { missingCandidateFields, settingValue } from "@/lib/applications/candidate-fields";
 import { evidenceLibrary } from "@/lib/applications/evidence-library";
+import { factIsAutomaticEvidence } from "@/lib/applications/evidence-management";
 import { applicationCriticalFields, availabilityLabel, candidateReadiness } from "@/lib/applications/readiness";
 import { ensureCandidate } from "@/lib/applications/service";
 import { prisma } from "@/lib/db";
@@ -52,8 +53,8 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
     degree: candidate.education[0]?.degree,
     institution: candidate.education[0]?.institution,
     certification: candidate.certifications[0]?.name,
-    verifiedExperience: candidate.facts.some((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED" && fact.category === "EXPERIENCE") || candidate.experiences.some((item) => item.verified),
-    verifiedTechnology: candidate.facts.some((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED" && fact.category === "TECHNOLOGY") || candidate.projects.some((project) => project.verified && project.technologies.length > 0),
+    verifiedExperience: candidate.facts.some((fact) => factIsAutomaticEvidence(fact) && fact.category === "EXPERIENCE") || candidate.experiences.some((item) => item.verified),
+    verifiedTechnology: candidate.facts.some((fact) => factIsAutomaticEvidence(fact) && fact.category === "TECHNOLOGY") || candidate.projects.some((project) => project.verified && project.technologies.length > 0),
   });
   return (
     <div>
@@ -155,6 +156,7 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Evidence library</h2>
+        <p className="mt-2 text-sm"><a className="text-tide" href="/jobs/candidate/evidence">Manage evidence</a></p>
         <p className="mt-2 text-sm text-muted">Only verified facts appear here. Generated CV text and cover-letter text are not evidence, and saving a document does not create a fact.</p>
         {evidenceLibrary({ facts: candidate.facts, projects: candidate.projects }).map((item) => (
           <p key={`${item.group}-${item.value}`} className="mt-2 text-sm">{item.group} · {item.value} · {item.origin} · {item.source} · {item.verification}{item.usableFor.length ? ` · ${item.usableFor.join(", ")}` : ""}</p>

@@ -53,7 +53,8 @@ export function evidenceLibrary(input: {
   return items;
 }
 
-export function usableEvidence(fact: { verified: boolean; sourceType?: string | null; source?: string | null; fact?: string | null }) {
+export function usableEvidence(fact: { verified: boolean; sourceType?: string | null; source?: string | null; fact?: string | null; verification?: string | null }) {
+  if (fact.verification && fact.verification !== "VERIFIED") return false;
   if (!fact.verified || fact.sourceType === "SYSTEM_GENERATED") return false;
   const source = `${fact.source ?? ""} ${fact.fact ?? ""}`;
   return !/generated[- ](?:cv|cover|document)|cover letter text|cv text/i.test(source);

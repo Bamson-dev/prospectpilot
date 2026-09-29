@@ -9,8 +9,8 @@ export type FitState = "QUALIFIED" | "REVIEW" | "NOT_A_FIT";
 
 export type QualificationExplanation = {
   state: FitState;
-  direct: Array<{ requirement: string; evidence: string; reason: string }>;
-  transferable: Array<{ requirement: string; evidence: string; reason: string }>;
+  direct: Array<{ requirement: string; evidence: string; reason: string; source: string | null; verification: "VERIFIED" }>;
+  transferable: Array<{ requirement: string; evidence: string; reason: string; source: string | null; verification: "VERIFIED" }>;
   missingHard: Array<{ requirement: string; reason: string }>;
   uncertainHard: Array<{ requirement: string; reason: string }>;
   preferred: Array<{ requirement: string; match: string; evidence: string | null; reason: string }>;
@@ -85,13 +85,13 @@ export function explainQualification(requirements: ExtractedRequirement[], selec
         reason: selection?.reason ?? "Preferred requirement.",
       });
       if (selection?.match === "TRANSFERABLE" && selection.evidence) {
-        transferable.push({ requirement: requirement.text, evidence: selection.evidence, reason: selection.reason });
+        transferable.push({ requirement: requirement.text, evidence: selection.evidence, reason: selection.reason, source: selection.source, verification: "VERIFIED" });
       }
       continue;
     }
     if (role !== "HARD_REQUIREMENT" || !selection) continue;
-    if (selection.match === "DIRECT" && selection.evidence) direct.push({ requirement: requirement.text, evidence: selection.evidence, reason: selection.reason });
-    else if (selection.match === "TRANSFERABLE" && selection.evidence) transferable.push({ requirement: requirement.text, evidence: selection.evidence, reason: selection.reason });
+    if (selection.match === "DIRECT" && selection.evidence) direct.push({ requirement: requirement.text, evidence: selection.evidence, reason: selection.reason, source: selection.source, verification: "VERIFIED" });
+    else if (selection.match === "TRANSFERABLE" && selection.evidence) transferable.push({ requirement: requirement.text, evidence: selection.evidence, reason: selection.reason, source: selection.source, verification: "VERIFIED" });
     else if (selection.match === "MISSING") missingHard.push({ requirement: requirement.text, reason: selection.reason });
     else uncertainHard.push({ requirement: requirement.text, reason: selection.reason });
   }

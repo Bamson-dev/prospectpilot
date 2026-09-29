@@ -1,3 +1,4 @@
+import { factIsAutomaticEvidence } from "@/lib/applications/evidence-management";
 import type { CandidateFactInput, CandidateProjectInput, CandidateRecord, CareerProfile, ExtractedRequirement, JobInput } from "@/lib/applications/types";
 import { selectEvidence, type EvidenceSelection } from "@/lib/applications/evidence-selection";
 import { contactIsReady } from "@/lib/applications/seed-data";
@@ -188,7 +189,7 @@ function selectionFor(requirement: ExtractedRequirement, facts: Parameters<typeo
 }
 
 function usableFact(fact: CandidateFactInput) {
-  return fact.verified && fact.sourceType !== "SYSTEM_GENERATED";
+  return factIsAutomaticEvidence(fact);
 }
 
 function yearsVerdict(requirement: ExtractedRequirement, candidate: CandidateRecord, facts: CandidateFactInput[]) {

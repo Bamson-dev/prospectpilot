@@ -1,3 +1,4 @@
+import { factIsAutomaticEvidence } from "@/lib/applications/evidence-management";
 import type { ApplicationQuestionKind, CandidateRecord, JobInput } from "@/lib/applications/types";
 import type { FitResult } from "@/lib/applications/fit";
 import { explicitTechnologyDuration, namedTechnology } from "@/lib/applications/field-taxonomy";
@@ -48,7 +49,7 @@ function known(value: string | null | undefined) {
 }
 
 function storedFact(candidate: CandidateRecord, pattern: RegExp) {
-  return candidate.facts.find((fact) => fact.verified && pattern.test(fact.fact))?.fact ?? null;
+  return candidate.facts.find((fact) => factIsAutomaticEvidence(fact) && pattern.test(fact.fact))?.fact ?? null;
 }
 
 function resolved(input: {
@@ -131,12 +132,12 @@ export function answerQuestion(question: string, job: JobInput, candidate: Candi
   }
   if (/have you used|have you worked with|do you have experience with/i.test(question)) {
     const verified = candidate.projects.flatMap((project) => project.technologies).some((item) => question.toLowerCase().includes(item.toLowerCase()))
-      || candidate.facts.some((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED" && question.toLowerCase().includes(fact.fact.toLowerCase()));
+      || candidate.facts.some((fact) => factIsAutomaticEvidence(fact) && question.toLowerCase().includes(fact.fact.toLowerCase()));
     return resolved({ question, kind: "TECHNICAL", answer: verified ? "Yes" : null, source: "SAFE_TRANSFORMATION", confidence: 0.9, reason: "That technology is not on verified evidence." });
   }
   if (/years/.test(question.toLowerCase()) && namedTechnology(question)) {
     const record = candidate.facts
-      .filter((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED")
+      .filter((fact) => factIsAutomaticEvidence(fact))
       .map((fact) => fact.fact)
       .join("\n");
     const duration = explicitTechnologyDuration(record, namedTechnology(question));
@@ -152,7 +153,7 @@ export function answerQuestion(question: string, job: JobInput, candidate: Candi
   }
   if (kind === "EDUCATION" || /certification|certificate/i.test(question)) {
     const category = /certification|certificate/i.test(question) ? "CERTIFICATION" : "EDUCATION";
-    const answer = candidate.facts.find((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED" && fact.category === category)?.fact ?? null;
+    const answer = candidate.facts.find((fact) => factIsAutomaticEvidence(fact) && fact.category === category)?.fact ?? null;
     return resolved({ question, kind, answer, source: "VERIFIED_EVIDENCE", confidence: 1, reason: "No verified education or certification answers this question." });
   }
   if (kind === "LOCATION") {

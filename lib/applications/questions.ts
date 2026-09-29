@@ -1,5 +1,6 @@
 import type { ApplicationQuestionKind, CandidateRecord, JobInput } from "@/lib/applications/types";
 import type { FitResult } from "@/lib/applications/fit";
+import { explicitTechnologyDuration, namedTechnology } from "@/lib/applications/field-taxonomy";
 
 export type QuestionDraft = {
   question: string;
@@ -57,8 +58,13 @@ export function answerQuestion(question: string, job: JobInput, candidate: Candi
     const verified = candidate.projects.flatMap((project) => project.technologies).some((item) => question.toLowerCase().includes(item.toLowerCase()));
     return { question, kind: "TECHNICAL", answer: verified ? "Yes" : null, status: verified ? "ANSWERED" : "REVIEW_REQUIRED" };
   }
-  if (/years/.test(question.toLowerCase()) && /typescript|node|react|python|javascript|next\.js|postgresql/i.test(question)) {
-    return { question, kind: "EXPERIENCE", answer: null, status: "REVIEW_REQUIRED" };
+  if (/years/.test(question.toLowerCase()) && namedTechnology(question)) {
+    const record = candidate.facts
+      .filter((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED")
+      .map((fact) => fact.fact)
+      .join("\n");
+    const duration = explicitTechnologyDuration(record, namedTechnology(question));
+    return { question, kind: "EXPERIENCE", answer: duration ? `${duration} years` : null, status: duration ? "ANSWERED" : "REVIEW_REQUIRED" };
   }
   if (kind === "EXPERIENCE" && /years/.test(question.toLowerCase())) {
     if (candidate.yearsExperience == null) return { question, kind, answer: null, status: "REVIEW_REQUIRED" };

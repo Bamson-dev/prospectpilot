@@ -46,29 +46,34 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Personal information</h2>
         <form action={saveCandidateProfile} className="mt-3 grid gap-2">
-          <input name="fullName" defaultValue={candidate.fullName} required />
+          <h3 className="mt-2 text-sm text-muted">Identity</h3>
+          <input name="fullName" defaultValue={candidate.fullName} placeholder="Full name" required />
+          <input name="preferredName" defaultValue={settingValue(candidate.facts, "preferred-name")} placeholder="Preferred name, only if you want one stored" />
           <input name="email" type="email" defaultValue={candidate.email.endsWith("@invalid.test") ? "" : candidate.email} placeholder="Email" required />
           <input name="phone" defaultValue={candidate.phone ?? ""} placeholder="Phone" />
           <input name="location" defaultValue={candidate.location ?? ""} placeholder="Location" />
-          <input name="headline" defaultValue={candidate.headline ?? ""} placeholder="Headline" />
+          <h3 className="mt-2 text-sm text-muted">Professional</h3>
+          <input name="headline" defaultValue={candidate.headline ?? ""} placeholder="Professional headline" />
+          <textarea name="summary" rows={3} defaultValue={settingValue(candidate.facts, "summary")} placeholder="Summary, only if you write one" />
           <input name="linkedin" defaultValue={candidate.linkedinUrl ?? settingValue(candidate.facts, "linkedin")} placeholder="LinkedIn URL" />
           <input name="portfolio" defaultValue={candidate.portfolioUrl ?? ""} placeholder="Portfolio URL" />
+          <input name="website" defaultValue={settingValue(candidate.facts, "website")} placeholder="Website URL" />
           <input name="github" defaultValue={candidate.githubUrl ?? ""} placeholder="GitHub URL" />
-          <input name="yearsExperience" defaultValue={candidate.yearsExperience ?? ""} placeholder="Years of experience" />
+          <h3 className="mt-2 text-sm text-muted">Employment</h3>
           <input name="currentRole" defaultValue={candidate.currentRole ?? ""} placeholder="Current role" />
           <input name="targetRoles" defaultValue={candidate.targetRoles.join(", ")} placeholder="Target roles, comma separated" />
+          <input name="yearsExperience" defaultValue={candidate.yearsExperience ?? ""} placeholder="Years of experience, only if you know the number" />
+          <h3 className="mt-2 text-sm text-muted">Work authorization</h3>
           <input name="workAuthorization" defaultValue={candidate.workAuthorization ?? settingValue(candidate.facts, "work-authorization")} placeholder="Work authorization" />
           <input name="sponsorship" defaultValue={candidate.sponsorship ?? ""} placeholder="Sponsorship requirement" />
-          <input name="availability" defaultValue={candidate.availability ?? ""} placeholder="Availability" />
-          <input name="noticePeriod" defaultValue={candidate.noticePeriod ?? settingValue(candidate.facts, "notice-period")} placeholder="Notice period" />
-          <input name="employmentPreference" defaultValue={candidate.employmentPreference ?? ""} placeholder="Employment preference" />
-          <input name="remotePreference" defaultValue={candidate.remotePreference ?? ""} placeholder="Remote preference" />
-          <input name="relocationPreference" defaultValue={candidate.relocationPreference ?? ""} placeholder="Relocation preference" />
+          <h3 className="mt-2 text-sm text-muted">Compensation</h3>
           <input name="salaryMin" defaultValue={candidate.preference?.salaryMin ?? ""} placeholder="Minimum salary" />
-          <input name="salaryTarget" defaultValue={candidate.preference?.salaryTarget ?? ""} placeholder="Target salary" />
+          <input name="salaryTarget" defaultValue={candidate.preference?.salaryTarget ?? ""} placeholder="Desired salary" />
           <input name="salaryCurrency" defaultValue={candidate.preference?.salaryCurrency ?? ""} placeholder="Currency, for example USD" />
           <input name="salaryPeriod" defaultValue={candidate.preference?.salaryPeriod ?? ""} placeholder="Period: year, month, day, or hour" />
-          <input name="institution" defaultValue={candidate.education[0]?.institution ?? ""} placeholder="Education institution" />
+          <input name="negotiability" defaultValue={settingValue(candidate.facts, "negotiability")} placeholder="Negotiability, only if you want it stored" />
+          <h3 className="mt-2 text-sm text-muted">Education and certifications</h3>
+          <input name="institution" defaultValue={candidate.education[0]?.institution ?? ""} placeholder="Institution" />
           <input name="degree" defaultValue={candidate.education[0]?.degree ?? ""} placeholder="Degree" />
           <input name="field" defaultValue={candidate.education[0]?.field ?? ""} placeholder="Field of study" />
           <input name="educationStart" type="date" defaultValue={dateValue(candidate.education[0]?.startDate)} />
@@ -77,6 +82,13 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
           <input name="issuer" defaultValue={candidate.certifications[0]?.issuer ?? ""} placeholder="Certification issuer" />
           <input name="certificationDate" type="date" defaultValue={dateValue(candidate.certifications[0]?.issuedAt)} />
           <input name="credentialUrl" defaultValue={candidate.certifications[0]?.credentialUrl ?? ""} placeholder="Credential URL" />
+          <h3 className="mt-2 text-sm text-muted">Skills and preferences</h3>
+          <input name="skillProficiency" defaultValue={settingValue(candidate.facts, "proficiency")} placeholder="Skill proficiency, only if you supply it" />
+          <input name="availability" defaultValue={candidate.availability ?? ""} placeholder="Availability" />
+          <input name="noticePeriod" defaultValue={candidate.noticePeriod ?? settingValue(candidate.facts, "notice-period")} placeholder="Notice period" />
+          <input name="employmentPreference" defaultValue={candidate.employmentPreference ?? ""} placeholder="Employment type" />
+          <input name="remotePreference" defaultValue={candidate.remotePreference ?? ""} placeholder="Remote preference" />
+          <input name="relocationPreference" defaultValue={candidate.relocationPreference ?? ""} placeholder="Relocation preference" />
           <p className="text-sm text-muted">Leave a field blank when you do not want it stored. Blank fields stay unknown. The number you type for a phone is stored as typed.</p>
           <SubmitButton pendingLabel="Saving">Save profile</SubmitButton>
         </form>
@@ -109,7 +121,7 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
             <p className="text-sm text-muted">{group}</p>
             <ul className="mt-1 list-disc pl-5 text-sm">
               {readiness.fields.filter((field) => field.group === group).map((field) => (
-                <li key={field.field}>{field.field}: {field.state}. {purposeLabel(field.purpose)}. {field.note}</li>
+                <li key={field.field} className={field.state === "KNOWN" ? "" : "font-medium"}>{field.field}: {displayState(field.state)}. {purposeLabel(field.purpose)}. {field.note}</li>
               ))}
             </ul>
           </div>
@@ -143,6 +155,12 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
       </Panel>
     </div>
   );
+}
+
+function displayState(state: "KNOWN" | "UNKNOWN" | "REVIEW_REQUIRED") {
+  if (state === "KNOWN") return "Verified";
+  if (state === "REVIEW_REQUIRED") return "Review required";
+  return "Missing";
 }
 
 function purposeLabel(purpose: "CV" | "APPLICATION" | "OPTIONAL") {

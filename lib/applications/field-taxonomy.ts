@@ -45,12 +45,21 @@ export type FieldTaxonomy =
   | "ETHNICITY"
   | "SKILL_RATING"
   | "TECHNOLOGY_USE"
+  | "SALARY_EXPECTATION"
+  | "REMOTE_ELIGIBILITY"
+  | "START_DATE"
+  | "EMPLOYMENT_STATUS"
+  | "AGE"
+  | "AI_USAGE"
+  | "PRIVACY_CONSENT"
+  | "TERMS_CONSENT"
   | "CUSTOM_QUESTION"
   | "UNKNOWN";
 
 export const CONFIDENCE_THRESHOLD = 0.85;
 
-const SENSITIVE = new Set<FieldTaxonomy>(["VETERAN_STATUS", "DISABILITY_STATUS", "GENDER", "ETHNICITY", "PRONOUNS"]);
+const SENSITIVE = new Set<FieldTaxonomy>(["VETERAN_STATUS", "DISABILITY_STATUS", "GENDER", "ETHNICITY", "PRONOUNS", "AGE"]);
+const NEVER_AUTO = new Set<FieldTaxonomy>(["AI_USAGE", "PRIVACY_CONSENT", "TERMS_CONSENT"]);
 
 const RULES: Array<{ taxonomy: FieldTaxonomy; phrases: string[] }> = [
   { taxonomy: "COVER_LETTER", phrases: ["cover letter upload", "cover letter"] },
@@ -59,7 +68,8 @@ const RULES: Array<{ taxonomy: FieldTaxonomy; phrases: string[] }> = [
   { taxonomy: "SPONSORSHIP", phrases: ["visa sponsorship", "require sponsorship", "sponsorship", "need sponsorship"] },
   { taxonomy: "HOURLY_RATE", phrases: ["hourly rate", "hourly pay"] },
   { taxonomy: "EXPECTED_COMPENSATION", phrases: ["expected compensation", "desired compensation", "compensation expectation"] },
-  { taxonomy: "SALARY", phrases: ["salary expectation", "expected salary", "desired salary", "salary"] },
+  { taxonomy: "SALARY_EXPECTATION", phrases: ["salary expectations", "salary expectation", "what are your salary"] },
+  { taxonomy: "SALARY", phrases: ["expected salary", "desired salary", "salary"] },
   { taxonomy: "YEARS_OF_TECHNOLOGY_EXPERIENCE", phrases: ["years of experience with", "years of", "how many years"] },
   { taxonomy: "YEARS_OF_EXPERIENCE", phrases: ["years of experience", "years experience"] },
   { taxonomy: "MANAGEMENT_EXPERIENCE", phrases: ["management experience", "people management"] },
@@ -71,7 +81,7 @@ const RULES: Array<{ taxonomy: FieldTaxonomy; phrases: string[] }> = [
   { taxonomy: "WEBSITE", phrases: ["website url", "website"] },
   { taxonomy: "FIRST_NAME", phrases: ["legal first name", "given name", "first name"] },
   { taxonomy: "LAST_NAME", phrases: ["family name", "last name", "surname"] },
-  { taxonomy: "PREFERRED_NAME", phrases: ["preferred name", "nickname"] },
+  { taxonomy: "PREFERRED_NAME", phrases: ["preferred name", "name you d prefer", "nickname"] },
   { taxonomy: "FULL_NAME", phrases: ["full name", "legal name"] },
   { taxonomy: "EMAIL", phrases: ["email address", "e mail", "email"] },
   { taxonomy: "PHONE", phrases: ["mobile number", "mobile phone", "phone number", "telephone", "mobile", "phone"] },
@@ -85,7 +95,13 @@ const RULES: Array<{ taxonomy: FieldTaxonomy; phrases: string[] }> = [
   { taxonomy: "CURRENT_COMPANY", phrases: ["current company", "current employer"] },
   { taxonomy: "REFERRED_BY", phrases: ["referred by", "referral"] },
   { taxonomy: "SOURCE", phrases: ["how did you hear", "source"] },
-  { taxonomy: "AVAILABILITY", phrases: ["availability", "start date", "when can you start"] },
+  { taxonomy: "START_DATE", phrases: ["when can you start", "earliest start date", "start date"] },
+  { taxonomy: "AVAILABILITY", phrases: ["availability"] },
+  { taxonomy: "EMPLOYMENT_STATUS", phrases: ["currently employed", "employment status", "are you employed"] },
+  { taxonomy: "REMOTE_ELIGIBILITY", phrases: ["comfortable working remotely", "working remotely", "work remotely", "remote eligibility"] },
+  { taxonomy: "AI_USAGE", phrases: ["ai usage", "ai tools", "artificial intelligence"] },
+  { taxonomy: "PRIVACY_CONSENT", phrases: ["privacy policy", "privacy consent", "candidate privacy"] },
+  { taxonomy: "TERMS_CONSENT", phrases: ["terms of service", "terms and conditions", "agree to the terms"] },
   { taxonomy: "NOTICE_PERIOD", phrases: ["notice period"] },
   { taxonomy: "EMPLOYMENT_TYPE", phrases: ["employment type", "full-time or part-time"] },
   { taxonomy: "REMOTE_PREFERENCE", phrases: ["remote preference", "work arrangement"] },
@@ -156,15 +172,53 @@ export function judgeField(field: FieldSignals): FieldJudgment {
   if (school && /employment|experience|work history/.test(section)) {
     return { taxonomy: "CURRENT_COMPANY", confidence: 0.9, evidence: ["section", "label"], ambiguous: false };
   }
+  const text = combined(field);
+  if (/privacy policy|privacy consent|candidate privacy/.test(text)) {
+    return { taxonomy: "PRIVACY_CONSENT", confidence: 0.96, evidence: ["question text"], ambiguous: false };
+  }
+  if (/\bai usage\b|\bai tools\b|artificial intelligence/.test(text)) {
+    return { taxonomy: "AI_USAGE", confidence: 0.94, evidence: ["question text"], ambiguous: false };
+  }
+  if (/terms of service|terms and conditions|agree to the terms/.test(text)) {
+    return { taxonomy: "TERMS_CONSENT", confidence: 0.94, evidence: ["question text"], ambiguous: false };
+  }
+  if (/salary expectations|what are your salary/.test(text)) {
+    return { taxonomy: "SALARY_EXPECTATION", confidence: 0.95, evidence: ["question text"], ambiguous: false };
+  }
+  if (/when can you start|earliest start date/.test(text)) {
+    return { taxonomy: "START_DATE", confidence: 0.94, evidence: ["question text"], ambiguous: false };
+  }
+  if (/currently employed|employment status|are you employed/.test(text)) {
+    return { taxonomy: "EMPLOYMENT_STATUS", confidence: 0.94, evidence: ["question text"], ambiguous: false };
+  }
+  if (/comfortable working remotely|working remotely|work remotely/.test(text)) {
+    return { taxonomy: "REMOTE_ELIGIBILITY", confidence: 0.94, evidence: ["question text"], ambiguous: false };
+  }
+  if (/date of birth|how old are you/.test(text)) {
+    return { taxonomy: "AGE", confidence: 0.96, evidence: ["question text"], ambiguous: false };
+  }
   const autocomplete = normalizeFieldText(field.autocomplete);
   if (AUTOCOMPLETE[autocomplete]) {
     const taxonomy = autocomplete === "url" && /linkedin/.test(normalizeFieldText(`${field.label} ${field.name}`)) ? "LINKEDIN" : AUTOCOMPLETE[autocomplete];
     return { taxonomy, confidence: 0.99, evidence: field.label ? ["label", "autocomplete"] : ["autocomplete"], ambiguous: false };
   }
+  const labelOnly = normalizeFieldText(`${field.label ?? ""} ${field.ariaLabel ?? ""}`);
+  const rawLabel = `${field.label ?? ""} ${field.ariaLabel ?? ""}`;
+  const labelHasRule = RULES.some((rule) => rule.phrases.some((phrase) => phraseIn(labelOnly, phrase)));
+  if (/\?/.test(rawLabel) && rawLabel.trim().length > 20 && !labelHasRule) {
+    return { taxonomy: "CUSTOM_QUESTION", confidence: 0.86, evidence: ["question text"], ambiguous: false };
+  }
+  if (!labelHasRule && labelOnly.length > 40) {
+    return { taxonomy: "CUSTOM_QUESTION", confidence: 0.86, evidence: ["label"], ambiguous: false };
+  }
   const hits = scoreRules(field);
   if (hits.length === 0) {
     const text = combined(field);
-    if (/\?/.test(field.label ?? field.ariaLabel ?? "") || (field.type ?? "").toLowerCase() === "textarea") {
+    const question = `${field.label ?? ""} ${field.ariaLabel ?? ""}`.trim();
+    if ((/\?/.test(question) || (field.type ?? "").toLowerCase() === "textarea") && question.length > 20) {
+      return { taxonomy: "CUSTOM_QUESTION", confidence: 0.86, evidence: ["question text"], ambiguous: false };
+    }
+    if (/\?/.test(question) || (field.type ?? "").toLowerCase() === "textarea") {
       return { taxonomy: "CUSTOM_QUESTION", confidence: 0.7, evidence: ["question text"], ambiguous: false };
     }
     if (text) return { taxonomy: "UNKNOWN", confidence: 0.4, evidence: ["no matching synonym"], ambiguous: false };
@@ -216,8 +270,13 @@ export function resolveFieldAnswer(input: {
   if (taxonomy === "UNKNOWN") {
     return { status: input.required ? "UNSUPPORTED" as const : "REVIEW_REQUIRED" as const, value: null as string | null, source: null as string | null, reason: input.required ? "unknown required field" : input.judgment.ambiguous ? "ambiguous field" : "unclassified field" };
   }
-  if (isSensitiveTaxonomy(taxonomy) || taxonomy === "SKILL_RATING") {
-    return { status: "REVIEW_REQUIRED" as const, value: null, source: null, reason: taxonomy === "SKILL_RATING" ? "skill rating is not on file" : "sensitive question" };
+  if (isSensitiveTaxonomy(taxonomy) || NEVER_AUTO.has(taxonomy) || taxonomy === "SKILL_RATING") {
+    const reason = taxonomy === "SKILL_RATING"
+      ? "skill rating is not on file"
+      : NEVER_AUTO.has(taxonomy)
+        ? "employer-specific question needs review"
+        : "sensitive question";
+    return { status: "REVIEW_REQUIRED" as const, value: null, source: null, reason };
   }
   if (taxonomy === "TECHNOLOGY_USE") {
     const technology = namedTechnology(input.questionText ?? "");
@@ -226,7 +285,9 @@ export function resolveFieldAnswer(input: {
     return chooseOption(input.options, "Yes", "verified technology");
   }
   if (taxonomy === "YEARS_OF_TECHNOLOGY_EXPERIENCE") {
-    return { status: "REVIEW_REQUIRED" as const, value: null, source: null, reason: "technology duration is not verified" };
+    const duration = explicitTechnologyDuration(input.values.technologyDurations ?? "", namedTechnology(input.questionText ?? ""));
+    if (!duration) return { status: "REVIEW_REQUIRED" as const, value: null, source: null, reason: "technology duration is not verified" };
+    return chooseOption(input.options, duration, "verified duration");
   }
   if (taxonomy === "CUSTOM_QUESTION") {
     return { status: "REVIEW_REQUIRED" as const, value: null, source: null, reason: "custom question" };
@@ -286,8 +347,12 @@ function valueKey(taxonomy: FieldTaxonomy) {
     WORK_AUTHORIZATION: "workAuthorization",
     SPONSORSHIP: "sponsorship",
     SALARY: "salary",
+    SALARY_EXPECTATION: "salary",
     EXPECTED_COMPENSATION: "salary",
     AVAILABILITY: "availability",
+    START_DATE: "availability",
+    REMOTE_ELIGIBILITY: "remotePreference",
+    EMPLOYMENT_STATUS: "employmentStatus",
     NOTICE_PERIOD: "noticePeriod",
     DEGREE: "degree",
     INSTITUTION: "institution",
@@ -308,6 +373,7 @@ function scoreRules(field: FieldSignals) {
     { evidence: "id", text: normalizeFieldText(field.id), bonus: 0.18 },
     { evidence: "question text", text: normalizeFieldText(field.nearby), bonus: 0.12 },
     { evidence: "section", text: normalizeFieldText(field.section), bonus: 0.16 },
+    { evidence: "option labels", text: normalizeFieldText((field.options ?? []).join(" ")), bonus: 0.14 },
   ];
   const scored: Array<{ taxonomy: FieldTaxonomy; score: number; evidence: string[] }> = [];
   for (const rule of RULES) {
@@ -351,6 +417,20 @@ export function namesTechnology(text: string) {
   return TECHNOLOGIES.some((item) => normal.includes(item.replace(".js", " js")) || normal.includes(item));
 }
 
+export function explicitTechnologyDuration(record: string, technology: string | null) {
+  if (!technology) return null;
+  const wanted = normalizeFieldText(technology);
+  for (const sentence of record.split(/[.\n]/)) {
+    const normal = normalizeFieldText(sentence);
+    if (!normal.includes(wanted) && !normal.includes(wanted.replace(".", " "))) continue;
+    const others = TECHNOLOGIES.filter((item) => item !== technology && (normal.includes(item) || normal.includes(item.replace(".", " "))));
+    if (others.length) return null;
+    const years = normal.match(/\b(\d{1,2})\s*(?:\+|plus)?\s*years?\b/);
+    if (years) return years[1];
+  }
+  return null;
+}
+
 export function namedTechnology(text: string) {
   const normal = normalizeFieldText(text);
   return TECHNOLOGIES.find((item) => normal.includes(item) || normal.includes(item.replace(".", " "))) ?? null;
@@ -363,7 +443,8 @@ export function coarseClass(taxonomy: FieldTaxonomy) {
   if (taxonomy === "COVER_LETTER") return "COVER_LETTER" as const;
   if (taxonomy === "WORK_AUTHORIZATION") return "WORK_AUTH" as const;
   if (taxonomy === "SPONSORSHIP") return "SPONSORSHIP" as const;
-  if (["SALARY", "HOURLY_RATE", "EXPECTED_COMPENSATION"].includes(taxonomy)) return "SALARY" as const;
+  if (["SALARY", "SALARY_EXPECTATION", "HOURLY_RATE", "EXPECTED_COMPENSATION"].includes(taxonomy)) return "SALARY" as const;
+  if (["AI_USAGE", "PRIVACY_CONSENT", "TERMS_CONSENT", "EMPLOYMENT_STATUS", "REMOTE_ELIGIBILITY", "START_DATE"].includes(taxonomy)) return "CUSTOM_QUESTION" as const;
   if (["DEGREE", "INSTITUTION", "FIELD_OF_STUDY", "GRADUATION_DATE"].includes(taxonomy)) return "EDUCATION" as const;
   if (["YEARS_OF_EXPERIENCE", "YEARS_OF_TECHNOLOGY_EXPERIENCE", "MANAGEMENT_EXPERIENCE", "SKILL_RATING", "TECHNOLOGY_USE"].includes(taxonomy)) return "EXPERIENCE" as const;
   if (isSensitiveTaxonomy(taxonomy)) return "DEMOGRAPHIC" as const;

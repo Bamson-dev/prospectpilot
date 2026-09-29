@@ -12,6 +12,8 @@ export function classifyBlockers(input: {
   unknownRequired?: string[];
   workAuthorizationKnown?: boolean;
   workAuthorizationAsked?: boolean;
+  sponsorshipKnown?: boolean;
+  sponsorshipAsked?: boolean;
   salaryKnown?: boolean;
   salaryAsked?: boolean;
   linkedinKnown?: boolean;
@@ -25,6 +27,9 @@ export function classifyBlockers(input: {
   }
   if (input.workAuthorizationAsked && !input.workAuthorizationKnown) {
     blockers.push({ label: "Work authorization", class: "REVIEW_REQUIRED" });
+  }
+  if (input.sponsorshipAsked && !input.sponsorshipKnown) {
+    blockers.push({ label: "Sponsorship", class: "REVIEW_REQUIRED" });
   }
   if (input.salaryAsked && !input.salaryKnown) {
     blockers.push({ label: "Salary", class: "REVIEW_REQUIRED" });

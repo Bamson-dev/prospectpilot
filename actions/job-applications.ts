@@ -79,6 +79,13 @@ export async function saveCandidateProfile(formData: FormData) {
   await replaceEnteredFact(candidate.id, "IDENTITY", "sponsorship", draft.sponsorship ? `Sponsorship: ${draft.sponsorship}` : "");
   await replaceEnteredFact(candidate.id, "LINK", "github", draft.githubUrl ? `GitHub: ${draft.githubUrl}` : "");
   await replaceEnteredFact(candidate.id, "LINK", "portfolio", draft.portfolioUrl ? `Portfolio: ${draft.portfolioUrl}` : "");
+  const website = String(formData.get("website") ?? "").trim();
+  if (website && !/^https:\/\/[^\s]+$/i.test(website)) redirect("/jobs/candidate?error=Website+must+be+an+https+URL,+or+stay+blank.");
+  await replaceEnteredFact(candidate.id, "LINK", "website", website ? `Website: ${website}` : "");
+  await replaceEnteredFact(candidate.id, "IDENTITY", "preferred-name", textFact(formData, "preferredName", "Preferred name"));
+  await replaceEnteredFact(candidate.id, "IDENTITY", "summary", textFact(formData, "summary", "Summary"));
+  await replaceEnteredFact(candidate.id, "IDENTITY", "negotiability", textFact(formData, "negotiability", "Salary negotiability"));
+  await replaceEnteredFact(candidate.id, "SKILL", "proficiency", textFact(formData, "skillProficiency", "Skill proficiency"));
   if (draft.yearsExperience != null) await replaceEnteredFact(candidate.id, "EXPERIENCE", "years", `Years of experience: ${draft.yearsExperience}`);
   else await replaceEnteredFact(candidate.id, "EXPERIENCE", "years", "");
   await prisma.candidateEducation.deleteMany({ where: { candidateId: candidate.id, source: "candidate-settings" } });
@@ -114,7 +121,12 @@ export async function saveCandidateProfile(formData: FormData) {
   redirect("/jobs/candidate?notice=Candidate+profile+saved.");
 }
 
-async function replaceEnteredFact(candidateId: string, category: "LINK" | "EXPERIENCE" | "EDUCATION" | "CERTIFICATION" | "IDENTITY", subcategory: string, fact: string) {
+function textFact(formData: FormData, field: string, label: string) {
+  const value = String(formData.get(field) ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
+  return value ? `${label}: ${value}` : "";
+}
+
+async function replaceEnteredFact(candidateId: string, category: "LINK" | "EXPERIENCE" | "EDUCATION" | "CERTIFICATION" | "IDENTITY" | "SKILL", subcategory: string, fact: string) {
   await prisma.candidateFact.deleteMany({ where: { candidateId, source: "candidate-settings", subcategory } });
   if (!fact) return;
   await prisma.candidateFact.create({

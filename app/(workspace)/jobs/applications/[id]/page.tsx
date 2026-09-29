@@ -41,6 +41,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
     coverLetterReady: Boolean(letter),
     contactReady: !application.candidate.email.endsWith("@invalid.test"),
     workAuthorization: application.candidate.workAuthorization,
+    sponsorship: application.candidate.sponsorship,
     salary: application.answers.find((answer) => answer.kind === "SALARY")?.answer ?? null,
     salaryAsked: application.answers.some((answer) => answer.kind === "SALARY"),
     educationKnown: false,
@@ -84,12 +85,12 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <p className="mt-2 text-sm">Source {application.source}. <a className="text-tide" href={application.applicationUrl} target="_blank" rel="noreferrer">Open application URL</a></p>
       </Panel>
       <Panel className="mb-3">
-        <h2 className="font-display text-2xl">Final readiness</h2>
+        <h2 className="font-display text-2xl">Readiness</h2>
         <p className="mt-2 text-sm">CV {report.cv}. Cover letter {report.coverLetter}. Contact {report.contact}. Work authorization {report.workAuthorization}. Salary {report.salary}.</p>
         <p className="text-sm">Writing {report.writing}. Facts {report.facts}. Questions {report.requiredQuestions} review-required. Security {report.security}. CAPTCHA {report.captcha}.</p>
-        <p className="mt-2 text-sm">Overall {report.overall}. Package version {application.package?.version ?? 1}.</p>
+        <p className="mt-2 text-sm">Decision {report.decision}. Package version {application.package?.version ?? 1}.</p>
         <ul className="mt-2 list-disc pl-5 text-sm">
-          {report.blockers.map((item) => <li key={`${item.class}-${item.label}`}>{item.class}: {item.label}</li>)}
+          {report.reasons.map((reason) => <li key={reason}>{reason}</li>)}
         </ul>
       </Panel>
       <Panel className="mb-3">
@@ -110,7 +111,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         {analysis?.selections?.length ? analysis.selections.map((item) => <p key={`${item.requirement}-${item.match}`} className="mt-2 text-sm">{item.requirement}: {item.match}{item.evidence ? ` · ${item.evidence}` : ""}</p>) : null}
       </Panel>
       <Panel className="mb-3">
-        <h2 className="font-display text-2xl">Package</h2>
+        <h2 className="font-display text-2xl">CV and cover letter</h2>
         <p className="mt-2 text-sm">Selected profile {application.profile}.</p>
         {documents.filter((document) => document.kind === "CV").map((document) => <p key={document.id} className="mt-2 text-sm"><a className="text-tide" href={`/api/jobs/documents/${document.id}`}>{document.fileName}</a></p>)}
         {!cv ? <p className="mt-2 text-sm text-muted">No CV stored. A placeholder email blocks document generation.</p> : null}
@@ -118,12 +119,12 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         {letter ? <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap text-sm">{letter.text.slice(0, 1200)}</pre> : <p className="mt-2 text-sm text-muted">No cover letter stored.</p>}
       </Panel>
       <Panel className="mb-3">
-        <h2 className="font-display text-2xl">Answers</h2>
+        <h2 className="font-display text-2xl">Employer questions</h2>
         {application.answers.map((answer) => <p key={answer.id} className="mt-2 text-sm">{answer.question} · {answer.status}{answer.answer ? ` · ${answer.answer.slice(0, 220)}` : ""}</p>)}
         <List title="Warnings" items={application.package?.warnings} />
       </Panel>
       <Panel className="mb-3">
-        <h2 className="font-display text-2xl">Review</h2>
+        <h2 className="font-display text-2xl">Approval</h2>
         <p className="mt-2 text-sm text-muted">Approve does not submit. Submission needs a separate confirmation, and this build still will not send the application.</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="APPROVED" /><SubmitButton pendingLabel="Saving">Approve</SubmitButton></form>
@@ -155,12 +156,24 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         </form>
       </Panel>
       <Panel>
-        <h2 className="font-display text-2xl">History</h2>
+        <h2 className="font-display text-2xl">Browser preparation</h2>
+        <p className="mt-2 text-sm">{browserLine(application.package?.timings)}</p>
+      </Panel>
+      <Panel>
+        <h2 className="font-display text-2xl">Audit history</h2>
         {application.events.map((event) => <p key={event.id} className="mt-2 text-sm">{event.type}{event.detail ? ` · ${event.detail}` : ""}</p>)}
         {application.followUps.map((item) => <p key={item.id} className="mt-2 text-sm">Follow-up {item.status} · {item.channel}</p>)}
       </Panel>
     </div>
   );
+}
+
+function browserLine(timings: unknown) {
+  if (!timings || typeof timings !== "object" || Array.isArray(timings)) return "Browser preparation has not been stored for this package.";
+  const row = timings as Record<string, unknown>;
+  const inspection = typeof row.browserInspectionMs === "number" ? `${row.browserInspectionMs} ms inspection` : "inspection not recorded";
+  const reason = typeof row.failureReason === "string" && row.failureReason ? ` Stop reason: ${row.failureReason}.` : "";
+  return `${inspection}.${reason} Opening a form does not mark the application ready.`;
 }
 
 function fieldLine(name: string, value: string | null) {

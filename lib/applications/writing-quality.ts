@@ -80,11 +80,16 @@ export function humanRewrite(text: string) {
   return next.replace(/[ ]{2,}/g, " ").trim();
 }
 
+const COMMON_WORDS = new Set(["a", "an", "the", "and", "or", "of", "to", "for", "in", "on", "with", "this", "that", "role", "work", "application", "web", "about", "interested", "excited", "opportunity"]);
+
 function repeatedPhrases(text: string) {
   const words = text.split(/\s+/);
   const counts = new Map<string, number>();
-  for (let index = 0; index < words.length - 3; index += 1) {
-    const phrase = words.slice(index, index + 4).join(" ");
+  for (let index = 0; index < words.length - 4; index += 1) {
+    const slice = words.slice(index, index + 5);
+    const distinctive = slice.filter((word) => word.length > 4 && !COMMON_WORDS.has(word));
+    if (distinctive.length < 2) continue;
+    const phrase = slice.join(" ");
     counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
   }
   return [...counts.entries()].filter(([, count]) => count > 1).map(([phrase]) => phrase);

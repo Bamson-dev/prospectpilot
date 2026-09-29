@@ -9,6 +9,6 @@ export function nextPackageVersion(current: number | null | undefined) {
 }
 
 export function safeAuditDetail(detail: string) {
-  if (/password|bearer\s+|authorization:\s*|api[_-]?key|token=/i.test(detail)) return "redacted";
+  if (/password|bearer\s+|authorization:\s*|api[_-]?key|token=|cookie\s*[:=]|set-cookie|sitekey|g-recaptcha|h-captcha-response|secret/i.test(detail)) return "redacted";
   return detail.replace(/\s+/g, " ").trim().slice(0, 240);
 }

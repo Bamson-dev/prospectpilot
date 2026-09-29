@@ -86,6 +86,8 @@ export async function saveCandidateProfile(formData: FormData) {
   await replaceEnteredFact(candidate.id, "IDENTITY", "summary", textFact(formData, "summary", "Summary"));
   await replaceEnteredFact(candidate.id, "IDENTITY", "negotiability", textFact(formData, "negotiability", "Salary negotiability"));
   await replaceEnteredFact(candidate.id, "SKILL", "proficiency", textFact(formData, "skillProficiency", "Skill proficiency"));
+  await replaceEnteredFact(candidate.id, "IDENTITY", "employment-status", textFact(formData, "employmentStatus", "Employment status"));
+  await replaceEnteredFact(candidate.id, "IDENTITY", "start-date", textFact(formData, "startDate", "Start date"));
   if (draft.yearsExperience != null) await replaceEnteredFact(candidate.id, "EXPERIENCE", "years", `Years of experience: ${draft.yearsExperience}`);
   else await replaceEnteredFact(candidate.id, "EXPERIENCE", "years", "");
   await prisma.candidateEducation.deleteMany({ where: { candidateId: candidate.id, source: "candidate-settings" } });

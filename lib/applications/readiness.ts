@@ -46,6 +46,38 @@ const FIELDS: Array<{ group: ReadinessGroup; field: string; key: keyof Candidate
   { group: "COMPENSATION", field: "salary expectation", key: "salaryExpectation", purpose: "OPTIONAL", note: "Not required for a CV. A salary question stays review-required until you save one." },
 ];
 
+export function availabilityLabel(state: FactState) {
+  if (state === "KNOWN") return "AVAILABLE" as const;
+  if (state === "REVIEW_REQUIRED") return "REVIEW REQUIRED" as const;
+  return "MISSING" as const;
+}
+
+export function applicationCriticalFields(input: CandidateReadinessInput & {
+  fullName?: string | null;
+  employmentStatus?: string | null;
+  startDate?: string | null;
+  verifiedExperience?: boolean;
+  verifiedTechnology?: boolean;
+}) {
+  const rows: Array<{ label: string; state: FactState; note: string }> = [
+    { label: "Full name", state: fieldState(input.fullName, "phone"), note: "Required on every application." },
+    { label: "Email", state: fieldState(input.email, "email"), note: "Required before a CV or cover letter can be stored." },
+    { label: "Phone", state: fieldState(input.phone, "phone"), note: "Missing until an employer asks, and still not guessed." },
+    { label: "Location", state: fieldState(input.location, "location"), note: "Missing until an employer asks, and still not guessed." },
+    { label: "LinkedIn", state: fieldState(input.linkedinUrl, "linkedinUrl"), note: "Missing until an employer asks, and still not guessed." },
+    { label: "Work authorization", state: fieldState(input.workAuthorization, "workAuthorization"), note: "Stays missing until you enter it." },
+    { label: "Sponsorship", state: fieldState(input.sponsorship, "sponsorship"), note: "Stays missing until you enter it." },
+    { label: "Salary", state: fieldState(input.salaryExpectation, "salaryExpectation"), note: "Used only when an employer asks. A CV does not need it." },
+    { label: "Employment status", state: fieldState(input.employmentStatus, "phone"), note: "Used only when an employer asks." },
+    { label: "Start date", state: fieldState(input.startDate, "phone"), note: "Used only when an employer asks. Availability is not treated as a start date." },
+    { label: "Verified experience", state: input.verifiedExperience ? "KNOWN" : "UNKNOWN", note: "Only experience you have marked verified." },
+    { label: "Verified technologies", state: input.verifiedTechnology ? "KNOWN" : "UNKNOWN", note: "Only technologies present on verified evidence." },
+    { label: "Education", state: fieldState(input.degree || input.institution, "degree"), note: "Used only when an employer asks." },
+    { label: "Certifications", state: fieldState(input.certification, "certification"), note: "Used only when an employer asks." },
+  ];
+  return rows.map((row) => ({ ...row, availability: availabilityLabel(row.state) }));
+}
+
 export function fieldState(value: string | null | undefined, key: keyof CandidateReadinessInput): FactState {
   const text = (value ?? "").trim();
   if (!text) return "UNKNOWN";

@@ -1,6 +1,6 @@
 import type { CandidateRecord, CareerProfile, JobInput } from "@/lib/applications/types";
 import type { FitResult } from "@/lib/applications/fit";
-import { unsupportedClaims } from "@/lib/applications/claims";
+import { unsupportedClaims, validateCvFacts } from "@/lib/applications/claims";
 import { careerStrategy } from "@/lib/applications/seed-data";
 import { bannedPhrases } from "@/lib/applications/writing";
 
@@ -63,8 +63,8 @@ export function validateCvText(text: string, candidate: CandidateRecord, keyword
   if (!text.includes(candidate.fullName)) problems.push("missing candidate name");
   if (!text.includes(candidate.email)) problems.push("missing contact details");
   if (text.trim().length < 80) problems.push("empty sections");
-  const claims = unsupportedClaims(text, candidate, allowedNames);
-  if (!claims.ok) problems.push(`unsupported facts: ${claims.unsupported.join(", ")}`);
+  const claims = validateCvFacts(text, candidate, allowedNames);
+  if (claims.status === "REVIEW_REQUIRED") problems.push(...claims.issues.map((issue) => `unsupported ${issue.kind}: ${issue.value}`));
   const present = keywords.filter((keyword) => text.toLowerCase().includes(keyword.toLowerCase()));
   return { ok: problems.length === 0, problems, keywordHits: present };
 }

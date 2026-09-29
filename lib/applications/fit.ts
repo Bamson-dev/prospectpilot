@@ -101,7 +101,12 @@ export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requireme
   const selectedProjects = (projectHits.length ? projectHits : rankProjects(verifiedProjects, job)).slice(0, 3);
   const skills = unique(selectedFacts.flatMap((fact) => fact.skills ?? []).concat(selectedProjects.flatMap((project) => project.technologies)));
   const legalUnknown = uncertain.some((item) => /authorization|visa|salary|notice|location/i.test(item)) || missingInformation.includes("work authorization");
-  const selections = [...required, ...preferred].map((requirement) => selectEvidence(requirement.text, verifiedFacts));
+  const selections = [...required, ...preferred].map((requirement) => selectionFor(requirement, verifiedFacts));
+  const covered = new Set(selections.map((item) => item.requirement));
+  const requirementSelections = [
+    ...selections,
+    ...requirements.filter((item) => !covered.has(item.text)).map((item) => selectionFor(item, verifiedFacts)),
+  ];
   const recommendation = selectedFacts.length === 0 && selectedProjects.length === 0
     ? "DO_NOT_PREPARE"
     : blockers.length || missing.length
@@ -134,7 +139,7 @@ export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requireme
     cvStructure: ["Summary", "Skills", "Experience", "Projects"],
     responsibilities: unique(responsibilities).slice(0, 8),
     recommendation,
-    selections,
+    selections: requirementSelections,
   };
 }
 
@@ -161,6 +166,19 @@ function isRequired(item: ExtractedRequirement) {
   if (item.certainty === "preferred" || item.certainty === "uncertain" || item.certainty === "responsibility") return false;
   if (item.certainty === "required") return item.kind !== "RESPONSIBILITY";
   return item.required || item.kind === "MUST_HAVE" || item.kind === "EDUCATION";
+}
+
+function selectionFor(requirement: ExtractedRequirement, facts: Parameters<typeof selectEvidence>[1]) {
+  const skill = requirement.kind === "TECHNOLOGY" || requirement.kind === "MUST_HAVE" || requirement.kind === "NICE_TO_HAVE" || requirement.kind === "EDUCATION" || requirement.kind === "EXPERIENCE_YEARS";
+  if (skill) return selectEvidence(requirement.text, facts);
+  return {
+    requirement: requirement.text,
+    evidence: null,
+    source: null,
+    match: "UNCERTAIN" as const,
+    confidence: 0.5,
+    reason: "This is employer context, so it is not matched to candidate evidence.",
+  };
 }
 
 function usableFact(fact: CandidateFactInput) {

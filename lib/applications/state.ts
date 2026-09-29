@@ -20,8 +20,26 @@ const NEXT: Record<ApplicationStatus, ApplicationStatus[]> = {
   WITHDRAWN: [],
 };
 
+export type PipelineState = "DRAFT" | "GENERATING" | "REVIEW_REQUIRED" | "READY" | "APPROVED" | "REQUIRES_MANUAL_ACTION" | "REJECTED" | "SUPERSEDED";
+
 export function canTransition(from: ApplicationStatus, to: ApplicationStatus) {
+  if ((from === "REQUIRES_REVIEW" || from === "REQUIRES_MANUAL_ACTION") && (to === "SUBMITTED" || to === "SUBMITTING")) return false;
   return NEXT[from].includes(to);
+}
+
+export function pipelineState(status: ApplicationStatus): PipelineState {
+  if (status === "PREPARING") return "GENERATING";
+  if (status === "REQUIRES_REVIEW" || status === "VERIFICATION_REQUIRED" || status === "VERIFICATION_PENDING" || status === "FAILED") return "REVIEW_REQUIRED";
+  if (status === "REQUIRES_MANUAL_ACTION") return "REQUIRES_MANUAL_ACTION";
+  if (status === "APPROVED") return "APPROVED";
+  if (status === "REJECTED" || status === "WITHDRAWN") return "REJECTED";
+  if (status === "READY_FOR_REVIEW" || status === "READY_TO_SUBMIT" || status === "READY_FOR_SUBMISSION" || status === "FIT_EVALUATED") return "READY";
+  if (status === "SUBMITTING" || status === "SUBMITTED" || status === "VERIFIED") return "REQUIRES_MANUAL_ACTION";
+  return "DRAFT";
+}
+
+export function automaticSubmissionAllowed() {
+  return false;
 }
 
 export function statusAfterBlock(reason: "captcha" | "rate-limit" | "unknown-field" | "verification") {

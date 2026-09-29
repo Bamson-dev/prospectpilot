@@ -1,9 +1,12 @@
 export type EvidenceGroup = "EXPERIENCE" | "PROJECT" | "SKILL" | "TECHNOLOGY" | "ACHIEVEMENT" | "EDUCATION" | "CERTIFICATION" | "CONTACT" | "PREFERENCE";
 
+export type EvidenceOrigin = "CANDIDATE_ENTERED" | "REPOSITORY_VERIFIED" | "DOCUMENT_VERIFIED";
+
 export type EvidenceItem = {
   group: EvidenceGroup;
   value: string;
   source: string;
+  origin: EvidenceOrigin;
   verification: "VERIFIED";
   usableFor: string[];
 };
@@ -20,17 +23,18 @@ const PROFILE_LABELS: Record<string, string> = {
 
 export function evidenceLibrary(input: {
   facts: Array<{ category: string; subcategory?: string | null; fact: string; source: string; sourceType?: string | null; verified: boolean; profiles?: string[] }>;
-  projects?: Array<{ name: string; source: string; verified: boolean; technologies: string[]; profiles?: string[] }>;
+  projects?: Array<{ name: string; source: string; sourceType?: string | null; verified: boolean; technologies: string[]; profiles?: string[] }>;
 }) {
   const items: EvidenceItem[] = [];
   for (const fact of input.facts) {
-    if (!fact.verified || fact.sourceType === "SYSTEM_GENERATED") continue;
+    if (!usableEvidence(fact)) continue;
     const group = groupFor(fact.category, fact.subcategory ?? "");
     if (!group) continue;
     items.push({
       group,
       value: fact.fact,
       source: fact.source,
+      origin: originFor(fact.sourceType, fact.source),
       verification: "VERIFIED",
       usableFor: labels(fact.profiles ?? []),
     });
@@ -41,11 +45,31 @@ export function evidenceLibrary(input: {
       group: "PROJECT",
       value: project.technologies.length ? `${project.name}: ${project.technologies.join(", ")}` : project.name,
       source: project.source,
+      origin: originFor(project.sourceType, project.source),
       verification: "VERIFIED",
       usableFor: labels(project.profiles ?? []),
     });
   }
   return items;
+}
+
+export function usableEvidence(fact: { verified: boolean; sourceType?: string | null; source?: string | null; fact?: string | null }) {
+  if (!fact.verified || fact.sourceType === "SYSTEM_GENERATED") return false;
+  const source = `${fact.source ?? ""} ${fact.fact ?? ""}`;
+  return !/generated[- ](?:cv|cover|document)|cover letter text|cv text/i.test(source);
+}
+
+export function supportsClaim(claim: string, items: EvidenceItem[]) {
+  const text = claim.trim().toLowerCase();
+  if (!text) return null;
+  return items.find((item) => item.value.toLowerCase().includes(text) || text.includes(item.value.toLowerCase())) ?? null;
+}
+
+function originFor(sourceType: string | null | undefined, source: string | null | undefined): EvidenceOrigin {
+  if (sourceType === "REPOSITORY_VERIFIED" || sourceType === "DOCUMENT_VERIFIED" || sourceType === "CANDIDATE_ENTERED") return sourceType;
+  if (/repository/i.test(source ?? "")) return "REPOSITORY_VERIFIED";
+  if (/document/i.test(source ?? "")) return "DOCUMENT_VERIFIED";
+  return "CANDIDATE_ENTERED";
 }
 
 function groupFor(category: string, subcategory: string): EvidenceGroup | null {

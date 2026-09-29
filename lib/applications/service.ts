@@ -277,13 +277,16 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   let coverLetterId: string | null = null;
   let cvMs = 0;
   let coverLetterMs = 0;
+  let cvValidation: "PASS" | "REVIEW_REQUIRED" | "NOT_GENERATED" = "NOT_GENERATED";
+  let coverValidation: "PASS" | "REVIEW_REQUIRED" | "NOT_GENERATED" = "NOT_GENERATED";
   if (cvGenerationEnabled() && contactIsReady(candidate.email) && !stopped) {
     const cvStarted = Date.now();
     const cv = buildCvDraft(job, candidate, fit);
     const rewritten = await maybeRewrite(cv.text, candidate);
     const rewrittenOk = rewritten !== cv.text && validateCvText(rewritten, candidate, [], [job.companyName]).ok && DateValidator(rewritten, candidate).ok;
     const text = rewrittenOk ? rewritten : cv.text;
-    const validation = validateCvText(text, candidate, fit.selectedProjects.flatMap((project) => project.technologies).slice(0, 6), [job.companyName]);
+    const validation = validateCvText(text, candidate, fit.selectedProjects.flatMap((project) => project.technologies).slice(0, 6), [job.companyName, job.title]);
+    cvValidation = validation.ok ? "PASS" : "REVIEW_REQUIRED";
     const dates = DateValidator(text, candidate);
     const formatting = FormattingValidator(text);
     if (!validation.ok || !dates.ok || !formatting.ok) {
@@ -319,6 +322,7 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
       extension: "pdf",
     });
     const writing = assessWriting({ text: letter, jobDescription: vacancy.description });
+    coverValidation = writing.status === "REVIEW_REQUIRED" ? "REVIEW_REQUIRED" : "PASS";
     if (writing.status === "REVIEW_REQUIRED") warnings.push("Cover letter writing needs review.");
     coverLetterMs = Date.now() - letterStarted;
   }
@@ -344,6 +348,24 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   timings.packageMs = timings.totalMs;
   timings.manualReview = status === "REQUIRES_REVIEW" || fit.recommendation === "MANUAL_REVIEW";
   timings.failureReason = stopped ? fit.recommendation : null;
+  const storedTimings = {
+    ...timings,
+    cvValidation,
+    coverValidation,
+    resolvedAnswers: answers.map((answer) => ({
+      question: answer.question,
+      classification: answer.classification,
+      required: answer.required,
+      answer: answer.answer,
+      source: answer.source,
+      confidence: answer.confidence,
+      reviewState: answer.reviewState,
+      reason: answer.reason,
+      fieldType: answer.fieldType,
+      options: answer.options,
+      section: answer.section,
+    })),
+  };
   const previous = await prisma.jobApplication.findUnique({
     where: { organizationId_vacancyId_candidateId: { organizationId, vacancyId, candidateId: candidateRow.id } },
     include: { package: true },
@@ -366,8 +388,8 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   });
   await prisma.applicationPackage.upsert({
     where: { applicationId: application.id },
-    update: { profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings, timings, version },
-    create: { applicationId: application.id, profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings, timings, version },
+    update: { profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings, timings: storedTimings, version },
+    create: { applicationId: application.id, profile: fit.profile, fitSummary: `${fit.overallMatch}`, strategy: fit.recommendation, status, warnings, timings: storedTimings, version },
   });
   await prisma.applicationAnswer.deleteMany({ where: { applicationId: application.id } });
   if (answers.length) {
@@ -375,11 +397,13 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
       data: answers.map((answer) => ({ applicationId: application.id, question: answer.question, kind: answer.kind, answer: answer.answer, status: answer.status })),
     });
   }
-  await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "FIT_CALCULATED", detail: safeAuditDetail(fit.recommendation) } });
-  if (cvId) await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "CV_GENERATED", detail: safeAuditDetail(`v${version}`) } });
-  if (coverLetterId) await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "COVER_LETTER_GENERATED", detail: safeAuditDetail(`v${version}`) } });
-  if (answers.length) await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "QUESTIONS_GENERATED", detail: safeAuditDetail(`${answers.length}`) } });
-  await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "PACKAGE_PREPARED", detail: safeAuditDetail(`v${version}`) } });
+  const direct = fit.selections.filter((item) => item.match === "DIRECT").length;
+  const missingEvidence = fit.selections.filter((item) => item.match === "MISSING").length;
+  await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "FIT_CALCULATED", detail: safeAuditDetail(`${fit.recommendation}; evidence ${direct} direct, ${missingEvidence} missing`) } });
+  if (cvId) await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "CV_GENERATED", detail: safeAuditDetail(`v${version} validation ${cvValidation}`) } });
+  if (coverLetterId) await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "COVER_LETTER_GENERATED", detail: safeAuditDetail(`v${version} validation ${coverValidation}`) } });
+  if (answers.length) await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "QUESTIONS_GENERATED", detail: safeAuditDetail(`${answers.filter((answer) => answer.reviewState === "ANSWERED").length} answered, ${answers.filter((answer) => answer.reviewState === "REVIEW_REQUIRED").length} review`) } });
+  await prisma.applicationEvent.create({ data: { applicationId: application.id, type: "PACKAGE_PREPARED", detail: safeAuditDetail(version > 1 ? `regenerated v${version}` : `v${version}`) } });
   const followUp = await prisma.applicationFollowUp.findFirst({ where: { applicationId: application.id } });
   if (!followUp) {
     await prisma.applicationFollowUp.create({

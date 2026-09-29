@@ -3,9 +3,13 @@ import { decideApplication, enqueueApplicationPreparation, recordSubmissionConfi
 import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
+import { validateCvFacts } from "@/lib/applications/claims";
 import { applicationPreview } from "@/lib/applications/preview";
 import { applicationReadinessReport } from "@/lib/applications/application-readiness";
+import { pipelineState } from "@/lib/applications/state";
+import type { CandidateRecord } from "@/lib/applications/types";
 import { assessWriting } from "@/lib/applications/writing-quality";
+import { validateCoverLetterForVacancy } from "@/lib/applications/document-check";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
 
@@ -23,7 +27,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       answers: true,
       events: { orderBy: { createdAt: "desc" }, take: 30 },
       followUps: true,
-      candidate: true,
+      candidate: { include: { facts: true, projects: true, experiences: true } },
     },
   });
   if (!application) notFound();
@@ -34,6 +38,12 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
   const analysis = readAnalysis(application.vacancy.fit?.analysis);
   const cv = documents.find((document) => document.kind === "CV");
   const letter = documents.find((document) => document.kind === "COVER_LETTER");
+  const candidateRecord = toCandidateRecord(application.candidate);
+  const cvCheck = cv ? validateCvFacts(cv.text, candidateRecord, [application.vacancy.companyName, application.vacancy.title]) : { status: "NOT_GENERATED" as const, issues: [] };
+  const letterWriting = letter ? assessWriting({ text: letter.text, jobDescription: application.vacancy.description }) : { status: "NOT_GENERATED" as const };
+  const letterSpecificity = letter ? validateCoverLetterForVacancy({ text: letter.text, companyName: application.vacancy.companyName, title: application.vacancy.title }) : null;
+  const letterValidation = !letter ? "NOT_GENERATED" : letterWriting.status === "REVIEW_REQUIRED" || letterSpecificity?.ok === false ? "REVIEW_REQUIRED" : "PASS";
+  const storedAnswers = readResolvedAnswers(application.package?.timings, application.answers);
   const report = applicationReadinessReport({
     candidateName: application.candidate.fullName,
     jobTitle: application.vacancy.title,
@@ -88,7 +98,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <h2 className="font-display text-2xl">Readiness</h2>
         <p className="mt-2 text-sm">CV {report.cv}. Cover letter {report.coverLetter}. Contact {report.contact}. Work authorization {report.workAuthorization}. Salary {report.salary}.</p>
         <p className="text-sm">Writing {report.writing}. Facts {report.facts}. Questions {report.requiredQuestions} review-required. Security {report.security}. CAPTCHA {report.captcha}.</p>
-        <p className="mt-2 text-sm">Decision {report.decision}. Package version {application.package?.version ?? 1}.</p>
+        <p className="mt-2 text-sm">Decision {report.decision}. Pipeline {pipelineState(application.status)}. Package version {application.package?.version ?? 1}. Approval is separate from this status, and neither approval nor browser preparation submits the application.</p>
         <ul className="mt-2 list-disc pl-5 text-sm">
           {report.reasons.map((reason) => <li key={reason}>{reason}</li>)}
         </ul>
@@ -108,19 +118,26 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <List title="Blockers" items={analysis?.blockers} />
         <List title="Missing candidate information" items={analysis?.missingInformation} />
         {analysis?.evidence?.length ? analysis.evidence.map((item) => <p key={item.requirement} className="mt-2 text-sm">{item.requirement}: {item.fact}</p>) : null}
-        {analysis?.selections?.length ? analysis.selections.map((item) => <p key={`${item.requirement}-${item.match}`} className="mt-2 text-sm">{item.requirement}: {item.match}{item.evidence ? ` · ${item.evidence}` : ""}</p>) : null}
+        {analysis?.selections?.length ? analysis.selections.map((item) => <p key={`${item.requirement}-${item.match}`} className="mt-2 text-sm">Requirement: {item.requirement}. Classification: {item.match}. Evidence: {item.evidence || "None"}. Reason: {item.reason || "No reason stored."}</p>) : null}
       </Panel>
       <Panel className="mb-3">
-        <h2 className="font-display text-2xl">CV and cover letter</h2>
-        <p className="mt-2 text-sm">Selected profile {application.profile}.</p>
-        {documents.filter((document) => document.kind === "CV").map((document) => <p key={document.id} className="mt-2 text-sm"><a className="text-tide" href={`/api/jobs/documents/${document.id}`}>{document.fileName}</a></p>)}
+        <h2 className="font-display text-2xl">CV</h2>
+        <p className="mt-2 text-sm">Status {cv ? "Stored" : "Missing"}. Version {cv?.version ?? "—"}. Validation {cv ? cvCheck.status : "NOT_GENERATED"}.</p>
+        {documents.filter((document) => document.kind === "CV").map((document) => <p key={document.id} className="mt-2 text-sm">Version {document.version} · {document.createdAt.toISOString()} · {document.version === latestVersion(documents, "CV", document.fileType) ? pipelineState(application.status) : "SUPERSEDED"} · <a className="text-tide" href={`/api/jobs/documents/${document.id}`}>{document.fileName}</a></p>)}
         {!cv ? <p className="mt-2 text-sm text-muted">No CV stored. A placeholder email blocks document generation.</p> : null}
+        {cvCheck.issues.map((issue) => <p key={`${issue.kind}-${issue.value}`} className="mt-2 text-sm">REVIEW REQUIRED · unsupported {issue.kind}: {issue.value}</p>)}
         {cv ? <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-sm">{cv.text.slice(0, 1200)}</pre> : null}
+      </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Cover letter</h2>
+        <p className="mt-2 text-sm">Status {letter ? "Stored" : "Missing"}. Version {letter?.version ?? "—"}. Validation {letterValidation}. {letterWriting.status === "REVIEW_REQUIRED" ? "Review reason: writing needs review." : ""}</p>
+        {documents.filter((document) => document.kind === "COVER_LETTER").map((document) => <p key={document.id} className="mt-2 text-sm">Version {document.version} · {document.createdAt.toISOString()} · {document.version === latestVersion(documents, "COVER_LETTER", document.fileType) ? pipelineState(application.status) : "SUPERSEDED"} · <a className="text-tide" href={`/api/jobs/documents/${document.id}`}>{document.fileName}</a></p>)}
         {letter ? <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap text-sm">{letter.text.slice(0, 1200)}</pre> : <p className="mt-2 text-sm text-muted">No cover letter stored.</p>}
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Employer questions</h2>
-        {application.answers.map((answer) => <p key={answer.id} className="mt-2 text-sm">{answer.question} · {answer.status}{answer.answer ? ` · ${answer.answer.slice(0, 220)}` : ""}</p>)}
+        <p className="mt-2 text-sm">Answered {storedAnswers.filter((answer) => answer.reviewState === "ANSWERED").length}. Review required {storedAnswers.filter((answer) => answer.reviewState !== "ANSWERED").length}. Unresolved {storedAnswers.filter((answer) => !answer.answer).length}. Sensitive {storedAnswers.filter((answer) => /sensitive/i.test(answer.reason ?? "")).length}.</p>
+        {storedAnswers.map((answer) => <p key={answer.question} className="mt-2 text-sm">{answer.question} · {answer.classification} · {answer.required ? "Required" : "Optional"} · {answer.reviewState} · {answer.source} · confidence {answer.confidence}{answer.answer ? ` · ${answer.answer.slice(0, 220)}` : ""}{answer.reason ? ` · ${answer.reason}` : ""}</p>)}
         <List title="Warnings" items={application.package?.warnings} />
       </Panel>
       <Panel className="mb-3">
@@ -158,6 +175,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       <Panel>
         <h2 className="font-display text-2xl">Browser preparation</h2>
         <p className="mt-2 text-sm">{browserLine(application.package?.timings)}</p>
+        <p className="mt-2 text-sm">Prepared means the form was opened. CAPTCHA, Cloudflare, and login stay manual. Preparation is not approval.</p>
       </Panel>
       <Panel>
         <h2 className="font-display text-2xl">Audit history</h2>
@@ -166,6 +184,63 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       </Panel>
     </div>
   );
+}
+
+function latestVersion(documents: Array<{ kind: string; version: number; fileType: string }>, kind: string, fileType: string) {
+  return documents.filter((document) => document.kind === kind && document.fileType === fileType).reduce((max, document) => Math.max(max, document.version), 0);
+}
+
+function toCandidateRecord(candidate: {
+  fullName: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  facts: Array<{ id: string; category: CandidateRecord["facts"][number]["category"]; fact: string; verified: boolean; profiles: CandidateRecord["facts"][number]["profiles"]; skills: string[]; technologies: string[]; keywords: string[]; sourceType: CandidateRecord["facts"][number]["sourceType"] }>;
+  projects: Array<{ id: string; name: string; description: string; role: string; technologies: string[]; features: string[]; outcomes: string[]; metrics: string[]; verified: boolean; profiles: CandidateRecord["projects"][number]["profiles"] }>;
+  experiences: Array<{ id: string; title: string; organizationName: string; summary: string; verified: boolean; profiles: CandidateRecord["experiences"][number]["profiles"] }>;
+}): CandidateRecord {
+  return {
+    fullName: candidate.fullName,
+    firstName: candidate.firstName,
+    lastName: candidate.lastName,
+    email: candidate.email,
+    facts: candidate.facts,
+    projects: candidate.projects,
+    experiences: candidate.experiences,
+  };
+}
+
+function readResolvedAnswers(timings: unknown, fallback: Array<{ question: string; kind: string; answer: string | null; status: string }>) {
+  if (timings && typeof timings === "object" && !Array.isArray(timings)) {
+    const row = timings as { resolvedAnswers?: unknown };
+    if (Array.isArray(row.resolvedAnswers) && row.resolvedAnswers.length) {
+      return row.resolvedAnswers.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const entry = item as { question?: unknown; classification?: unknown; required?: unknown; answer?: unknown; source?: unknown; confidence?: unknown; reviewState?: unknown; reason?: unknown };
+        if (typeof entry.question !== "string") return [];
+        return [{
+          question: entry.question,
+          classification: typeof entry.classification === "string" ? entry.classification : "CUSTOM_QUESTION",
+          required: entry.required === true,
+          answer: typeof entry.answer === "string" ? entry.answer : null,
+          source: typeof entry.source === "string" ? entry.source : "HUMAN_REVIEW",
+          confidence: typeof entry.confidence === "number" ? entry.confidence : 0,
+          reviewState: entry.reviewState === "ANSWERED" ? "ANSWERED" : "REVIEW_REQUIRED",
+          reason: typeof entry.reason === "string" ? entry.reason : null,
+        }];
+      });
+    }
+  }
+  return fallback.map((answer) => ({
+    question: answer.question,
+    classification: answer.kind,
+    required: answer.status !== "ANSWERED",
+    answer: answer.answer,
+    source: answer.status === "ANSWERED" ? "CANDIDATE_ENTERED" : "HUMAN_REVIEW",
+    confidence: answer.status === "ANSWERED" ? 1 : 0,
+    reviewState: answer.status === "ANSWERED" ? "ANSWERED" as const : "REVIEW_REQUIRED" as const,
+    reason: answer.status === "ANSWERED" ? null : "No safe answer is stored.",
+  }));
 }
 
 function browserLine(timings: unknown) {
@@ -219,9 +294,9 @@ function readAnalysis(value: unknown) {
     selections: Array.isArray(row.selections)
       ? row.selections.flatMap((item) => {
           if (!item || typeof item !== "object") return [];
-          const entry = item as { requirement?: unknown; evidence?: unknown; match?: unknown };
+          const entry = item as { requirement?: unknown; evidence?: unknown; match?: unknown; reason?: unknown };
           if (typeof entry.requirement !== "string" || typeof entry.match !== "string") return [];
-          return [{ requirement: entry.requirement, evidence: typeof entry.evidence === "string" ? entry.evidence : "", match: entry.match }];
+          return [{ requirement: entry.requirement, evidence: typeof entry.evidence === "string" ? entry.evidence : "", match: entry.match, reason: typeof entry.reason === "string" ? entry.reason : "" }];
         })
       : [],
     evidence: Array.isArray(row.evidence)

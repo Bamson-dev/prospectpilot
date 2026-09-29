@@ -5,7 +5,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { requireOrganization } from "@/lib/current-user";
 import { missingCandidateFields, settingValue } from "@/lib/applications/candidate-fields";
 import { evidenceLibrary } from "@/lib/applications/evidence-library";
-import { candidateReadiness } from "@/lib/applications/readiness";
+import { applicationCriticalFields, availabilityLabel, candidateReadiness } from "@/lib/applications/readiness";
 import { ensureCandidate } from "@/lib/applications/service";
 import { prisma } from "@/lib/db";
 
@@ -34,9 +34,26 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
     institution: candidate.education[0]?.institution,
     degree: candidate.education[0]?.degree,
     certification: candidate.certifications[0]?.name,
-    salaryExpectation: candidate.preference?.salaryCurrency && candidate.preference.salaryPeriod && (candidate.preference.salaryMin != null || candidate.preference.salaryTarget != null)
+      salaryExpectation: candidate.preference?.salaryCurrency && candidate.preference.salaryPeriod && (candidate.preference.salaryMin != null || candidate.preference.salaryTarget != null)
       ? `${candidate.preference.salaryMin ?? ""} ${candidate.preference.salaryCurrency}`
       : settingValue(candidate.facts, "salary-expectation"),
+  });
+  const critical = applicationCriticalFields({
+    fullName: candidate.fullName,
+    email: candidate.email,
+    phone: candidate.phone,
+    location: candidate.location,
+    linkedinUrl: candidate.linkedinUrl ?? settingValue(candidate.facts, "linkedin"),
+    workAuthorization: candidate.workAuthorization ?? settingValue(candidate.facts, "work-authorization"),
+    sponsorship: candidate.sponsorship,
+    salaryExpectation: settingValue(candidate.facts, "salary-expectation"),
+    employmentStatus: settingValue(candidate.facts, "employment-status"),
+    startDate: settingValue(candidate.facts, "start-date"),
+    degree: candidate.education[0]?.degree,
+    institution: candidate.education[0]?.institution,
+    certification: candidate.certifications[0]?.name,
+    verifiedExperience: candidate.facts.some((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED" && fact.category === "EXPERIENCE") || candidate.experiences.some((item) => item.verified),
+    verifiedTechnology: candidate.facts.some((fact) => fact.verified && fact.sourceType !== "SYSTEM_GENERATED" && fact.category === "TECHNOLOGY") || candidate.projects.some((project) => project.verified && project.technologies.length > 0),
   });
   return (
     <div>
@@ -84,6 +101,8 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
           <input name="credentialUrl" defaultValue={candidate.certifications[0]?.credentialUrl ?? ""} placeholder="Credential URL" />
           <h3 className="mt-2 text-sm text-muted">Skills and preferences</h3>
           <input name="skillProficiency" defaultValue={settingValue(candidate.facts, "proficiency")} placeholder="Skill proficiency, only if you supply it" />
+          <input name="employmentStatus" defaultValue={settingValue(candidate.facts, "employment-status")} placeholder="Employment status, only if you want it stored" />
+          <input name="startDate" defaultValue={settingValue(candidate.facts, "start-date")} placeholder="Start date, only if you want it stored" />
           <input name="availability" defaultValue={candidate.availability ?? ""} placeholder="Availability" />
           <input name="noticePeriod" defaultValue={candidate.noticePeriod ?? settingValue(candidate.facts, "notice-period")} placeholder="Notice period" />
           <input name="employmentPreference" defaultValue={candidate.employmentPreference ?? ""} placeholder="Employment type" />
@@ -114,6 +133,13 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
         </form>
       </Panel>
       <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Application-critical fields</h2>
+        <p className="mt-2 text-sm">AVAILABLE means you entered it. MISSING means it is blank. REVIEW REQUIRED means the saved value cannot be used. Nothing here is inferred.</p>
+        <ul className="mt-2 list-disc pl-5 text-sm">
+          {critical.map((field) => <li key={field.label} className={field.state === "KNOWN" ? "" : "font-medium"}>{field.label}: {field.availability}. {field.note}</li>)}
+        </ul>
+      </Panel>
+      <Panel className="mb-3">
         <h2 className="font-display text-2xl">Readiness</h2>
         <p className="mt-2 text-sm">Profile {readiness.status}. CV {readiness.cvStatus}. Unknown values stay unknown.</p>
         {(["IDENTITY", "PROFESSIONAL", "EMPLOYMENT", "EDUCATION", "CERTIFICATIONS", "COMPENSATION"] as const).map((group) => (
@@ -121,7 +147,7 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
             <p className="text-sm text-muted">{group}</p>
             <ul className="mt-1 list-disc pl-5 text-sm">
               {readiness.fields.filter((field) => field.group === group).map((field) => (
-                <li key={field.field} className={field.state === "KNOWN" ? "" : "font-medium"}>{field.field}: {displayState(field.state)}. {purposeLabel(field.purpose)}. {field.note}</li>
+                <li key={field.field} className={field.state === "KNOWN" ? "" : "font-medium"}>{field.field}: {availabilityLabel(field.state)}. {purposeLabel(field.purpose)}. {field.note}</li>
               ))}
             </ul>
           </div>
@@ -129,9 +155,9 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Evidence library</h2>
-        <p className="mt-2 text-sm text-muted">Only verified facts appear here. Generated CV text is not evidence.</p>
+        <p className="mt-2 text-sm text-muted">Only verified facts appear here. Generated CV text and cover-letter text are not evidence, and saving a document does not create a fact.</p>
         {evidenceLibrary({ facts: candidate.facts, projects: candidate.projects }).map((item) => (
-          <p key={`${item.group}-${item.value}`} className="mt-2 text-sm">{item.group} · {item.value} · {item.source} · {item.verification}{item.usableFor.length ? ` · ${item.usableFor.join(", ")}` : ""}</p>
+          <p key={`${item.group}-${item.value}`} className="mt-2 text-sm">{item.group} · {item.value} · {item.origin} · {item.source} · {item.verification}{item.usableFor.length ? ` · ${item.usableFor.join(", ")}` : ""}</p>
         ))}
       </Panel>
       <Panel className="mb-3">
@@ -155,12 +181,6 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
       </Panel>
     </div>
   );
-}
-
-function displayState(state: "KNOWN" | "UNKNOWN" | "REVIEW_REQUIRED") {
-  if (state === "KNOWN") return "Verified";
-  if (state === "REVIEW_REQUIRED") return "Review required";
-  return "Missing";
 }
 
 function purposeLabel(purpose: "CV" | "APPLICATION" | "OPTIONAL") {

@@ -247,8 +247,11 @@ function browserLine(timings: unknown) {
   if (!timings || typeof timings !== "object" || Array.isArray(timings)) return "Browser preparation has not been stored for this package.";
   const row = timings as Record<string, unknown>;
   const inspection = typeof row.browserInspectionMs === "number" ? `${row.browserInspectionMs} ms inspection` : "inspection not recorded";
-  const reason = typeof row.failureReason === "string" && row.failureReason ? ` Stop reason: ${row.failureReason}.` : "";
-  return `${inspection}.${reason} Opening a form does not mark the application ready.`;
+  const platform = typeof row.browserPlatform === "string" ? ` Platform ${row.browserPlatform}.` : "";
+  const fields = typeof row.browserFields === "number" ? ` Fields ${row.browserFields}.` : "";
+  const browserReason = typeof row.browserReason === "string" && row.browserReason && row.browserReason !== "pause before submit" ? ` Stop reason: ${row.browserReason}.` : "";
+  const reason = typeof row.failureReason === "string" && row.failureReason ? ` Fit stop: ${row.failureReason}.` : "";
+  return `${inspection}.${platform}${fields}${browserReason}${reason} Opening a form does not mark the application ready.`;
 }
 
 function fieldLine(name: string, value: string | null) {

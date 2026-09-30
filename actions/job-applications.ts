@@ -11,6 +11,7 @@ import { optionalCandidateFacts } from "@/lib/applications/candidate-fields";
 import { validateCandidateProfile } from "@/lib/applications/profile-validation";
 import { canTransition } from "@/lib/applications/state";
 import { evaluateSubmissionGate } from "@/lib/applications/submission-gate";
+import { MANUAL_QUEUE_REASON, discoveryLimit, queueAdmission, selectBulkPrepare, storedFitDecision } from "@/lib/applications/application-queue";
 import { preparationDecision, safeAuditDetail } from "@/lib/applications/package-version";
 import { checksum } from "@/lib/applications/documents";
 import type { ApplicationStatus } from "@/lib/applications/types";
@@ -193,17 +194,24 @@ export async function enqueueJobSearch(formData: FormData) {
   if (active.some((job) => discoveryQuery(job.payload) === query.toLowerCase())) {
     redirect("/jobs/discover?notice=That+search+is+already+running.");
   }
+  const limit = discoveryLimit(String(formData.get("limit") ?? "15"));
   try {
     await queueJob({
       organizationId: organization.id,
       queue: "job-discovery",
       name: "search",
-      payload: { organizationId: organization.id, query },
+      payload: { organizationId: organization.id, query, limit: String(limit) },
     });
   } catch (error) {
     redirect(`/jobs/discover?error=${encodeURIComponent(errorMessage(error))}`);
   }
   redirect("/jobs/discover?notice=Job+search+queued.");
+}
+
+function payloadVacancy(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
+  const vacancyId = (payload as { vacancyId?: unknown }).vacancyId;
+  return typeof vacancyId === "string" ? vacancyId : "";
 }
 
 function discoveryQuery(payload: unknown) {
@@ -233,6 +241,78 @@ export async function enqueueApplicationPreparation(formData: FormData) {
     redirect(`/jobs?error=${encodeURIComponent(errorMessage(error))}`);
   }
   redirect("/jobs/applications?notice=Application+preparation+queued.");
+}
+
+export async function addReviewToQueue(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const vacancyId = String(formData.get("vacancyId") ?? "");
+  const vacancy = await prisma.jobVacancy.findFirst({
+    where: { id: vacancyId, organizationId: organization.id },
+    include: { fit: true },
+  });
+  if (!vacancy) redirect("/jobs/applications/queue?error=Vacancy+not+found.");
+  const decision = storedFitDecision(vacancy.fit?.analysis);
+  if (decision === "NOT_A_FIT") redirect("/jobs/applications/queue?error=A+not-a-fit+vacancy+cannot+enter+the+queue.");
+  if (decision === "APPLY") redirect("/jobs/applications/queue?notice=Apply+vacancies+are+already+in+the+queue.");
+  const candidate = await ensureCandidate(organization.id);
+  const existing = await prisma.jobApplication.findFirst({
+    where: { organizationId: organization.id, vacancyId, candidateId: candidate.id },
+    select: { id: true },
+  });
+  if (existing) redirect("/jobs/applications/queue?notice=That+vacancy+is+already+queued.");
+  await prisma.jobApplication.create({
+    data: {
+      organizationId: organization.id,
+      candidateId: candidate.id,
+      vacancyId,
+      profile: vacancy.fit?.profile ?? "SOFTWARE",
+      status: "FIT_EVALUATED",
+      source: vacancy.source,
+      applicationUrl: vacancy.applicationUrl,
+      blockedReason: MANUAL_QUEUE_REASON,
+    },
+  });
+  redirect("/jobs/applications/queue?notice=Review+vacancy+added.+Nothing+was+submitted.");
+}
+
+export async function enqueueApplicationBatch(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const candidate = await ensureCandidate(organization.id);
+  const requested = formData.getAll("vacancyId").map((value) => String(value));
+  const vacancies = await prisma.jobVacancy.findMany({
+    where: { organizationId: organization.id, id: { in: requested } },
+    include: { fit: true, applications: { where: { candidateId: candidate.id }, select: { id: true, blockedReason: true, package: { select: { id: true } } } } },
+  });
+  const eligible = new Set(vacancies.flatMap((vacancy) => {
+    const decision = storedFitDecision(vacancy.fit?.analysis);
+    const manuallyQueued = vacancy.applications.some((application) => application.blockedReason === MANUAL_QUEUE_REASON);
+    return queueAdmission({ decision, manuallyQueued }) === "excluded" ? [] : [vacancy.id];
+  }));
+  const selected = selectBulkPrepare(requested, eligible);
+  if (!selected.ok) redirect(`/jobs/applications/queue?error=${encodeURIComponent(selected.reason)}`);
+  const running = await prisma.backgroundJob.findMany({
+    where: { organizationId: organization.id, queue: "application-preparation", state: { in: ["QUEUED", "ACTIVE"] } },
+    select: { payload: true },
+    take: 30,
+  });
+  const runningVacancies = new Set(running.map((job) => payloadVacancy(job.payload)));
+  let queued = 0;
+  let reused = 0;
+  for (const vacancyId of selected.ids) {
+    const existing = vacancies.find((vacancy) => vacancy.id === vacancyId)?.applications[0];
+    if (runningVacancies.has(vacancyId) || (existing?.package && preparationDecision(true, false) === "REUSE")) {
+      reused += 1;
+      continue;
+    }
+    await queueJob({
+      organizationId: organization.id,
+      queue: "application-preparation",
+      name: "prepare",
+      payload: { organizationId: organization.id, vacancyId },
+    });
+    queued += 1;
+  }
+  redirect(`/jobs/applications/queue?notice=${encodeURIComponent(`${queued} queued. ${reused} already had an application. Nothing was submitted.`)}`);
 }
 
 export async function decideApplication(formData: FormData) {

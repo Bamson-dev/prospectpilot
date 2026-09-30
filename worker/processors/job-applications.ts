@@ -4,17 +4,19 @@ import { queueJob, recordActivity } from "@/lib/jobs";
 import { enqueue } from "@/lib/queues";
 import { applicationAutomationEnabled, applicationMode, jobDiscoveryEnabled } from "@/lib/applications/config";
 import { collectPublicVacancies } from "@/lib/applications/job-sources";
+import { discoveryLimit } from "@/lib/applications/application-queue";
 import { analysisJobDecision, emptySummary, prepareDiscoveredVacancies } from "@/lib/applications/job-pipeline";
+import { attachBrowserInspection } from "@/lib/applications/public-inspection";
 import { analyzeVacancy, persistNormalizedVacancies, prepareApplication } from "@/lib/applications/service";
 import { statusAfterBlock } from "@/lib/applications/state";
 
-export async function processJobDiscovery(organizationId: string, query: string) {
+export async function processJobDiscovery(organizationId: string, query: string, requestedLimit?: string) {
   if (!jobDiscoveryEnabled()) {
     logInfo("job_discovery.disabled", { organizationId });
     return emptySummary();
   }
   const started = Date.now();
-  const collected = await collectPublicVacancies({ query, limit: 40 });
+  const collected = await collectPublicVacancies({ query, limit: discoveryLimit(requestedLimit) });
   const prepared = prepareDiscoveredVacancies(collected.jobs, query);
   const saved = await persistNormalizedVacancies(organizationId, prepared.kept);
   const summary = emptySummary();
@@ -78,7 +80,18 @@ export async function queueVacancyAnalysis(organizationId: string, vacancyId: st
 }
 
 export async function processApplicationPreparation(organizationId: string, vacancyId: string) {
-  await prepareApplication(organizationId, vacancyId);
+  const applicationId = await prepareApplication(organizationId, vacancyId);
+  await attachBrowserInspection(applicationId);
+  const submitted = await prisma.jobApplication.findFirst({
+    where: { id: applicationId, organizationId },
+    select: { submittedAt: true, status: true },
+  });
+  if (submitted?.submittedAt || submitted?.status === "SUBMITTED" || submitted?.status === "SUBMITTING") {
+    await prisma.jobApplication.update({
+      where: { id: applicationId },
+      data: { submittedAt: null, status: "REQUIRES_MANUAL_ACTION", blockedReason: "Preparation must not submit." },
+    });
+  }
 }
 
 export async function processApplicationSubmit(applicationId: string) {

@@ -112,7 +112,7 @@ followUps.on("failed", (job, error) => {
 
 start("job-discovery", async (data) => {
   if (!data.organizationId) throw new Error("Job discovery is missing an organization.");
-  await processJobDiscovery(data.organizationId, data.query || "software engineer remote");
+  await processJobDiscovery(data.organizationId, data.query || "software engineer remote", data.limit);
 });
 
 for (const name of ["job-analysis", "job-fit"] as const) {

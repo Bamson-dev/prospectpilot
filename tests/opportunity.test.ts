@@ -47,6 +47,9 @@ describe("opportunity coverage", () => {
     expect(report.primaryProfile).toBe("TECHNICAL_PRODUCT_MANAGER");
     expect(report.secondaryProfiles).toEqual(expect.arrayContaining(["PRODUCT_ENGINEER", "TECHNICAL_GROWTH"]));
     expect(report.documentProfile).toBe("SAAS");
+    expect(report.decision).toBe("REVIEW");
+    expect(report.queue).toBe("hold");
+    expect(report.unknown[0]?.reason).toMatch(/no hard requirement/i);
   });
 
   it("activates a profile only from verified evidence", () => {

@@ -18,7 +18,8 @@ export async function processJobDiscovery(organizationId: string, query: string,
   const started = Date.now();
   const collected = await collectPublicVacancies({ query, limit: discoveryLimit(requestedLimit) });
   const prepared = prepareDiscoveredVacancies(collected.jobs, query);
-  const saved = await persistNormalizedVacancies(organizationId, prepared.kept);
+  const capped = prepared.kept.slice(0, discoveryLimit(requestedLimit));
+  const saved = await persistNormalizedVacancies(organizationId, capped);
   const summary = emptySummary();
   summary.discovered = collected.jobs.length;
   summary.normalized = prepared.normalized.length;
@@ -27,8 +28,9 @@ export async function processJobDiscovery(organizationId: string, query: string,
   summary.stored = saved.ids.length;
   summary.failed = prepared.failed + collected.failures.filter((failure) => failure.reason !== "not configured").length;
   summary.failures = collected.failures;
+  summary.invalidSources = prepared.invalidSources.length;
   summary.discoveryMs = Date.now() - started;
-  for (const job of prepared.kept) summary.sources[job.source] = (summary.sources[job.source] ?? 0) + 1;
+  for (const job of capped) summary.sources[job.source] = (summary.sources[job.source] ?? 0) + 1;
   const analysisStarted = Date.now();
   for (const id of saved.ids) {
     const assessed = await analyzeVacancy(organizationId, id);
@@ -54,6 +56,7 @@ export async function processJobDiscovery(organizationId: string, query: string,
       review: summary.review,
       notReady: summary.notReady,
       notAFit: summary.notAFit,
+      invalidSources: summary.invalidSources,
       failed: summary.failed,
       failures: summary.failures,
       sources: summary.sources,

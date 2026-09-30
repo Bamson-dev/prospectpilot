@@ -40,6 +40,7 @@ export default async function DiscoverJobsPage({ searchParams }: { searchParams:
         <Metric label="Jobs qualified" value={summary?.qualified ?? vacancies.filter((job) => job.fit?.recommendation === "PREPARE").length} />
         <Metric label="Jobs requiring review" value={summary?.review ?? vacancies.filter((job) => job.fit?.recommendation === "REVIEW" || job.fit?.recommendation === "MANUAL_REVIEW").length} />
         <Metric label="Jobs not a fit" value={summary?.notAFit ?? 0} />
+        <Metric label="Invalid sources" value={summary?.invalidSources ?? 0} />
         <Metric label="Jobs failed" value={summary?.failed ?? 0} />
       </div>
       <Panel className="mb-3">
@@ -85,6 +86,7 @@ function readSummary(detail: string | null | undefined) {
       qualified?: number;
       review?: number;
       notAFit?: number;
+      invalidSources?: number;
       failed?: number;
       failures?: Array<{ source: string; reason: string }>;
       sources?: Record<string, number>;

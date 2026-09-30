@@ -195,10 +195,10 @@ export function evaluateOpportunity(input: {
   const titleBlock = titleBlocker(input.job.title, corpus);
   if (titleBlock) disqualifiers.push({ requirement: input.job.title, evidence: null, reason: titleBlock });
   if (hard.length === 0 && primary && !titleBlock) {
-    unknown.push({
+    experienceBased.push({
       requirement: input.job.title,
-      evidence: null,
-      reason: "No hard requirement was extracted from the posting.",
+      evidence: evidenceExcerpt(corpus, primary),
+      reason: "The title differs from the verified record. The career lane still matches verified evidence, and no mandatory blocker was extracted.",
     });
   }
   const missingPreferred = input.requirements

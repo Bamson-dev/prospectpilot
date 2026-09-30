@@ -47,9 +47,22 @@ describe("opportunity coverage", () => {
     expect(report.primaryProfile).toBe("TECHNICAL_PRODUCT_MANAGER");
     expect(report.secondaryProfiles).toEqual(expect.arrayContaining(["PRODUCT_ENGINEER", "TECHNICAL_GROWTH"]));
     expect(report.documentProfile).toBe("SAAS");
-    expect(report.decision).toBe("REVIEW");
-    expect(report.queue).toBe("hold");
-    expect(report.unknown[0]?.reason).toMatch(/no hard requirement/i);
+    expect(report.decision).toBe("APPLY");
+    expect(report.queue).toBe("prepare");
+    expect(report.experienceBased[0]?.reason).toMatch(/no mandatory blocker/i);
+    const architect = evaluateOpportunity({
+      job: job("Staff Product Security Architect", "Lead security architecture and mentor engineers."),
+      candidate: seed,
+      requirements: [],
+    });
+    expect(architect.decision).toBe("APPLY");
+    const fullStack = evaluateOpportunity({
+      job: job("Senior Full-Stack Engineer", "Builds web applications, APIs, databases, frontend and backend systems."),
+      candidate: seed,
+      requirements: [],
+    });
+    expect(fullStack.decision).toBe("APPLY");
+    expect(fullStack.primaryProfile).toBeTruthy();
   });
 
   it("activates a profile only from verified evidence", () => {

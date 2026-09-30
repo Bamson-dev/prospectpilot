@@ -30,14 +30,14 @@ export async function collectPublicVacancies(input: { query: string; limit: numb
     jobs.push(...found.jobs);
     failures.push(...found.failures);
   }
-  if (searxngEnabled() && jobs.length < input.limit) {
-    const searched = await searxngVacancies(input.query, input.limit - jobs.length);
+  if (searxngEnabled()) {
+    const searched = await searxngVacancies(input.query, Math.min(10, input.limit));
     jobs.push(...searched.jobs);
     failures.push(...searched.failures);
-  } else if (!searxngEnabled()) {
+  } else {
     failures.push({ source: "searxng", reason: "not configured" });
   }
-  return { jobs: jobs.slice(0, input.limit), failures };
+  return { jobs, failures };
 }
 
 async function greenhouseBoard(fetchImpl: typeof fetch, board: string, limit: number, query: string): Promise<SourceCollection> {

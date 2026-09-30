@@ -3,6 +3,7 @@ import { JobsNav } from "@/components/jobs-nav";
 import { Empty, Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { MANUAL_QUEUE_REASON, queueAdmission, readQueueOpportunity, storedFitDecision } from "@/lib/applications/application-queue";
+import { sourceValidity } from "@/lib/applications/source-validity";
 import { pipelineState } from "@/lib/applications/state";
 import type { ApplicationStatus } from "@/lib/applications/types";
 import { requireOrganization } from "@/lib/current-user";
@@ -26,11 +27,12 @@ export default async function ApplicationQueuePage({ searchParams }: { searchPar
     const decision = storedFitDecision(vacancy.fit?.analysis);
     const application = vacancy.applications[0] ?? null;
     const manuallyQueued = application?.blockedReason === MANUAL_QUEUE_REASON;
-    const admission = queueAdmission({ decision, manuallyQueued });
-    return { vacancy, decision, application, admission, opportunity: readQueueOpportunity(vacancy.fit?.analysis) };
+    const valid = sourceValidity({ title: vacancy.title, url: vacancy.applicationUrl, source: vacancy.source }) === "VALID_VACANCY";
+    const admission = valid ? queueAdmission({ decision, manuallyQueued }) : "excluded" as const;
+    return { vacancy, decision, application, admission, valid, opportunity: readQueueOpportunity(vacancy.fit?.analysis) };
   });
   const queued = rows.filter((row) => row.admission !== "excluded");
-  const reviewChoices = rows.filter((row) => row.decision === "REVIEW" && row.admission === "excluded");
+  const reviewChoices = rows.filter((row) => row.valid && row.decision === "REVIEW" && row.admission === "excluded");
   return (
     <div>
       <PageHeader title="Application queue" detail="Apply vacancies enter on their own. Review vacancies stay out until you add one. Not-a-fit vacancies stay out. Preparation does not submit." />

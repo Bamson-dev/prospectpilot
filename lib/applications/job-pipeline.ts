@@ -1,4 +1,5 @@
 import { duplicateDecision, type IdentityInput } from "@/lib/applications/dedupe";
+import { sourceValidity } from "@/lib/applications/source-validity";
 import type { EvidenceSelection } from "@/lib/applications/evidence-selection";
 import { matchesQuery, normalizeVacancy, type NormalizedVacancy, type RawDiscoveredVacancy } from "@/lib/applications/job-normalize";
 import { scoreJobFit, type FitResult } from "@/lib/applications/fit";
@@ -34,6 +35,7 @@ export type DiscoverySummary = {
   failed: number;
   failures: Array<{ source: string; reason: string }>;
   sources: Record<string, number>;
+  invalidSources: number;
   discoveryMs: number;
   analysisMs: number;
 };
@@ -49,9 +51,18 @@ export function prepareDiscoveredVacancies(jobs: RawDiscoveredVacancy[], query: 
     }
     if (matchesQuery(next, query)) normalized.push(next);
   }
+  const eligible: NormalizedVacancy[] = [];
+  const invalidSources: string[] = [];
+  for (const job of normalized) {
+    if (sourceValidity({ title: job.title, url: job.applicationUrl, source: job.source }) === "INVALID_SOURCE") {
+      invalidSources.push(job.title);
+      continue;
+    }
+    eligible.push(job);
+  }
   const kept: NormalizedVacancy[] = [];
   const duplicateReasons: string[] = [];
-  for (const job of normalized) {
+  for (const job of eligible) {
     const match = kept.find((existing) => duplicateDecision(identity(existing), identity(job)).merge);
     if (!match) {
       kept.push(job);
@@ -59,7 +70,7 @@ export function prepareDiscoveredVacancies(jobs: RawDiscoveredVacancy[], query: 
     }
     duplicateReasons.push(duplicateDecision(identity(match), identity(job)).reason ?? "duplicate");
   }
-  return { normalized, kept, duplicateReasons, failed };
+  return { normalized, kept, duplicateReasons, failed, invalidSources };
 }
 
 export function assessVacancy(job: JobInput, candidate: CandidateRecord) {
@@ -174,6 +185,7 @@ export function emptySummary(): DiscoverySummary {
     failed: 0,
     failures: [],
     sources: {},
+    invalidSources: 0,
     discoveryMs: 0,
     analysisMs: 0,
   };

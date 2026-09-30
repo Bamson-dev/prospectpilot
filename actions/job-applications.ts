@@ -12,6 +12,7 @@ import { validateCandidateProfile } from "@/lib/applications/profile-validation"
 import { canTransition } from "@/lib/applications/state";
 import { evaluateSubmissionGate } from "@/lib/applications/submission-gate";
 import { MANUAL_QUEUE_REASON, discoveryLimit, queueAdmission, selectBulkPrepare, storedFitDecision } from "@/lib/applications/application-queue";
+import { sourceValidity } from "@/lib/applications/source-validity";
 import { preparationDecision, safeAuditDetail } from "@/lib/applications/package-version";
 import { checksum } from "@/lib/applications/documents";
 import type { ApplicationStatus } from "@/lib/applications/types";
@@ -252,6 +253,9 @@ export async function addReviewToQueue(formData: FormData) {
   });
   if (!vacancy) redirect("/jobs/applications/queue?error=Vacancy+not+found.");
   const decision = storedFitDecision(vacancy.fit?.analysis);
+  if (sourceValidity({ title: vacancy.title, url: vacancy.applicationUrl, source: vacancy.source }) === "INVALID_SOURCE") {
+    redirect("/jobs/applications/queue?error=That+page+is+not+a+vacancy.");
+  }
   if (decision === "NOT_A_FIT") redirect("/jobs/applications/queue?error=A+not-a-fit+vacancy+cannot+enter+the+queue.");
   if (decision === "APPLY") redirect("/jobs/applications/queue?notice=Apply+vacancies+are+already+in+the+queue.");
   const candidate = await ensureCandidate(organization.id);
@@ -286,6 +290,7 @@ export async function enqueueApplicationBatch(formData: FormData) {
   const eligible = new Set(vacancies.flatMap((vacancy) => {
     const decision = storedFitDecision(vacancy.fit?.analysis);
     const manuallyQueued = vacancy.applications.some((application) => application.blockedReason === MANUAL_QUEUE_REASON);
+    if (sourceValidity({ title: vacancy.title, url: vacancy.applicationUrl, source: vacancy.source }) === "INVALID_SOURCE") return [];
     return queueAdmission({ decision, manuallyQueued }) === "excluded" ? [] : [vacancy.id];
   }));
   const selected = selectBulkPrepare(requested, eligible);

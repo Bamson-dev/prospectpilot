@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { discoveryLimit, queueAdmission, selectBulkPrepare, storedFitDecision } from "@/lib/applications/application-queue";
+import { discoveryLimit, keptQualificationExplanation, queueAdmission, selectBulkPrepare, storedFitDecision } from "@/lib/applications/application-queue";
 import { inspectionIsBlocked } from "@/lib/applications/public-inspection";
 
 describe("application queue", () => {
@@ -24,6 +24,14 @@ describe("application queue", () => {
     expect(discoveryLimit("15")).toBe(15);
     expect(discoveryLimit("500")).toBe(20);
     expect(discoveryLimit("0")).toBe(1);
+  });
+
+  it("keeps the stored qualification explanation when a package is prepared", () => {
+    const analysis = { explanation: { state: "APPLY", opportunity: { decision: "APPLY", primaryProfile: "GROWTH_GTM" } } };
+    expect(keptQualificationExplanation(analysis)?.state).toBe("APPLY");
+    expect(storedFitDecision({ ...analysis, qualification: "APPLY", explanation: keptQualificationExplanation(analysis) })).toBe("APPLY");
+    expect(keptQualificationExplanation({ qualification: "APPLY" })).toBeUndefined();
+    expect(keptQualificationExplanation(null)).toBeUndefined();
   });
 
   it("reads the stored qualification decision", () => {

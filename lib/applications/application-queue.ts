@@ -33,6 +33,14 @@ export function storedFitDecision(analysis: unknown): FitDecision {
   return "REVIEW";
 }
 
+export function keptQualificationExplanation(analysis: unknown): { state: string } | undefined {
+  if (!analysis || typeof analysis !== "object" || Array.isArray(analysis)) return undefined;
+  const explanation = (analysis as { explanation?: unknown }).explanation;
+  if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return undefined;
+  if (typeof (explanation as { state?: unknown }).state !== "string") return undefined;
+  return explanation as { state: string };
+}
+
 export function readQueueOpportunity(analysis: unknown) {
   const explanation = explanationOf(analysis);
   const opportunity = explanation?.opportunity;

@@ -19,6 +19,7 @@ import type { CandidateRecord, JobInput } from "@/lib/applications/types";
 import { DateValidator, FormattingValidator } from "@/lib/applications/validators";
 import { CV_SYSTEM_PROMPT, evidencePrompt } from "@/lib/applications/prompts";
 import { duplicateDecision } from "@/lib/applications/dedupe";
+import { keptQualificationExplanation } from "@/lib/applications/application-queue";
 import { assessVacancy } from "@/lib/applications/job-pipeline";
 import { normalizeVacancy, type NormalizedVacancy } from "@/lib/applications/job-normalize";
 import type { DiscoveredJob } from "@/lib/applications/providers";
@@ -313,10 +314,12 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   const fitStarted = Date.now();
   const fit = scoreJobFit(job, candidate, requirements);
   const fitMs = Date.now() - fitStarted;
+  const previousFit = await prisma.jobFitSnapshot.findUnique({ where: { vacancyId }, select: { analysis: true } });
+  const qualification = keptQualificationExplanation(previousFit?.analysis);
   await prisma.jobFitSnapshot.upsert({
     where: { vacancyId },
-    update: fitData(candidateRow.id, fit),
-    create: { vacancyId, ...fitData(candidateRow.id, fit) },
+    update: fitData(candidateRow.id, fit, qualification),
+    create: { vacancyId, ...fitData(candidateRow.id, fit, qualification) },
   });
   const warnings = [...fit.gaps.map((gap) => `Missing requirement: ${gap}`)];
   if (!contactIsReady(candidate.email)) warnings.push("Candidate email is still a placeholder.");

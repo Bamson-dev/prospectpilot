@@ -58,6 +58,10 @@ export function buildCvDraft(job: JobInput, candidate: CandidateRecord, fit: Fit
   return { headline, summary, skills: listedSkills, experience, projects, text };
 }
 
+export function rewritePreservesVacancy(text: string, companyName: string, title: string) {
+  return text.includes(companyName) && text.includes(title);
+}
+
 export function validateCvText(text: string, candidate: CandidateRecord, keywords: string[], allowedNames: string[] = []) {
   const problems: string[] = [];
   if (!text.includes(candidate.fullName)) problems.push("missing candidate name");

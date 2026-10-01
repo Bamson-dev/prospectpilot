@@ -6,7 +6,7 @@ import { planApplication, verificationFromPage } from "@/lib/applications/browse
 import { fillApplicationPage } from "@/lib/applications/browser";
 import { unsupportedClaims } from "@/lib/applications/claims";
 import { buildCoverLetter } from "@/lib/applications/cover-letter";
-import { buildCvDraft, validateCvText } from "@/lib/applications/cv";
+import { buildCvDraft, rewritePreservesVacancy, validateCvText } from "@/lib/applications/cv";
 import { applicationIdentity, isDuplicateIdentity } from "@/lib/applications/dedupe";
 import { docxContains, pdfLooksReadable, renderDocx, renderPdf } from "@/lib/applications/documents";
 import { mapField } from "@/lib/applications/fields";
@@ -73,6 +73,8 @@ describe("job application evidence", () => {
     const fit = scoreJobFit(job, person, extractRequirements(job.description));
     const cv = buildCvDraft(job, person, fit);
     expect(cv.text).toContain("Bamidele Matthew");
+    expect(rewritePreservesVacancy(cv.text, job.companyName, job.title)).toBe(true);
+    expect(rewritePreservesVacancy(cv.text.replaceAll(job.companyName, "a company"), job.companyName, job.title)).toBe(false);
     expect(cv.text).toContain("bamidele@example.com");
     expect(cv.text).not.toMatch(/kubernetes|bachelor|Acme/i);
     const validation = validateCvText(cv.text, person, ["PromptEarn"], [job.companyName]);

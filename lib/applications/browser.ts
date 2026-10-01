@@ -2,7 +2,7 @@ import type { Page } from "playwright";
 import { adapterFor } from "@/lib/applications/adapters";
 import { classificationReport, inspectFields, mapCandidateToFields, type RawField } from "@/lib/applications/form-map";
 import { detectPlatform } from "@/lib/applications/platforms";
-import { detectSecurityBarrier, unexpectedRedirect } from "@/lib/applications/security";
+import { detectSecurityBarrier, employerServerError, unexpectedRedirect } from "@/lib/applications/security";
 import { submissionAllowed } from "@/lib/applications/submission-gate";
 import { verificationFromPage } from "@/lib/applications/browser-plan";
 
@@ -63,6 +63,9 @@ export async function fillApplicationPage(
   const body = await page.locator("body").innerText().catch(() => "");
   const html = await page.content().catch(() => "");
   const raw = await readFormFields(page).catch(() => []);
+  if (employerServerError(undefined, body)) {
+    return finish(page.url(), detectPlatform({ url: page.url() }), [], [], "EMPLOYER_SERVER_ERROR", false);
+  }
   const security = detectSecurityBarrier({ text: `${body}\n${html}`, fieldTypes: raw.map((field) => field.type) })
     ?? (unexpectedRedirect(started, page.url()) ? "unexpected-redirect" as const : null);
   const inspected = inspectFields(raw);

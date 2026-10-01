@@ -7,7 +7,7 @@ import { selectEvidence } from "@/lib/applications/evidence-selection";
 import { nextPackageVersion, preparationDecision, safeAuditDetail } from "@/lib/applications/package-version";
 import { assessWriting, humanRewrite } from "@/lib/applications/writing-quality";
 import { scoreJobFit } from "@/lib/applications/fit";
-import { seedCandidateRecord } from "@/lib/applications/seed-data";
+import { seedCandidateRecord, selectExistingCandidate } from "@/lib/applications/seed-data";
 import type { JobInput } from "@/lib/applications/types";
 
 const job: JobInput = {
@@ -16,6 +16,17 @@ const job: JobInput = {
   description: "Build product features with TypeScript.",
   applicationUrl: "https://boards.greenhouse.io/northwind/jobs/1",
 };
+
+describe("candidate identity", () => {
+  it("reuses the candidate that already has applications after a real email is saved", () => {
+    const placeholder = { email: "needs-email@invalid.test", applicationCount: 3 };
+    const saved = { email: "candidate@example.com", applicationCount: 3 };
+    expect(selectExistingCandidate([saved])).toBe(saved);
+    expect(selectExistingCandidate([placeholder, saved])).toBe(placeholder);
+    expect(selectExistingCandidate([{ email: "needs-email@invalid.test", applicationCount: 0 }, saved])).toBe(saved);
+    expect(selectExistingCandidate([])).toBeNull();
+  });
+});
 
 describe("candidate intelligence", () => {
   it("shows which missing fields block a CV", () => {

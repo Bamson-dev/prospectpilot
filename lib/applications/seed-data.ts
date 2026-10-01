@@ -37,6 +37,11 @@ export function contactIsReady(email: string | null | undefined) {
   return Boolean(email && !email.endsWith("@invalid.test"));
 }
 
+export function selectExistingCandidate<T extends { email: string; applicationCount: number }>(rows: T[]): T | null {
+  if (rows.length === 0) return null;
+  return rows.find((row) => row.applicationCount > 0) ?? rows.find((row) => contactIsReady(row.email)) ?? rows[0];
+}
+
 export function unknownCandidateFields() {
   return ["phone", "location", "linkedin", "education", "certifications", "work authorization", "notice period", "salary expectation"];
 }

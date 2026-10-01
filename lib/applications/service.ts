@@ -14,7 +14,7 @@ import { checksum, docxContains, pdfLooksReadable, renderDocx, renderPdf } from 
 import { documentFileName } from "@/lib/applications/filenames";
 import { answerQuestion } from "@/lib/applications/questions";
 import { extractRequirements } from "@/lib/applications/requirements";
-import { CAREER_PROFILES, contactIsReady, seedCandidateRecord, seedWritingProfile } from "@/lib/applications/seed-data";
+import { CAREER_PROFILES, contactIsReady, seedCandidateRecord, seedWritingProfile, selectExistingCandidate } from "@/lib/applications/seed-data";
 import type { CandidateRecord, JobInput } from "@/lib/applications/types";
 import { DateValidator, FormattingValidator } from "@/lib/applications/validators";
 import { CV_SYSTEM_PROMPT, evidencePrompt } from "@/lib/applications/prompts";
@@ -27,10 +27,14 @@ import { cvGenerationEnabled, coverLetterGenerationEnabled } from "@/lib/applica
 
 export async function ensureCandidate(organizationId: string) {
   const seed = seedCandidateRecord();
-  const candidate = await prisma.candidate.upsert({
-    where: { organizationId_email: { organizationId, email: seed.email } },
-    update: {},
-    create: {
+  const rows = await prisma.candidate.findMany({
+    where: { organizationId },
+    orderBy: { createdAt: "asc" },
+    include: { _count: { select: { applications: true } } },
+  });
+  const selected = selectExistingCandidate(rows.map((row) => ({ ...row, applicationCount: row._count.applications })));
+  const candidate = selected ?? await prisma.candidate.create({
+    data: {
       organizationId,
       fullName: seed.fullName,
       firstName: seed.firstName,

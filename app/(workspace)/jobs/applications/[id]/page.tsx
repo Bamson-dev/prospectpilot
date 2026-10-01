@@ -4,8 +4,11 @@ import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { validateCvFacts } from "@/lib/applications/claims";
+import { cvStorageFailure } from "@/lib/applications/cv";
 import { applicationPreview } from "@/lib/applications/preview";
 import { applicationReadinessReport } from "@/lib/applications/application-readiness";
+import { preparationReadinessLine } from "@/lib/applications/security";
+import { classifyCandidateEmail } from "@/lib/applications/seed-data";
 import { pipelineState } from "@/lib/applications/state";
 import type { CandidateRecord } from "@/lib/applications/types";
 import { assessWriting } from "@/lib/applications/writing-quality";
@@ -44,12 +47,14 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
   const letterSpecificity = letter ? validateCoverLetterForVacancy({ text: letter.text, companyName: application.vacancy.companyName, title: application.vacancy.title }) : null;
   const letterValidation = !letter ? "NOT_GENERATED" : letterWriting.status === "REVIEW_REQUIRED" || letterSpecificity?.ok === false ? "REVIEW_REQUIRED" : "PASS";
   const storedAnswers = readResolvedAnswers(application.package?.timings, application.answers);
+  const blocker = readString(application.package?.timings, "blocker");
+  const readinessLine = preparationReadinessLine(blocker);
   const report = applicationReadinessReport({
     candidateName: application.candidate.fullName,
     jobTitle: application.vacancy.title,
     cvReady: Boolean(cv),
     coverLetterReady: Boolean(letter),
-    contactReady: !application.candidate.email.endsWith("@invalid.test"),
+    contactReady: classifyCandidateEmail(application.candidate.email) === "VALID_EMAIL",
     workAuthorization: application.candidate.workAuthorization,
     sponsorship: application.candidate.sponsorship,
     salary: application.answers.find((answer) => answer.kind === "SALARY")?.answer ?? null,
@@ -58,14 +63,17 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
     reviewQuestions: application.answers.filter((answer) => answer.status !== "ANSWERED").length,
     writing: letter ? assessWriting({ text: letter.text, jobDescription: application.vacancy.description }).status : "REVIEW_REQUIRED",
     facts: application.package?.warnings.some((warning) => /unsupported/i.test(warning)) ? "FAIL" : "PASS",
+    captcha: blocker === "CAPTCHA_REQUIRED",
+    authentication: blocker === "LOGIN_REQUIRED" || blocker === "AUTH_REQUIRED",
+    cloudflare: blocker === "CLOUDFLARE_CHALLENGE",
   });
   const preview = applicationPreview({
     company: application.vacancy.companyName,
     role: application.vacancy.title,
     resumeFileName: cv?.fileName ?? null,
     coverLetterFileName: letter?.fileName ?? null,
-    captcha: false,
-    authentication: false,
+    captcha: blocker === "CAPTCHA_REQUIRED",
+    authentication: blocker === "LOGIN_REQUIRED" || blocker === "AUTH_REQUIRED",
     fields: [
       fieldLine("Work authorization", application.candidate.workAuthorization),
       fieldLine("Sponsorship", application.candidate.sponsorship),
@@ -97,7 +105,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Readiness</h2>
         <p className="mt-2 text-sm">CV {report.cv}. Cover letter {report.coverLetter}. Contact {report.contact}. Work authorization {report.workAuthorization}. Salary {report.salary}.</p>
-        <p className="text-sm">Writing {report.writing}. Facts {report.facts}. Questions {report.requiredQuestions} review-required. Security {report.security}. CAPTCHA {report.captcha}.</p>
+        <p className="text-sm">Writing {report.writing}. Facts {report.facts}. Questions {report.requiredQuestions} review-required. Security {report.security}. {readinessLine ?? `CAPTCHA ${report.captcha}`}.</p>
         <p className="mt-2 text-sm">Decision {report.decision}. Pipeline {pipelineState(application.status)}. Package version {application.package?.version ?? 1}. Approval is separate from this status, and neither approval nor browser preparation submits the application.</p>
         <ul className="mt-2 list-disc pl-5 text-sm">
           {report.reasons.map((reason) => <li key={reason}>{reason}</li>)}
@@ -124,7 +132,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <h2 className="font-display text-2xl">CV</h2>
         <p className="mt-2 text-sm">Status {cv ? "Stored" : "Missing"}. Version {cv?.version ?? "—"}. Validation {cv ? cvCheck.status : "NOT_GENERATED"}.</p>
         {documents.filter((document) => document.kind === "CV").map((document) => <p key={document.id} className="mt-2 text-sm">Version {document.version} · {document.createdAt.toISOString()} · {document.version === latestVersion(documents, "CV", document.fileType) ? pipelineState(application.status) : "SUPERSEDED"} · <a className="text-tide" href={`/api/jobs/documents/${document.id}`}>{document.fileName}</a></p>)}
-        {!cv ? <p className="mt-2 text-sm text-muted">No CV stored. A placeholder email blocks document generation.</p> : null}
+        {!cv ? <p className="mt-2 text-sm text-muted">{cvStorageFailure(application.candidate.email, application.package?.warnings ?? []).message}</p> : null}
         {cvCheck.issues.map((issue) => <p key={`${issue.kind}-${issue.value}`} className="mt-2 text-sm">REVIEW REQUIRED · unsupported {issue.kind}: {issue.value}</p>)}
         {cv ? <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-sm">{cv.text.slice(0, 1200)}</pre> : null}
       </Panel>
@@ -243,6 +251,12 @@ function readResolvedAnswers(timings: unknown, fallback: Array<{ question: strin
   }));
 }
 
+function readString(value: unknown, key: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  return typeof row[key] === "string" ? row[key] : null;
+}
+
 function browserLine(timings: unknown) {
   if (!timings || typeof timings !== "object" || Array.isArray(timings)) return "Browser preparation has not been stored for this package.";
   const row = timings as Record<string, unknown>;
@@ -250,8 +264,10 @@ function browserLine(timings: unknown) {
   const platform = typeof row.browserPlatform === "string" ? ` Platform ${row.browserPlatform}.` : "";
   const fields = typeof row.browserFields === "number" ? ` Fields ${row.browserFields}.` : "";
   const browserReason = typeof row.browserReason === "string" && row.browserReason && row.browserReason !== "pause before submit" ? ` Stop reason: ${row.browserReason}.` : "";
+  const blocker = typeof row.blocker === "string" ? preparationReadinessLine(row.blocker) : null;
+  const blockerLine = blocker ? ` ${blocker}.` : "";
   const reason = typeof row.failureReason === "string" && row.failureReason ? ` Fit stop: ${row.failureReason}.` : "";
-  return `${inspection}.${platform}${fields}${browserReason}${reason} Opening a form does not mark the application ready.`;
+  return `${inspection}.${platform}${fields}${browserReason}${blockerLine}${reason} Opening a form does not mark the application ready.`;
 }
 
 function fieldLine(name: string, value: string | null) {

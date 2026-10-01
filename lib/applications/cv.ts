@@ -1,8 +1,9 @@
 import type { CandidateRecord, CareerProfile, JobInput } from "@/lib/applications/types";
 import type { FitResult } from "@/lib/applications/fit";
 import { unsupportedClaims, validateCvFacts } from "@/lib/applications/claims";
-import { careerStrategy } from "@/lib/applications/seed-data";
+import { careerStrategy, classifyCandidateEmail } from "@/lib/applications/seed-data";
 import { bannedPhrases } from "@/lib/applications/writing";
+import { DateValidator, FormattingValidator } from "@/lib/applications/validators";
 
 export type CvDraft = {
   headline: string;
@@ -62,6 +63,26 @@ export function rewritePreservesVacancy(text: string, companyName: string, title
   return text.includes(companyName) && text.includes(title);
 }
 
+export function cvStorageFailure(email: string | null | undefined, warnings: string[]) {
+  const status = classifyCandidateEmail(email);
+  if (status === "PLACEHOLDER_EMAIL") return { error_code: "PLACEHOLDER_EMAIL", message: "A placeholder email blocks document generation.", field: "email", document_type: "CV", details: status };
+  if (status === "MISSING_EMAIL") return { error_code: "MISSING_EMAIL", message: "A candidate email is required before document generation.", field: "email", document_type: "CV", details: status };
+  if (status === "INVALID_EMAIL") return { error_code: "INVALID_EMAIL", message: "The candidate email is not valid.", field: "email", document_type: "CV", details: status };
+  if (warnings.some((warning) => warning === "missing standard headings")) {
+    return { error_code: "CV_HEADINGS_MISSING", message: "CV validation failed: required standard headings are missing.", field: "cv", document_type: "CV", details: "missing standard headings" };
+  }
+  const warning = warnings.find((item) => item.trim());
+  return { error_code: "CV_NOT_STORED", message: warning ? `CV validation failed: ${warning}` : "No CV stored.", field: "cv", document_type: "CV", details: warning ?? null };
+}
+
+export function acceptCvRewrite(input: { draft: string; rewritten: string; candidate: CandidateRecord; companyName: string; title: string }) {
+  if (input.rewritten === input.draft) return false;
+  if (!rewritePreservesVacancy(input.rewritten, input.companyName, input.title)) return false;
+  if (!validateCvText(input.rewritten, input.candidate, [], [input.companyName, input.title]).ok) return false;
+  if (!DateValidator(input.rewritten, input.candidate).ok) return false;
+  return FormattingValidator(input.rewritten).ok;
+}
+
 export function validateCvText(text: string, candidate: CandidateRecord, keywords: string[], allowedNames: string[] = []) {
   const problems: string[] = [];
   if (!text.includes(candidate.fullName)) problems.push("missing candidate name");
@@ -89,7 +110,7 @@ function renderText(input: { headline: string; summary: string; skills: string[]
     input.headline,
     "Summary",
     input.summary,
-    input.skills.length ? "Skills" : "",
+    "Skills",
     input.skills.join(", "),
     "Experience",
     ...input.experience.flatMap((item) => [item.title, item.organization, ...item.bullets]),

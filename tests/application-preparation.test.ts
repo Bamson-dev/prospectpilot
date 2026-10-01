@@ -167,9 +167,9 @@ describe("controlled application preparation", () => {
         const clicked = await page.evaluate(() => Boolean((window as unknown as { __submitted?: boolean }).__submitted));
         expect(clicked).toBe(false);
         expect(result.submitted).toBe(false);
-        if (path === "/captcha") expect(result.reason).toBe("captcha");
-        if (path === "/login") expect(result.reason).toBe("authentication");
-        if (path === "/cloudflare") expect(result.reason).toBe("cloudflare");
+        if (path === "/captcha") expect(result.reason).toBe("CAPTCHA_REQUIRED");
+        if (path === "/login") expect(result.reason).toBe("LOGIN_REQUIRED");
+        if (path === "/cloudflare") expect(result.reason).toBe("CLOUDFLARE_CHALLENGE");
         if (path === "/unknown") expect(result.reason).toBe("unknown-required-field");
       }
     } finally {

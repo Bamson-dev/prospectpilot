@@ -2,13 +2,15 @@ import { describe, expect, it } from "vitest";
 import { keptQualificationExplanation } from "@/lib/applications/application-queue";
 import { planApplication } from "@/lib/applications/browser-plan";
 import { buildCoverLetter } from "@/lib/applications/cover-letter";
-import { buildCvDraft } from "@/lib/applications/cv";
+import { acceptCvRewrite, buildCvDraft, cvStorageFailure } from "@/lib/applications/cv";
 import { documentFileName } from "@/lib/applications/filenames";
 import { fieldsFromHtml, inspectFields, mapCandidateToFields } from "@/lib/applications/form-map";
 import { scoreJobFit } from "@/lib/applications/fit";
 import { preparationDecision, safeAuditDetail } from "@/lib/applications/package-version";
-import { seedCandidateRecord } from "@/lib/applications/seed-data";
-import { classifyNavigationError, detectSecurityBarrier, employerServerError, preparationBlocker } from "@/lib/applications/security";
+import { applicationReadinessReport } from "@/lib/applications/application-readiness";
+import { classifyCandidateEmail, seedCandidateRecord } from "@/lib/applications/seed-data";
+import { classifyNavigationError, classifyObservedBarrier, detectSecurityBarrier, employerServerError, preparationBlocker, preparationReadinessLine } from "@/lib/applications/security";
+import { FormattingValidator } from "@/lib/applications/validators";
 import { sourceValidity } from "@/lib/applications/source-validity";
 import type { JobInput } from "@/lib/applications/types";
 
@@ -77,5 +79,79 @@ describe("preparation runtime blockers", () => {
     expect(keptQualificationExplanation({ explanation: { state: "APPLY" } })?.state).toBe("APPLY");
     expect(preparationDecision(true, false)).toBe("REUSE");
     expect(safeAuditDetail("cookie=session; captcha sitekey=abc")).toBe("redacted");
+  });
+});
+
+const spotify: JobInput = {
+  title: "Principal Product Manager - Personalization",
+  companyName: "Spotify",
+  description: "Lead personalization for the consumer subscription experience. Prioritize roadmap decisions with research and product partners.",
+  applicationUrl: "https://jobs.lever.co/spotify/e74bfb24-55de-4d93-b228-ae38b8fdfbea/apply",
+};
+
+describe("document and blocker accuracy", () => {
+  it("classifies a real mailbox as valid and keeps placeholders invalid", () => {
+    expect(classifyCandidateEmail("bamzonline01@gmail.com")).toBe("VALID_EMAIL");
+    expect(classifyCandidateEmail("Bamzonline01@gmail.com")).toBe("VALID_EMAIL");
+    expect(classifyCandidateEmail("needs-email@invalid.test")).toBe("PLACEHOLDER_EMAIL");
+    expect(classifyCandidateEmail("person@example.invalid")).toBe("PLACEHOLDER_EMAIL");
+    expect(classifyCandidateEmail("")).toBe("MISSING_EMAIL");
+    expect(classifyCandidateEmail("not-an-email")).toBe("INVALID_EMAIL");
+  });
+
+  it("stores a Spotify vacancy CV with standard headings and does not blame a valid email", () => {
+    const candidate = { ...seedCandidateRecord(), email: "bamzonline01@gmail.com" };
+    const fit = scoreJobFit(spotify, candidate, []);
+    const cv = buildCvDraft(spotify, candidate, fit);
+    const letter = buildCoverLetter(spotify, candidate, fit);
+    expect(FormattingValidator(cv.text).ok).toBe(true);
+    expect(cv.text).toContain("Summary");
+    expect(cv.text).toContain("Experience");
+    expect(cv.text).toContain("Skills");
+    expect(cv.text).toContain("Bamidele Matthew");
+    expect(cv.text).toContain("bamzonline01@gmail.com");
+    expect(cv.text).toContain("Spotify");
+    expect(cv.text).toContain(spotify.title);
+    expect(cv.text).not.toContain("\u2014");
+    expect(cv.text.toLowerCase()).not.toContain("credit drawdown");
+    expect(letter).toContain("Spotify");
+    expect(letter).toContain(spotify.title);
+    expect(acceptCvRewrite({ draft: cv.text, rewritten: cv.text.replace("Skills", "Capabilities"), candidate, companyName: "Spotify", title: spotify.title })).toBe(false);
+    const failure = cvStorageFailure("bamzonline01@gmail.com", ["missing standard headings"]);
+    expect(failure.error_code).toBe("CV_HEADINGS_MISSING");
+    expect(failure.message).toContain("required standard headings are missing");
+    expect(failure.message.toLowerCase()).not.toContain("placeholder");
+    expect(cvStorageFailure("needs-email@invalid.test", ["missing standard headings"]).error_code).toBe("PLACEHOLDER_EMAIL");
+  });
+
+  it("rejects a CV that is missing the required headings", () => {
+    const result = FormattingValidator("Bamidele Matthew\nbamzonline01@gmail.com\nA paragraph with no sections.");
+    expect(result.ok).toBe(false);
+    expect(result.problems).toContain("missing standard headings");
+  });
+
+  it("records a specific security barrier and keeps readiness aligned with it", () => {
+    expect(classifyObservedBarrier({ text: "Please complete the reCAPTCHA" })).toBe("CAPTCHA_REQUIRED");
+    expect(classifyObservedBarrier({ text: "Checking your browser before Cloudflare" })).toBe("CLOUDFLARE_CHALLENGE");
+    expect(classifyObservedBarrier({ text: "Sign in to apply", fieldTypes: ["password"] })).toBe("LOGIN_REQUIRED");
+    expect(classifyObservedBarrier({ text: "Access denied" })).toBe("ACCESS_DENIED");
+    expect(classifyObservedBarrier({ text: "Error 503 Service Unavailable", statusCode: 503 })).toBe("EMPLOYER_SERVER_ERROR");
+    expect(preparationBlocker("an unidentified interstitial")).toBe("SECURITY_BLOCK");
+    expect(preparationReadinessLine("CAPTCHA_REQUIRED")).toBe("CAPTCHA requires manual action");
+    expect(preparationReadinessLine("CAPTCHA_REQUIRED")).not.toContain("not detected");
+    const report = applicationReadinessReport({
+      candidateName: "Bamidele Matthew",
+      jobTitle: spotify.title,
+      cvReady: true,
+      coverLetterReady: true,
+      contactReady: true,
+      captcha: true,
+    });
+    expect(report.captcha).toBe("DETECTED");
+    expect(keptQualificationExplanation({ explanation: { state: "APPLY" } })?.state).toBe("APPLY");
+    const plan = planApplication({ provider: "lever", mode: "AUTO_PREPARE", automationEnabled: false, captcha: true, unknownRequired: 0 });
+    expect(plan.submit).toBe(false);
+    expect(plan.steps).not.toContain("submit");
+    expect(preparationDecision(true, false)).toBe("REUSE");
   });
 });

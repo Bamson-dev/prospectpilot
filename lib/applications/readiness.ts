@@ -1,3 +1,5 @@
+import { classifyCandidateEmail } from "@/lib/applications/seed-data";
+
 export type FactState = "KNOWN" | "UNKNOWN" | "REVIEW_REQUIRED";
 
 export type ReadinessGroup = "IDENTITY" | "PROFESSIONAL" | "EMPLOYMENT" | "EDUCATION" | "CERTIFICATIONS" | "COMPENSATION";
@@ -81,7 +83,7 @@ export function applicationCriticalFields(input: CandidateReadinessInput & {
 export function fieldState(value: string | null | undefined, key: keyof CandidateReadinessInput): FactState {
   const text = (value ?? "").trim();
   if (!text) return "UNKNOWN";
-  if (key === "email" && (text.endsWith("@invalid.test") || /placeholder|example\.invalid/i.test(text))) return "REVIEW_REQUIRED";
+  if (key === "email" && classifyCandidateEmail(text) !== "VALID_EMAIL") return text ? "REVIEW_REQUIRED" : "UNKNOWN";
   if (/^(unknown|n\/a|none|placeholder)$/i.test(text)) return "REVIEW_REQUIRED";
   return "KNOWN";
 }

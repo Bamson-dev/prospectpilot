@@ -9,7 +9,7 @@ import { nextPackageVersion, safeAuditDetail } from "@/lib/applications/package-
 import { emptyTimings, packageReadiness } from "@/lib/applications/throughput";
 import { scoreJobFit } from "@/lib/applications/fit";
 import { buildCoverLetter } from "@/lib/applications/cover-letter";
-import { buildCvDraft, rewritePreservesVacancy, validateCvText } from "@/lib/applications/cv";
+import { acceptCvRewrite, buildCvDraft, validateCvText } from "@/lib/applications/cv";
 import { checksum, docxContains, pdfLooksReadable, renderDocx, renderPdf } from "@/lib/applications/documents";
 import { documentFileName } from "@/lib/applications/filenames";
 import { answerQuestion } from "@/lib/applications/questions";
@@ -343,7 +343,7 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
     const cvStarted = Date.now();
     const cv = buildCvDraft(job, candidate, fit);
     const rewritten = await maybeRewrite(cv.text, candidate);
-    const rewrittenOk = rewritten !== cv.text && rewritePreservesVacancy(rewritten, job.companyName, job.title) && validateCvText(rewritten, candidate, [], [job.companyName, job.title]).ok && DateValidator(rewritten, candidate).ok;
+    const rewrittenOk = acceptCvRewrite({ draft: cv.text, rewritten, candidate, companyName: job.companyName, title: job.title });
     const text = rewrittenOk ? rewritten : cv.text;
     const validation = validateCvText(text, candidate, fit.selectedProjects.flatMap((project) => project.technologies).slice(0, 6), [job.companyName, job.title]);
     cvValidation = validation.ok ? "PASS" : "REVIEW_REQUIRED";

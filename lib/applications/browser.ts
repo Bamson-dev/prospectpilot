@@ -2,7 +2,7 @@ import type { Page } from "playwright";
 import { adapterFor } from "@/lib/applications/adapters";
 import { classificationReport, inspectFields, mapCandidateToFields, type RawField } from "@/lib/applications/form-map";
 import { detectPlatform } from "@/lib/applications/platforms";
-import { detectSecurityBarrier, employerServerError, unexpectedRedirect } from "@/lib/applications/security";
+import { classifyObservedBarrier, employerServerError, unexpectedRedirect } from "@/lib/applications/security";
 import { submissionAllowed } from "@/lib/applications/submission-gate";
 import { verificationFromPage } from "@/lib/applications/browser-plan";
 
@@ -57,7 +57,7 @@ export async function readFormFields(page: Page): Promise<RawField[]> {
 export async function fillApplicationPage(
   page: Page,
   values: Record<string, string>,
-  options: { submit?: boolean; mode?: "PREPARE_ONLY" | "CONFIRMED_SUBMIT"; confirmationPhrase?: string; cvPath?: string; fill?: boolean },
+  options: { submit?: boolean; mode?: "PREPARE_ONLY" | "CONFIRMED_SUBMIT"; confirmationPhrase?: string; cvPath?: string; fill?: boolean; statusCode?: number },
 ) {
   const started = page.url();
   const body = await page.locator("body").innerText().catch(() => "");
@@ -66,8 +66,8 @@ export async function fillApplicationPage(
   if (employerServerError(undefined, body)) {
     return finish(page.url(), detectPlatform({ url: page.url() }), [], [], "EMPLOYER_SERVER_ERROR", false);
   }
-  const security = detectSecurityBarrier({ text: `${body}\n${html}`, fieldTypes: raw.map((field) => field.type) })
-    ?? (unexpectedRedirect(started, page.url()) ? "unexpected-redirect" as const : null);
+  const security = classifyObservedBarrier({ text: `${body}\n${html}`, fieldTypes: raw.map((field) => field.type), statusCode: options.statusCode })
+    ?? (unexpectedRedirect(started, page.url()) ? "LOGIN_REQUIRED" as const : null);
   const inspected = inspectFields(raw);
   const mapped = mapCandidateToFields(inspected, values);
   const adapter = adapterFor(page.url());

@@ -65,7 +65,7 @@ export async function inspectPublicApplication(url: string, values: Record<strin
     if (employerServerError(response?.status(), body)) {
       return stopped("EMPLOYER_SERVER_ERROR", Date.now() - started, `HTTP ${response?.status() ?? "error"}`);
     }
-    const result = await fillApplicationPage(page, values, { fill: false, mode: "PREPARE_ONLY", submit: false });
+    const result = await fillApplicationPage(page, values, { fill: false, mode: "PREPARE_ONLY", submit: false, statusCode: response?.status() });
     if (result.submitted) return stopped("SECURITY_BLOCK", Date.now() - started, undefined, result.audit.platform, result.audit.fieldsDetected, result.audit.metrics);
     if (result.audit.fieldsDetected === 0 && preparationBlocker(result.reason) == null) {
       return stopped("APPLICATION_FORM_NOT_FOUND", Date.now() - started, undefined, result.audit.platform, 0, result.audit.metrics);
@@ -116,6 +116,7 @@ export async function attachBrowserInspection(applicationId: string) {
   timings.browserSubmitted = false;
   timings.browserReason = outcome.reason;
   timings.blocker = outcome.blocker;
+  timings.blockerDetails = outcome.reason;
   if (outcome.metrics) {
     timings.fieldsDetected = outcome.metrics.fieldsDetected;
     timings.fieldsClassified = outcome.metrics.fieldsClassified;

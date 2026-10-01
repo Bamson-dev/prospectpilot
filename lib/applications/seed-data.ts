@@ -33,8 +33,18 @@ export function careerStrategy(kind: CareerProfile) {
   return CAREER_PROFILES.find((profile) => profile.kind === kind);
 }
 
+export type EmailStatus = "MISSING_EMAIL" | "PLACEHOLDER_EMAIL" | "INVALID_EMAIL" | "VALID_EMAIL";
+
+export function classifyCandidateEmail(email: string | null | undefined): EmailStatus {
+  const text = (email ?? "").trim().toLowerCase();
+  if (!text) return "MISSING_EMAIL";
+  if (text.endsWith("@invalid.test") || /placeholder|example\.invalid/i.test(text)) return "PLACEHOLDER_EMAIL";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return "INVALID_EMAIL";
+  return "VALID_EMAIL";
+}
+
 export function contactIsReady(email: string | null | undefined) {
-  return Boolean(email && !email.endsWith("@invalid.test"));
+  return classifyCandidateEmail(email) === "VALID_EMAIL";
 }
 
 export function selectExistingCandidate<T extends { email: string; applicationCount: number }>(rows: T[]): T | null {

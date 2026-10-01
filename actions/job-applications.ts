@@ -224,8 +224,14 @@ function discoveryQuery(payload: unknown) {
 export async function enqueueApplicationPreparation(formData: FormData) {
   const { organization } = await requireOrganization("MEMBER");
   const vacancyId = String(formData.get("vacancyId") ?? "");
-  const vacancy = await prisma.jobVacancy.findFirst({ where: { id: vacancyId, organizationId: organization.id }, select: { id: true } });
+  const vacancy = await prisma.jobVacancy.findFirst({
+    where: { id: vacancyId, organizationId: organization.id },
+    select: { id: true, title: true, applicationUrl: true, source: true, status: true },
+  });
   if (!vacancy) redirect("/jobs?error=Vacancy+not+found.");
+  if (vacancy.status === "ARCHIVED" || sourceValidity({ title: vacancy.title, url: vacancy.applicationUrl, source: vacancy.source }) === "INVALID_SOURCE") {
+    redirect("/jobs?error=That+page+is+not+a+vacancy.");
+  }
   const candidate = await ensureCandidate(organization.id);
   const existing = await prisma.jobApplication.findFirst({ where: { organizationId: organization.id, vacancyId, candidateId: candidate.id }, select: { id: true } });
   if (preparationDecision(Boolean(existing), formData.get("reprepare") === "on") === "REUSE" && existing) {

@@ -5,7 +5,6 @@ const LISTING_HOST = /(?:^|\.)(?:indeed|linkedin|ziprecruiter|glassdoor|hellowor
 export function sourceValidity(input: { title: string; url: string; source?: string }): SourceValidity {
   if (isSpecificPosting(input.url)) return "VALID_VACANCY";
   if (isListingUrl(input.url) || isListingTitle(input.title)) return "INVALID_SOURCE";
-  if ((input.source ?? "").toLowerCase() === "generic" && isListingTitle(input.title)) return "INVALID_SOURCE";
   return "VALID_VACANCY";
 }
 
@@ -34,10 +33,12 @@ function isListingUrl(url: string) {
     return true;
   }
   const host = parsed.hostname.toLowerCase();
+  const pathname = (parsed.pathname.replace(/\/+$/, "") || "/").toLowerCase();
   const path = `${parsed.pathname}${parsed.search}`.toLowerCase();
   if (LISTING_HOST.test(host) && !/\/jobs\/view\/\d+|\/viewjob|jk=/.test(path)) return true;
-  if (/\/(?:search|job-search|jobs\/search|browse)(?:\/|$|\?)/.test(path)) return true;
-  if (/[?&](?:q|query|search|keywords|k)=/.test(path)) return true;
+  if (pathname === "/" || /^\/(?:jobs|job|careers|career|search)$/.test(pathname)) return true;
+  if (/\/(?:search|job-search|jobs\/search|careers\/search|browse|search-results|job-categories|articles|blog|departments?|locations?)(?:\/|$|\?)/.test(path)) return true;
+  if (/[?&](?:q|query|search|keywords|k|category)=/.test(path)) return true;
   return false;
 }
 
@@ -47,7 +48,12 @@ function isListingTitle(title: string) {
   if (/\d[\d,.]*\+?\s+\S{0,40}\b(?:jobs|offres|openings|roles)\b/i.test(text)) return true;
   if (/\b(?:job list|job board|jobs board|offres d['’]emploi|now hiring)\b/i.test(text)) return true;
   if (/\b(?:jobs|roles|openings)\s+in\b/i.test(text)) return true;
-  if (/\b(?:roles|jobs)\s+at\b/i.test(text)) return true;
+  if (/\b(?:roles|jobs|openings|positions|vacancies)\s+at\b/i.test(text)) return true;
+  if (/\b(?:jobs|roles|openings|positions|vacancies)\s*\|/i.test(text)) return true;
+  if (/\bjobs\s+for\b/i.test(text)) return true;
+  if (/\bjob openings\b/i.test(text)) return true;
+  if (/\b(?:search\s+job\s+opportunities|job opportunities)\b/i.test(text)) return true;
+  if (/\bjob description\b/i.test(text)) return true;
   if (/\|\s*(?:indeed|linkedin|ziprecruiter|glassdoor|hellowork)\b/i.test(text)) return true;
   if (/\b(?:start here|find pm jobs|find .* jobs)\b/i.test(text)) return true;
   if (/\bcareers\b/i.test(text) && !/\b(?:senior|staff|principal|lead|head|director|manager|engineer|developer|architect|analyst)\b/i.test(text)) return true;

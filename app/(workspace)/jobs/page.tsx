@@ -14,7 +14,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   const query = await searchParams;
   const [stats, jobs, applications] = await Promise.all([
     applicationStats(organization.id),
-    prisma.jobVacancy.findMany({ where: { organizationId: organization.id }, orderBy: { createdAt: "desc" }, take: 8, include: { fit: true } }),
+    prisma.jobVacancy.findMany({ where: { organizationId: organization.id, status: { notIn: ["ARCHIVED", "DUPLICATE"] } }, orderBy: { createdAt: "desc" }, take: 8, include: { fit: true } }),
     prisma.jobApplication.findMany({ where: { organizationId: organization.id }, orderBy: { createdAt: "desc" }, take: 8, include: { vacancy: true } }),
   ]);
   const target = applicationDailyTarget();

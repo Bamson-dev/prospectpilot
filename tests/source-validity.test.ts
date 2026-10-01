@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { prepareDiscoveredVacancies } from "@/lib/applications/job-pipeline";
+import { evaluateOpportunity } from "@/lib/applications/opportunity";
+import { seedCandidateRecord } from "@/lib/applications/seed-data";
 import { sourceValidity } from "@/lib/applications/source-validity";
+import type { JobInput } from "@/lib/applications/types";
 
 const posting = "This is a real public vacancy description with enough text to normalize.";
 
@@ -41,6 +44,79 @@ describe("source validity", () => {
       url: "https://weworkremotely.com/categories/remote-product-jobs",
       source: "generic",
     })).toBe("INVALID_SOURCE");
+    expect(sourceValidity({
+      title: "Product & Program Management Jobs | Lead Tech Projects - Meta",
+      url: "https://www.metacareers.com/teams/technology/product-and-program-management",
+      source: "generic",
+    })).toBe("INVALID_SOURCE");
+    expect(sourceValidity({
+      title: "Engineering Jobs | Acme",
+      url: "https://acme.example/careers/engineering",
+      source: "generic",
+    })).toBe("INVALID_SOURCE");
+    expect(sourceValidity({
+      title: "Jobs at Acme",
+      url: "https://acme.example/jobs",
+      source: "generic",
+    })).toBe("INVALID_SOURCE");
+    expect(sourceValidity({
+      title: "Product search results",
+      url: "https://acme.example/jobs/search?q=product",
+      source: "generic",
+    })).toBe("INVALID_SOURCE");
+    expect(sourceValidity({
+      title: "Project, Program, and Product Management—Technical",
+      url: "https://amazon.jobs/content/en/job-categories/project-program-product-management-technical",
+      source: "generic",
+    })).toBe("INVALID_SOURCE");
+    expect(sourceValidity({
+      title: "Product roles in London",
+      url: "https://acme.example/careers/locations/london",
+      source: "generic",
+    })).toBe("INVALID_SOURCE");
+    expect(sourceValidity({
+      title: "Senior Product Manager, Billing Engine & Platforms Monetization",
+      url: "https://job-boards.greenhouse.io/gitlab/jobs/8845483002",
+      source: "greenhouse",
+    })).toBe("VALID_VACANCY");
+    expect(sourceValidity({
+      title: "Senior Product Manager - Subscriptions",
+      url: "https://jobs.lever.co/spotify/a57db22d-dc0d-4f36-9a2e-34acdf1ec046/apply",
+      source: "lever",
+    })).toBe("VALID_VACANCY");
+    expect(sourceValidity({
+      title: "Senior Backend Engineer",
+      url: "https://acme.example/careers/senior-backend-engineer",
+      source: "generic",
+    })).toBe("VALID_VACANCY");
+    expect(sourceValidity({
+      title: "Product Manager",
+      url: "https://www.metacareers.com/jobs/123456789012345",
+      source: "generic",
+    })).toBe("VALID_VACANCY");
+    expect(sourceValidity({
+      title: "Product Manager Job Description",
+      url: "https://job-boards.greenhouse.io/acme/jobs/67890",
+      source: "greenhouse",
+    })).toBe("VALID_VACANCY");
+    expect(sourceValidity({
+      title: "Senior Full-Stack Engineer",
+      url: "https://boards.greenhouse.io/acme/jobs/12345",
+      source: "greenhouse",
+    })).toBe("VALID_VACANCY");
+  });
+
+  it("keeps an individual vacancy eligible when no hard requirement was extracted", () => {
+    const title = "Senior Full-Stack Engineer";
+    const url = "https://boards.greenhouse.io/acme/jobs/12345";
+    expect(sourceValidity({ title, url, source: "greenhouse" })).toBe("VALID_VACANCY");
+    const vacancy: JobInput = {
+      title,
+      companyName: "Acme",
+      description: "Builds web applications, APIs, databases, frontend and backend systems.",
+      applicationUrl: url,
+    };
+    expect(evaluateOpportunity({ job: vacancy, candidate: seedCandidateRecord(), requirements: [] }).decision).toBe("APPLY");
   });
 
   it("does not send an invalid source into qualification storage", () => {

@@ -5,7 +5,7 @@ import { fillApplicationPage, type PreparationAudit } from "@/lib/applications/b
 import { safeAuditDetail } from "@/lib/applications/package-version";
 import { classifyNavigationError, employerServerError, preparationBlocker, type PreparationBlocker } from "@/lib/applications/security";
 import { sourceValidity } from "@/lib/applications/source-validity";
-import { canTransition } from "@/lib/applications/state";
+import { canTransition, statusAfterBlock } from "@/lib/applications/state";
 import type { ApplicationStatus } from "@/lib/applications/types";
 import { contactIsReady } from "@/lib/applications/seed-data";
 
@@ -128,9 +128,12 @@ export async function attachBrowserInspection(applicationId: string) {
     timings.classificationTimeMs = outcome.metrics.classificationTimeMs;
   }
   const blocked = inspectionIsBlocked(outcome);
-  const nextStatus = blocked && canTransition(application.status as ApplicationStatus, "REQUIRES_MANUAL_ACTION")
-    ? "REQUIRES_MANUAL_ACTION"
-    : application.status;
+  const mapped = outcome.blocker ? statusAfterBlock(outcome.blocker) : "REQUIRES_MANUAL_ACTION";
+  const nextStatus = blocked && canTransition(application.status as ApplicationStatus, mapped)
+    ? mapped
+    : blocked && mapped !== "REQUIRES_MANUAL_ACTION" && canTransition(application.status as ApplicationStatus, "REQUIRES_MANUAL_ACTION")
+      ? "REQUIRES_MANUAL_ACTION"
+      : application.status;
   await prisma.jobApplication.update({
     where: { id: application.id },
     data: {

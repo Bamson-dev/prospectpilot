@@ -111,7 +111,7 @@ describe("job application evidence", () => {
     expect(canTransition("APPROVED", "SUBMITTING")).toBe(false);
     expect(canTransition("SUBMITTING", "SUBMITTED")).toBe(true);
     expect(canTransition("PREPARED", "SUBMITTED")).toBe(false);
-    expect(statusAfterBlock("captcha")).toBe("REQUIRES_MANUAL_ACTION");
+    expect(statusAfterBlock("captcha")).toBe("CAPTCHA_REQUIRED");
     expect(statusAfterBlock("verification")).toBe("VERIFICATION_REQUIRED");
     expect(retryDecision({ statusCode: 429, attempt: 1, maxAttempts: 3 })).toBe("retry");
     expect(retryDecision({ statusCode: 429, attempt: 3, maxAttempts: 3 })).toBe("fail");

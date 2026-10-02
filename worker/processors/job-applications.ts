@@ -8,7 +8,6 @@ import { discoveryLimit } from "@/lib/applications/application-queue";
 import { analysisJobDecision, emptySummary, prepareDiscoveredVacancies } from "@/lib/applications/job-pipeline";
 import { attachBrowserInspection } from "@/lib/applications/public-inspection";
 import { analyzeVacancy, persistNormalizedVacancies, prepareApplication } from "@/lib/applications/service";
-import { statusAfterBlock } from "@/lib/applications/state";
 
 export async function processJobDiscovery(organizationId: string, query: string, requestedLimit?: string) {
   if (!jobDiscoveryEnabled()) {
@@ -112,7 +111,7 @@ export async function processApplicationSubmit(applicationId: string) {
   }
   await prisma.jobApplication.update({
     where: { id: application.id },
-    data: { status: statusAfterBlock("captcha"), blockedReason: "Live submission stays off until a supported adapter run is explicitly started." },
+    data: { status: "REQUIRES_MANUAL_ACTION", blockedReason: "Live submission stays off until a supported adapter run is explicitly started." },
   });
   await prisma.applicationEvent.create({
     data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: "Live submission was not started." },

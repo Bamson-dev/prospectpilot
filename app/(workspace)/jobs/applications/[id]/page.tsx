@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { decideApplication, enqueueApplicationPreparation, recordManualReview, recordSubmissionConfirmation } from "@/actions/job-applications";
+import { decideApplication, enqueueApplicationPreparation, recordManualReview, recordSubmissionConfirmation, enqueueBrowserAutomation } from "@/actions/job-applications";
 import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -11,7 +11,8 @@ import { preparationReadinessLine } from "@/lib/applications/security";
 import { browserPreparationView, buildFieldReview, currentDocument, humanActionInstruction, latestManualMarker, qualificationDecision, verifiedEvidence } from "@/lib/applications/manual-review";
 import { classifyCandidateEmail } from "@/lib/applications/seed-data";
 import { pipelineState } from "@/lib/applications/state";
-import type { CandidateRecord } from "@/lib/applications/types";
+import { legacyAutomationHold } from "@/lib/applications/automation-engine";
+import type { CandidateRecord, ApplicationStatus } from "@/lib/applications/types";
 import { assessWriting } from "@/lib/applications/writing-quality";
 import { validateCoverLetterForVacancy } from "@/lib/applications/document-check";
 import { requireOrganization } from "@/lib/current-user";
@@ -226,6 +227,13 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <p className="text-sm">Blocker {browser.blocker ?? "None"}. {browser.readiness ?? "No blocker line."} Preparation stopped {browser.stopped ? "Yes" : "No"}. Submitted No. submittedAt {browser.submittedAt}.</p>
         <p className="mt-2 text-sm">{browserLine(application.package?.timings)}</p>
         <p className="mt-2 text-sm">Prepared means the form was opened. CAPTCHA, Cloudflare, and login stay manual. Preparation is not approval.</p>
+        {!legacyAutomationHold(application.status as ApplicationStatus) && application.package && application.applicationUrl ? (
+          <form action={enqueueBrowserAutomation} className="mt-3 grid gap-2">
+            <input type="hidden" name="id" value={application.id} />
+            <SubmitButton pendingLabel="Queuing">Run Browser Automation</SubmitButton>
+            <p className="text-sm text-muted">Open and prepare the public application form. No application will be submitted.</p>
+          </form>
+        ) : null}
       </Panel>
       <Panel>
         <h2 className="font-display text-2xl">Audit history</h2>

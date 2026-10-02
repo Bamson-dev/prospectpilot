@@ -16,3 +16,8 @@ playwright-report
 test-results
 /tmp
 /storage
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/

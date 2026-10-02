@@ -9,6 +9,60 @@ import { analysisJobDecision, emptySummary, prepareDiscoveredVacancies } from "@
 import { attachBrowserInspection } from "@/lib/applications/public-inspection";
 import { analyzeVacancy, persistNormalizedVacancies, prepareApplication } from "@/lib/applications/service";
 
+export async function processJobDiscoveryScheduler() {
+  const preferences = await prisma.candidatePreference.findMany({
+    where: { discoverJobs: true },
+    include: { candidate: { include: { profiles: true } } },
+  });
+  
+  for (const pref of preferences) {
+    if (!pref.candidate.profiles.length) continue;
+    const organizationId = pref.candidate.organizationId;
+    
+    for (const profile of pref.candidate.profiles) {
+      // Derive search variants from profile title
+      const baseTitle = profile.title.toLowerCase().trim();
+      const queries = new Set<string>();
+      queries.add(baseTitle);
+      
+      if (baseTitle.includes("software") || baseTitle.includes("engineer") || baseTitle.includes("developer")) {
+        queries.add("software engineer");
+        queries.add("backend engineer");
+        queries.add("full stack engineer");
+      }
+      if (baseTitle.includes("product manager")) {
+        queries.add("product manager");
+        queries.add("senior product manager");
+      }
+      if (baseTitle.includes("marketing")) {
+        queries.add("growth marketing manager");
+        queries.add("performance marketing manager");
+        queries.add("product marketing manager");
+      }
+      if (baseTitle.includes("founder")) {
+        queries.add("founder");
+        queries.add("technical product");
+      }
+      
+      const locations = pref.remoteOnly ? ["remote"] : pref.locations.length > 0 ? pref.locations : ["remote"];
+      
+      for (const query of queries) {
+        for (const loc of locations) {
+          const fullQuery = `${query} ${loc}`.trim();
+          const jobId = `discovery:${organizationId}:${fullQuery.replace(/\s+/g, "-")}`;
+          await queueJob({
+            id: jobId,
+            organizationId,
+            queue: "job-discovery",
+            name: "run",
+            payload: { organizationId, query: fullQuery, limit: String(Math.min(50, Math.ceil(pref.dailyTarget / queries.size))) },
+          }).catch(() => { /* ignore unique constraint on id */ });
+        }
+      }
+    }
+  }
+}
+
 export async function processJobDiscovery(organizationId: string, query: string, requestedLimit?: string) {
   if (!jobDiscoveryEnabled()) {
     logInfo("job_discovery.disabled", { organizationId });

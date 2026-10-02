@@ -7,7 +7,7 @@ import { applicationWorkerConcurrency } from "@/lib/applications/config";
 import { getQueue, getRedis } from "@/lib/queues";
 import { analyzeVacancy } from "@/lib/applications/service";
 import { recoverStaleAutomationRuns, runApplicationAutomation } from "@/lib/applications/automation-service";
-import { processApplicationFollowUp, processApplicationPreparation, processApplicationSubmit, processJobDiscovery } from "@/worker/processors/job-applications";
+import { processApplicationFollowUp, processApplicationPreparation, processApplicationSubmit, processJobDiscovery, processJobDiscoveryScheduler } from "@/worker/processors/job-applications";
 import { processDiscovery } from "@/worker/processors/discovery";
 import { processDueFollowUps, processReply } from "@/worker/processors/follow-up";
 import { processInboxSync } from "@/worker/processors/inbox";
@@ -116,6 +116,20 @@ start("job-discovery", async (data) => {
   await processJobDiscovery(data.organizationId, data.query || "software engineer remote", data.limit);
 });
 
+const jobDiscoveryScheduler = new Worker(
+  "job-discovery",
+  async (job) => {
+    if (job.name === "scan") {
+      await processJobDiscoveryScheduler();
+      return;
+    }
+  },
+  { connection, concurrency: 1, settings: { backoffStrategy: retryBackoff } }
+);
+jobDiscoveryScheduler.on("failed", (job, error) => {
+  logInfo("worker.job_failed", { queue: "job-discovery-scheduler", jobId: job?.id, message: error.message });
+});
+
 for (const name of ["job-analysis", "job-fit"] as const) {
   start(name, async (data) => {
     if (!data.organizationId || !data.vacancyId) throw new Error("Application job is missing its target.");
@@ -201,6 +215,14 @@ void getQueue("follow-up")
   .add("scan", {}, { repeat: { every: 15 * 60 * 1000 }, jobId: "follow-up-scan" })
   .catch((error: unknown) => {
     logInfo("worker.follow_up_schedule_failed", {
+      message: error instanceof Error ? error.message : "unknown",
+    });
+  });
+
+void getQueue("job-discovery")
+  .add("scan", {}, { repeat: { every: 2 * 60 * 60 * 1000 }, jobId: "job-discovery-scan" })
+  .catch((error: unknown) => {
+    logInfo("worker.job_discovery_schedule_failed", {
       message: error instanceof Error ? error.message : "unknown",
     });
   });

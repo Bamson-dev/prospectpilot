@@ -8,10 +8,11 @@ export type IdentityInput = {
 };
 
 export function applicationIdentity(input: IdentityInput) {
+  const company = normalize(input.companyName);
+  const title = normalize(input.title);
+  const location = normalize(input.location ?? "");
   const url = normalizeUrl(input.applicationUrl);
-  if (url) return `url:${url}`;
-  if (input.externalId) return `external:${normalize(input.companyName)}:${input.externalId.trim()}`;
-  return `title:${normalize(input.companyName)}:${normalize(input.title)}:${normalize(input.location ?? "")}`;
+  return `key:${company}:${title}:${location}:${url}`;
 }
 
 export function duplicateDecision(left: IdentityInput, right: IdentityInput) {

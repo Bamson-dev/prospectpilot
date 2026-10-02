@@ -210,7 +210,7 @@ export async function persistNormalizedVacancies(organizationId: string, jobs: N
   const duplicateReasons: string[] = [];
   const existing = await prisma.jobVacancy.findMany({
     where: { organizationId },
-    select: { companyName: true, title: true, applicationUrl: true, sourceUrl: true, location: true, externalId: true },
+    select: { id: true, companyName: true, title: true, applicationUrl: true, sourceUrl: true, location: true, externalId: true },
     orderBy: { createdAt: "desc" },
     take: 500,
   });
@@ -218,6 +218,8 @@ export async function persistNormalizedVacancies(organizationId: string, jobs: N
     const match = existing.find((row) => duplicateDecision(row, job).merge);
     if (match) {
       duplicateReasons.push(duplicateDecision(match, job).reason ?? "duplicate");
+      // Update freshness for discovered jobs
+      await prisma.jobVacancy.update({ where: { id: match.id }, data: { discoveredAt: new Date() } }).catch(() => {});
       continue;
     }
     try {
@@ -248,7 +250,7 @@ export async function persistNormalizedVacancies(organizationId: string, jobs: N
         },
       });
       ids.push(created.id);
-      existing.push(job);
+      existing.push({ ...job, id: created.id, sourceUrl: job.originalSourceUrl });
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
         duplicateReasons.push("canonical application URL");

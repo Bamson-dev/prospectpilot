@@ -4,6 +4,7 @@ import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { requireOrganization } from "@/lib/current-user";
 import { jobDiscoveryEnabled } from "@/lib/applications/config";
+import { applicationStats } from "@/lib/applications/service";
 import { prisma } from "@/lib/db";
 
 export const metadata = { title: "Discover jobs" };
@@ -11,13 +12,13 @@ export const metadata = { title: "Discover jobs" };
 export default async function DiscoverJobsPage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string }> }) {
   const { organization } = await requireOrganization();
   const query = await searchParams;
-  const [vacancies, runs, activity] = await Promise.all([
+  const [vacancies, runs, activity, stats] = await Promise.all([
     prisma.jobVacancy.findMany({ where: { organizationId: organization.id }, orderBy: { discoveredAt: "desc" }, take: 30, include: { fit: true, _count: { select: { requirements: true } } } }),
     prisma.backgroundJob.findMany({ where: { organizationId: organization.id, queue: "job-discovery" }, orderBy: { createdAt: "desc" }, take: 8 }),
     prisma.activityLog.findFirst({ where: { organizationId: organization.id, action: "job.discovery_completed" }, orderBy: { createdAt: "desc" } }),
+    applicationStats(organization.id),
   ]);
   const summary = readSummary(activity?.detail);
-  const analyzed = vacancies.filter((job) => job.status === "ANALYZED" || job.status === "QUALIFIED").length;
   return (
     <div>
       <PageHeader title="Discover jobs" detail="Public Greenhouse and Lever listings, plus SearXNG when it is configured. This does not submit applications or send email." />
@@ -32,16 +33,17 @@ export default async function DiscoverJobsPage({ searchParams }: { searchParams:
         </form>
       </Panel>
       <div className="mb-4 grid gap-3 md:grid-cols-4">
-        <Metric label="Jobs discovered" value={summary?.discovered ?? vacancies.length} />
-        <Metric label="Jobs normalized" value={summary?.normalized ?? vacancies.length} />
+        <Metric label="Jobs discovered (today)" value={stats.discovered} />
+        <Metric label="Jobs qualified (today)" value={stats.qualified} />
+        <Metric label="Packages ready (today)" value={stats.prepared} />
+        <Metric label="Blocked / Manual Review" value={stats.blocked + stats.manual} />
+      </div>
+      
+      <div className="mb-4 grid gap-3 md:grid-cols-4">
+        <Metric label="Last discovery jobs" value={summary?.discovered ?? 0} />
         <Metric label="Duplicates removed" value={summary?.duplicatesRemoved ?? 0} />
-        <Metric label="Jobs stored" value={summary?.stored ?? vacancies.length} />
-        <Metric label="Jobs analyzed" value={summary?.analyzed ?? analyzed} />
-        <Metric label="Jobs qualified" value={summary?.qualified ?? vacancies.filter((job) => job.fit?.recommendation === "PREPARE").length} />
-        <Metric label="Jobs requiring review" value={summary?.review ?? vacancies.filter((job) => job.fit?.recommendation === "REVIEW" || job.fit?.recommendation === "MANUAL_REVIEW").length} />
-        <Metric label="Jobs not a fit" value={summary?.notAFit ?? 0} />
+        <Metric label="Jobs stored" value={summary?.stored ?? 0} />
         <Metric label="Invalid sources" value={summary?.invalidSources ?? 0} />
-        <Metric label="Jobs failed" value={summary?.failed ?? 0} />
       </div>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Runs</h2>

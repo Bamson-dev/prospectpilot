@@ -14,6 +14,9 @@ export type SourceCollection = {
 const BOARDS = [
   { source: "greenhouse", board: "gitlab" },
   { source: "lever", board: "spotify" },
+  { source: "ashby", board: "reddit" },
+  { source: "workable", board: "revolut" },
+  { source: "smartrecruiters", board: "square" },
 ] as const;
 
 export async function collectPublicVacancies(input: { query: string; limit: number; fetchImpl?: typeof fetch }): Promise<SourceCollection> {
@@ -24,11 +27,20 @@ export async function collectPublicVacancies(input: { query: string; limit: numb
   for (const board of BOARDS) {
     if (jobs.length >= input.limit) break;
     const room = Math.min(perBoard, input.limit - jobs.length);
-    const found = board.source === "greenhouse"
-      ? await greenhouseBoard(fetchImpl, board.board, room, input.query)
-      : await leverBoard(fetchImpl, board.board, room, input.query);
+    let found: SourceCollection = { jobs: [], failures: [] };
+    if (board.source === "greenhouse") found = await greenhouseBoard(fetchImpl, board.board, room, input.query);
+    else if (board.source === "lever") found = await leverBoard(fetchImpl, board.board, room, input.query);
+    else if (board.source === "ashby") found = await ashbyBoard(fetchImpl, board.board, room, input.query);
+    else if (board.source === "workable") found = await workableBoard(fetchImpl, board.board, room, input.query);
+    else if (board.source === "smartrecruiters") found = await smartRecruitersBoard(fetchImpl, board.board, room, input.query);
+    
     jobs.push(...found.jobs);
     failures.push(...found.failures);
+    
+    // Stop querying this provider family entirely on rate limits to prevent IP bans
+    if (found.failures.some(f => f.reason.includes("429") || f.reason.includes("rate limit"))) {
+      break; 
+    }
   }
   if (searxngEnabled()) {
     const searched = await searxngVacancies(input.query, Math.min(10, input.limit));
@@ -56,6 +68,51 @@ async function greenhouseBoard(fetchImpl: typeof fetch, board: string, limit: nu
       return { jobs, failures: [{ source: `greenhouse:${board}`, reason: detail.failure }] };
     }
     const job = greenhouseJob(detail.body);
+    if (job) jobs.push(job);
+    await delay(200);
+  }
+  return { jobs, failures: [] };
+}
+
+async function ashbyBoard(fetchImpl: typeof fetch, board: string, limit: number, query: string): Promise<SourceCollection> {
+  const list = await readJson(fetchImpl, `https://api.ashbyhq.com/posting-api/job-board/${board}`);
+  if (list.failure) return { jobs: [], failures: [{ source: `ashby:${board}`, reason: list.failure }] };
+  const rows = Array.isArray((list.body as { jobs?: unknown }).jobs) ? (list.body as { jobs: unknown[] }).jobs : [];
+  const jobs: RawDiscoveredVacancy[] = [];
+  for (const row of rows) {
+    if (jobs.length >= limit) break;
+    const job = ashbyJob(board, row);
+    if (job && matchesTitle(job.title, query)) jobs.push(job);
+  }
+  return { jobs, failures: [] };
+}
+
+async function workableBoard(fetchImpl: typeof fetch, board: string, limit: number, query: string): Promise<SourceCollection> {
+  const list = await readJson(fetchImpl, `https://apply.workable.com/api/v3/accounts/${board}/jobs`);
+  if (list.failure) return { jobs: [], failures: [{ source: `workable:${board}`, reason: list.failure }] };
+  const rows = Array.isArray((list.body as { results?: unknown }).results) ? (list.body as { results: unknown[] }).results : [];
+  const jobs: RawDiscoveredVacancy[] = [];
+  for (const row of rows) {
+    if (jobs.length >= limit) break;
+    const job = workableJob(board, row);
+    if (job && matchesTitle(job.title, query)) jobs.push(job);
+  }
+  return { jobs, failures: [] };
+}
+
+async function smartRecruitersBoard(fetchImpl: typeof fetch, board: string, limit: number, query: string): Promise<SourceCollection> {
+  const list = await readJson(fetchImpl, `https://api.smartrecruiters.com/v1/companies/${board}/postings`);
+  if (list.failure) return { jobs: [], failures: [{ source: `smartrecruiters:${board}`, reason: list.failure }] };
+  const rows = Array.isArray((list.body as { content?: unknown }).content) ? (list.body as { content: unknown[] }).content : [];
+  const jobs: RawDiscoveredVacancy[] = [];
+  for (const row of rows) {
+    if (jobs.length >= limit) break;
+    if (!row || typeof row !== "object") continue;
+    const item = row as { id?: unknown; name?: unknown };
+    if (typeof item.id !== "string" || !matchesTitle(item.name, query)) continue;
+    const detail = await readJson(fetchImpl, `https://api.smartrecruiters.com/v1/companies/${board}/postings/${item.id}`);
+    if (detail.failure) return { jobs, failures: [{ source: `smartrecruiters:${board}`, reason: detail.failure }] };
+    const job = smartRecruitersJob(board, detail.body);
     if (job) jobs.push(job);
     await delay(200);
   }
@@ -122,6 +179,78 @@ export function leverJob(board: string, value: unknown): RawDiscoveredVacancy | 
     description,
     originalDescription: text(row.description) || description,
     postedAt: created,
+  };
+}
+
+export function ashbyJob(board: string, value: unknown): RawDiscoveredVacancy | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const title = text(row.title);
+  const url = text(row.jobUrl);
+  const description = text(row.descriptionHtml);
+  if (!title || !url || !description) return null;
+  const location = row.location && typeof row.location === "object" ? text((row.location as { name?: unknown }).name) : "";
+  return {
+    source: "ashby",
+    sourceUrl: url,
+    applicationUrl: url,
+    externalId: text(row.id) || null,
+    companyName: board,
+    title,
+    location: location || null,
+    employmentType: text(row.employmentType) || null,
+    description,
+    originalDescription: description,
+    postedAt: text(row.publishedAt) || null,
+  };
+}
+
+export function workableJob(board: string, value: unknown): RawDiscoveredVacancy | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const title = text(row.title);
+  const code = text(row.shortcode);
+  const url = `https://apply.workable.com/${board}/j/${code}`;
+  const description = text(row.description);
+  if (!title || !code || !description) return null;
+  const location = row.location && typeof row.location === "object" ? text((row.location as { city?: unknown; country?: unknown }).city) : "";
+  return {
+    source: "workable",
+    sourceUrl: url,
+    applicationUrl: url,
+    externalId: code || null,
+    companyName: board,
+    title,
+    location: location || null,
+    employmentType: text(row.type) || null,
+    description,
+    originalDescription: description,
+    postedAt: text(row.published_on) || null,
+  };
+}
+
+export function smartRecruitersJob(board: string, value: unknown): RawDiscoveredVacancy | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const title = text(row.name);
+  const url = text((row.ref ?? {}) as Record<string, unknown>).replace("api.", "www.").replace("/v1/companies", "") || `https://jobs.smartrecruiters.com/${board}/${row.id}`;
+  const jobAd = row.jobAd && typeof row.jobAd === "object" ? row.jobAd as Record<string, unknown> : {};
+  const sections = jobAd.sections && typeof jobAd.sections === "object" ? jobAd.sections as Record<string, unknown> : {};
+  const description = [text(sections.companyDescription), text(sections.jobDescription), text(sections.qualifications), text(sections.additionalInformation)].filter(Boolean).join("\n\n");
+  if (!title || !description) return null;
+  const location = row.location && typeof row.location === "object" ? text((row.location as { city?: unknown }).city) : "";
+  return {
+    source: "smartrecruiters",
+    sourceUrl: url,
+    applicationUrl: url,
+    externalId: text(row.id) || null,
+    companyName: board,
+    title,
+    location: location || null,
+    employmentType: text((row.typeOfEmployment ?? {}) as Record<string, unknown>) || null,
+    description,
+    originalDescription: description,
+    postedAt: text(row.releasedDate) || null,
   };
 }
 

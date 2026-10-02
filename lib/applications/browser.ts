@@ -78,7 +78,8 @@ export async function fillApplicationPage(
   const defer = manual === "unknown-required-field" || manual === "required-field-needs-review";
   if (manual && !defer) return finish(page.url(), adapter.name, inspected, mapped, manual, false);
   if (options.fill !== false) {
-    for (const field of inspected) {
+    const sortedInspected = [...inspected].sort((a, b) => taxonomyFillPriority(a.taxonomy) - taxonomyFillPriority(b.taxonomy));
+    for (const field of sortedInspected) {
       const answer = mapped.find((item) => item.name === (field.name || field.id || field.question));
       const selector = field.name ? `[name="${css(field.name)}"]` : field.id ? `[id="${css(field.id)}"]` : "";
       if (!selector) continue;
@@ -211,4 +212,18 @@ function css(value: string) {
 
 function fieldLive(raw: RawField[], field: { name: string; id: string }) {
   return raw.find((item) => (field.name && item.name === field.name) || (field.id && item.id === field.id))?.value ?? "";
+}
+
+function taxonomyFillPriority(taxonomy: string): number {
+  const t = (taxonomy || "").toUpperCase();
+  if (t.includes("NAME") || t.includes("FIRST") || t.includes("LAST") || t === "IDENTITY") return 1;
+  if (t.includes("EMAIL") || t.includes("PHONE") || t.includes("CONTACT")) return 2;
+  if (t.includes("LOCATION") || t.includes("ADDRESS") || t.includes("CITY") || t.includes("ZIP")) return 3;
+  if (t.includes("LINKEDIN") || t.includes("GITHUB") || t.includes("WEBSITE") || t.includes("PORTFOLIO") || t === "PROFILE") return 4;
+  if (t.includes("EMPLOYMENT") || t.includes("COMPANY") || t.includes("TITLE") || t === "EXPERIENCE") return 5;
+  if (t.includes("EDUCATION") || t.includes("DEGREE") || t.includes("SCHOOL")) return 6;
+  if (t.includes("SKILL") || t.includes("TECHNOLOGY")) return 7;
+  if (t.includes("QUESTION") || t === "CUSTOM_QUESTION") return 8;
+  if (t === "RESUME" || t === "COVER_LETTER" || t === "DOCUMENT") return 9;
+  return 10;
 }

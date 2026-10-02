@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import type { FieldResolutionStatus } from "@prisma/client";
 import { logInfo } from "@/lib/logger";
 import {
   admitRun,
@@ -153,13 +154,62 @@ export async function runApplicationAutomation(applicationId: string) {
       coverUpload: previous?.coverUpload === "UPLOADED" || previous?.coverUpload === "VALIDATED" ? previous.coverUpload : "NOT_STARTED",
     },
   });
+
+  const { default: os } = await import("node:os");
+  const { default: path } = await import("node:path");
+  const { default: fs } = await import("node:fs");
+
+  let cvTmpPath: string | undefined;
+  let coverTmpPath: string | undefined;
+
   try {
+    if (application.cvId) {
+      const cvDoc = await prisma.generatedDocument.findFirst({ where: { id: application.cvId } });
+      if (cvDoc && cvDoc.content && cvDoc.content.length > 0) {
+        const cleanName = (cvDoc.fileName || "cv.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
+        cvTmpPath = path.join(os.tmpdir(), `prospectpilot-${cvDoc.id}-${cleanName}`);
+        fs.writeFileSync(cvTmpPath, cvDoc.content);
+      }
+    }
+    if (application.coverLetterId) {
+      const coverDoc = await prisma.generatedDocument.findFirst({ where: { id: application.coverLetterId } });
+      if (coverDoc && coverDoc.content && coverDoc.content.length > 0) {
+        const cleanName = (coverDoc.fileName || "cover_letter.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
+        coverTmpPath = path.join(os.tmpdir(), `prospectpilot-${coverDoc.id}-${cleanName}`);
+        fs.writeFileSync(coverTmpPath, coverDoc.content);
+      }
+    }
+
     const { inspectPublicApplication, inspectionValues } = await import("@/lib/applications/public-inspection");
-    const outcome = await inspectPublicApplication(application.applicationUrl, inspectionValues(application.candidate), { fill: true });
+    const outcome = await inspectPublicApplication(
+      application.applicationUrl,
+      inspectionValues(application.candidate),
+      { fill: true, cvPath: cvTmpPath, coverPath: coverTmpPath }
+    );
     const stored = outcome.resolvedFields.map(persistDetectedField);
-    if (stored.length) {
-      await prisma.applicationFieldResolution.createMany({
-        data: stored.map((field) => ({
+    for (const field of stored) {
+      await prisma.applicationFieldResolution.upsert({
+        where: {
+          automationRunId_fieldKey: {
+            automationRunId: run.id,
+            fieldKey: field.fieldKey,
+          },
+        },
+        update: {
+          label: field.label || "Field",
+          name: field.name,
+          elementId: field.elementId,
+          fieldType: field.fieldType || "text",
+          required: field.required,
+          classification: field.classification,
+          confidence: field.confidence,
+          answer: field.answer,
+          answerSource: field.answerSource,
+          resolution: field.resolution as FieldResolutionStatus,
+          filled: field.filled ?? false,
+          validated: field.validated ?? false,
+        },
+        create: {
           applicationId,
           automationRunId: run.id,
           packageId: application.package!.id,
@@ -173,11 +223,16 @@ export async function runApplicationAutomation(applicationId: string) {
           confidence: field.confidence,
           answer: field.answer,
           answerSource: field.answerSource,
-          resolution: field.resolution,
-        })),
-        skipDuplicates: true,
+          resolution: field.resolution as FieldResolutionStatus,
+          filled: field.filled ?? false,
+          validated: field.validated ?? false,
+        },
       });
     }
+
+    const cvUploaded = Boolean(cvTmpPath && outcome.resolvedFields.some((f) => f.type === "file" && f.classification !== "COVER_LETTER"));
+    const coverUploaded = Boolean(coverTmpPath && outcome.resolvedFields.some((f) => f.type === "file" && f.classification === "COVER_LETTER"));
+
     const blocker = outcome.blocker ?? (stored.some((field) => field.required && field.resolution === "UNRESOLVED" && field.classification === "UNKNOWN") ? "UNKNOWN_REQUIRED_FIELD" : null);
     const mapped = blocker ? statusAfterBlock(blocker) : null;
     const plan = blocker ? retryPlan({ code: blocker, attempt, now: Date.now() }) : null;
@@ -201,6 +256,8 @@ export async function runApplicationAutomation(applicationId: string) {
         currentStep: blocker ? "FORM_DISCOVERY" : "FORM_VALIDATION",
         blocker: mapped,
         errorCode: mapped,
+        cvUpload: cvUploaded ? "UPLOADED" : previous?.cvUpload === "UPLOADED" || previous?.cvUpload === "VALIDATED" ? previous.cvUpload : "NOT_STARTED",
+        coverUpload: coverUploaded ? "UPLOADED" : previous?.coverUpload === "UPLOADED" || previous?.coverUpload === "VALIDATED" ? previous.coverUpload : "NOT_STARTED",
         nextRetryAt: plan?.nextRetryAt ? new Date(plan.nextRetryAt) : null,
         completedAt: new Date(),
         heartbeatAt: new Date(),
@@ -229,5 +286,12 @@ export async function runApplicationAutomation(applicationId: string) {
       data: { applicationId, type: "AUTOMATION_FAILED", detail: safeAuditDetail(`browser crash; package v${packageVersion}; not submitted`) },
     });
     return { skipped: null, packageVersion, runId: run.id, submitted: false as const };
+  } finally {
+    if (cvTmpPath) {
+      try { fs.unlinkSync(cvTmpPath); } catch {}
+    }
+    if (coverTmpPath) {
+      try { fs.unlinkSync(coverTmpPath); } catch {}
+    }
   }
 }

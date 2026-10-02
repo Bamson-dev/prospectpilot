@@ -227,6 +227,13 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <p className="text-sm">Blocker {browser.blocker ?? "None"}. {browser.readiness ?? "No blocker line."} Preparation stopped {browser.stopped ? "Yes" : "No"}. Submitted No. submittedAt {browser.submittedAt}.</p>
         <p className="mt-2 text-sm">{browserLine(application.package?.timings)}</p>
         <p className="mt-2 text-sm">Prepared means the form was opened. CAPTCHA, Cloudflare, and login stay manual. Preparation is not approval.</p>
+        <div className="mt-2 p-2 border border-red-500 text-xs">
+          DEBUG: 
+          status={application.status}, 
+          hold={String(legacyAutomationHold(application.status as ApplicationStatus))}, 
+          pkg={String(!!application.package)}, 
+          url={String(!!application.applicationUrl)}
+        </div>
         {!legacyAutomationHold(application.status as ApplicationStatus) && application.package && application.applicationUrl ? (
           <form action={enqueueBrowserAutomation} className="mt-3 grid gap-2">
             <input type="hidden" name="id" value={application.id} />

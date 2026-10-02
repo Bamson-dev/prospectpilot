@@ -43,7 +43,7 @@ export async function collectPublicVacancies(input: { query: string; limit: numb
     }
   }
   if (searxngEnabled()) {
-    const searched = await searxngVacancies(input.query, Math.min(10, input.limit));
+    const searched = await searxngVacancies(input.query, Math.min(10, input.limit), fetchImpl);
     jobs.push(...searched.jobs);
     failures.push(...searched.failures);
   } else {
@@ -254,26 +254,106 @@ export function smartRecruitersJob(board: string, value: unknown): RawDiscovered
   };
 }
 
-async function searxngVacancies(query: string, limit: number): Promise<SourceCollection> {
+async function searxngVacancies(query: string, limit: number, fetchImpl: typeof fetch = fetch): Promise<SourceCollection> {
   try {
     const payload = await searxngSearch({ query: `${query} job`, limit, language: "en" });
-    const jobs = parseSearxngResults(payload, query, limit).flatMap((hit) => {
-      const parsed: DiscoveredJob | null = parseJobPage({ url: hit.url, title: hit.title, text: `${hit.title}. ${hit.snippet}`.padEnd(40, ".") });
-      if (!parsed) return [];
-      return [{
-        source: parsed.source,
-        sourceUrl: parsed.sourceUrl,
-        applicationUrl: parsed.applicationUrl,
-        companyName: parsed.companyName,
-        title: parsed.title,
-        location: parsed.location ?? null,
-        description: parsed.description,
-        originalDescription: parsed.description,
-      }];
-    });
-    return { jobs, failures: [] };
+    const hits = parseSearxngResults(payload, query, limit);
+    const jobs: RawDiscoveredVacancy[] = [];
+    const failures: SourceFailure[] = [];
+
+    for (const hit of hits) {
+      if (jobs.length >= limit) break;
+      const resolved = await resolveAtsUrl(fetchImpl, hit.url);
+      if (resolved.job) {
+        jobs.push(resolved.job);
+      } else if (resolved.failure) {
+        failures.push(resolved.failure);
+      }
+      await delay(200);
+    }
+    return { jobs, failures };
   } catch (error) {
     return { jobs: [], failures: [{ source: "searxng", reason: error instanceof Error ? error.message : "unavailable" }] };
+  }
+}
+
+export async function resolveAtsUrl(fetchImpl: typeof fetch, url: string): Promise<{ job: RawDiscoveredVacancy | null; failure: SourceFailure | null }> {
+  try {
+    const parsedUrl = new URL(url);
+    const host = parsedUrl.hostname.toLowerCase();
+    const path = parsedUrl.pathname.split('/').filter(Boolean);
+
+    if (host.includes('greenhouse.io')) {
+      if (path.length >= 3 && path[1] === 'jobs') {
+        const board = path[0];
+        const id = path[2];
+        const detail = await readJson(fetchImpl, `https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}`);
+        if (detail.failure) return { job: null, failure: { source: "searxng:greenhouse", reason: detail.failure } };
+        const job = greenhouseJob(detail.body);
+        if (job) return { job, failure: null };
+        return { job: null, failure: { source: "searxng:greenhouse", reason: "PARSE_FAILED" } };
+      }
+      return { job: null, failure: { source: "searxng:greenhouse", reason: "NOT_INDIVIDUAL_VACANCY" } };
+    }
+
+    if (host.includes('lever.co')) {
+      if (path.length >= 2) {
+        const board = path[0];
+        const id = path[path.length - 1]; // Can be /company/job-id
+        const detail = await readJson(fetchImpl, `https://api.lever.co/v0/postings/${board}/${id}?mode=json`);
+        if (detail.failure) return { job: null, failure: { source: "searxng:lever", reason: detail.failure } };
+        const job = leverJob(board, detail.body);
+        if (job) return { job, failure: null };
+        return { job: null, failure: { source: "searxng:lever", reason: "PARSE_FAILED" } };
+      }
+      return { job: null, failure: { source: "searxng:lever", reason: "NOT_INDIVIDUAL_VACANCY" } };
+    }
+
+    if (host.includes('ashbyhq.com')) {
+      if (path.length >= 2) {
+        const board = path[0];
+        const id = path[path.length - 1];
+        const list = await readJson(fetchImpl, `https://api.ashbyhq.com/posting-api/job-board/${board}`);
+        if (list.failure) return { job: null, failure: { source: "searxng:ashby", reason: list.failure } };
+        const rows = Array.isArray((list.body as { jobs?: unknown }).jobs) ? (list.body as { jobs: unknown[] }).jobs : [];
+        const row = rows.find(r => typeof r === 'object' && r !== null && (r as { id?: string }).id === id);
+        if (!row) return { job: null, failure: { source: "searxng:ashby", reason: "PARSE_FAILED" } };
+        const job = ashbyJob(board, row);
+        if (job) return { job, failure: null };
+        return { job: null, failure: { source: "searxng:ashby", reason: "PARSE_FAILED" } };
+      }
+      return { job: null, failure: { source: "searxng:ashby", reason: "NOT_INDIVIDUAL_VACANCY" } };
+    }
+
+    if (host.includes('workable.com')) {
+      if (path.length >= 3 && path[path.length - 2] === 'j') {
+        const board = path[0];
+        const id = path[path.length - 1];
+        const detail = await readJson(fetchImpl, `https://apply.workable.com/api/v3/accounts/${board}/jobs/${id}`);
+        if (detail.failure) return { job: null, failure: { source: "searxng:workable", reason: detail.failure } };
+        const job = workableJob(board, detail.body);
+        if (job) return { job, failure: null };
+        return { job: null, failure: { source: "searxng:workable", reason: "PARSE_FAILED" } };
+      }
+      return { job: null, failure: { source: "searxng:workable", reason: "NOT_INDIVIDUAL_VACANCY" } };
+    }
+
+    if (host.includes('smartrecruiters.com')) {
+      if (path.length >= 2) {
+        const board = path[0];
+        const id = path[path.length - 1];
+        const detail = await readJson(fetchImpl, `https://api.smartrecruiters.com/v1/companies/${board}/postings/${id}`);
+        if (detail.failure) return { job: null, failure: { source: "searxng:smartrecruiters", reason: detail.failure } };
+        const job = smartRecruitersJob(board, detail.body);
+        if (job) return { job, failure: null };
+        return { job: null, failure: { source: "searxng:smartrecruiters", reason: "PARSE_FAILED" } };
+      }
+      return { job: null, failure: { source: "searxng:smartrecruiters", reason: "NOT_INDIVIDUAL_VACANCY" } };
+    }
+
+    return { job: null, failure: { source: "searxng", reason: "UNSUPPORTED_SOURCE" } };
+  } catch (error) {
+    return { job: null, failure: { source: "searxng", reason: "INVALID_JOB_URL" } };
   }
 }
 

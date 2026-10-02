@@ -53,6 +53,6 @@ function normalizeUrl(value: string) {
   }
 }
 
-function normalize(value: string) {
+export function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }

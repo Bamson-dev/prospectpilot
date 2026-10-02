@@ -18,7 +18,7 @@ import { CAREER_PROFILES, contactIsReady, seedCandidateRecord, seedWritingProfil
 import type { CandidateRecord, JobInput } from "@/lib/applications/types";
 import { DateValidator, FormattingValidator } from "@/lib/applications/validators";
 import { CV_SYSTEM_PROMPT, evidencePrompt } from "@/lib/applications/prompts";
-import { duplicateDecision } from "@/lib/applications/dedupe";
+import { duplicateDecision, normalize } from "@/lib/applications/dedupe";
 import { keptQualificationExplanation } from "@/lib/applications/application-queue";
 import { assessVacancy } from "@/lib/applications/job-pipeline";
 import { normalizeVacancy, type NormalizedVacancy } from "@/lib/applications/job-normalize";
@@ -219,7 +219,7 @@ export async function persistNormalizedVacancies(organizationId: string, jobs: N
     if (match) {
       duplicateReasons.push(duplicateDecision(match, job).reason ?? "duplicate");
       // Update freshness for discovered jobs
-      await prisma.jobVacancy.update({ where: { id: match.id }, data: { discoveredAt: new Date() } }).catch(() => {});
+      await prisma.jobVacancy.update({ where: { id: match.id }, data: { lastCheckedAt: new Date() } }).catch(() => {});
       continue;
     }
     try {
@@ -232,6 +232,9 @@ export async function persistNormalizedVacancies(organizationId: string, jobs: N
           externalId: job.externalId,
           companyName: job.companyName,
           title: job.title,
+          normalizedCompany: normalize(job.companyName),
+          normalizedTitle: normalize(job.title),
+          normalizedLocation: normalize(job.location ?? ""),
           location: job.location,
           remoteType: job.remoteType,
           employmentType: job.employmentType,

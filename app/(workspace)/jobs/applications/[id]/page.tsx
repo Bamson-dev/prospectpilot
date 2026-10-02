@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { decideApplication, enqueueApplicationPreparation, recordSubmissionConfirmation } from "@/actions/job-applications";
+import { decideApplication, enqueueApplicationPreparation, recordManualReview, recordSubmissionConfirmation } from "@/actions/job-applications";
 import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -8,6 +8,7 @@ import { cvStorageFailure } from "@/lib/applications/cv";
 import { applicationPreview } from "@/lib/applications/preview";
 import { applicationReadinessReport } from "@/lib/applications/application-readiness";
 import { preparationReadinessLine } from "@/lib/applications/security";
+import { browserPreparationView, buildFieldReview, currentDocument, humanActionInstruction, latestManualMarker, qualificationDecision, verifiedEvidence } from "@/lib/applications/manual-review";
 import { classifyCandidateEmail } from "@/lib/applications/seed-data";
 import { pipelineState } from "@/lib/applications/state";
 import type { CandidateRecord } from "@/lib/applications/types";
@@ -39,8 +40,8 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
     orderBy: { createdAt: "desc" },
   });
   const analysis = readAnalysis(application.vacancy.fit?.analysis);
-  const cv = documents.find((document) => document.kind === "CV");
-  const letter = documents.find((document) => document.kind === "COVER_LETTER");
+  const cv = currentDocument(documents, "CV");
+  const letter = currentDocument(documents, "COVER_LETTER");
   const candidateRecord = toCandidateRecord(application.candidate);
   const cvCheck = cv ? validateCvFacts(cv.text, candidateRecord, [application.vacancy.companyName, application.vacancy.title]) : { status: "NOT_GENERATED" as const, issues: [] };
   const letterWriting = letter ? assessWriting({ text: letter.text, jobDescription: application.vacancy.description }) : { status: "NOT_GENERATED" as const };
@@ -67,6 +68,16 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
     authentication: blocker === "LOGIN_REQUIRED" || blocker === "AUTH_REQUIRED",
     cloudflare: blocker === "CLOUDFLARE_CHALLENGE",
   });
+  const qualification = qualificationDecision(application.vacancy.fit?.analysis, blocker);
+  const action = humanActionInstruction(blocker);
+  const browser = browserPreparationView(application.package?.timings, application.submittedAt);
+  const fieldReview = buildFieldReview({
+    answers: storedAnswers,
+    workAuthorization: application.candidate.workAuthorization,
+    sponsorship: application.candidate.sponsorship,
+  });
+  const evidence = verifiedEvidence(application.candidate.facts.map((fact) => ({ fact: fact.fact, verified: fact.verified, sourceType: fact.sourceType })));
+  const manualMarker = latestManualMarker(application.events);
   const preview = applicationPreview({
     company: application.vacancy.companyName,
     role: application.vacancy.title,
@@ -96,11 +107,27 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       <JobsNav />
       <Flash error={query.error} notice={query.notice} />
       <Panel className="mb-3">
-        <h2 className="font-display text-2xl">Job</h2>
-        <p className="mt-2 text-sm">{application.vacancy.companyName} · {application.vacancy.title}</p>
-        <p className="text-sm text-muted">{application.vacancy.location || "Location not listed"} · {application.vacancy.remoteType || "Remote policy not listed"} · {application.vacancy.employmentType || "Employment type not listed"}</p>
+        <h2 className="font-display text-2xl">Application</h2>
+        <p className="mt-2 text-sm">Employer {application.vacancy.companyName}</p>
+        <p className="text-sm">Role {application.vacancy.title}</p>
+        <p className="text-sm">Location {application.vacancy.location || "Location not listed"} · {application.vacancy.remoteType || "Remote policy not listed"}</p>
+        <p className="text-sm">Application state {application.status}. Qualification {qualification.decision ?? "stored with the vacancy"}. Package version {application.package?.version ?? 1}. Preparation {pipelineState(application.status)}.</p>
+        <p className="text-sm">Profile {application.profile}{qualification.primary ? `. Qualification profile ${qualification.primary}` : ""}{qualification.secondary.length ? `. Secondary ${qualification.secondary.join(", ")}` : ""}.</p>
+        <p className="mt-2 text-sm">{qualification.reason ?? "Qualification stays on the stored decision. A preparation blocker does not change it."}</p>
         <p className="text-sm text-muted">{salary(application.vacancy.salaryMin, application.vacancy.salaryMax, application.vacancy.salaryCurrency)}</p>
-        <p className="mt-2 text-sm">Source {application.source}. <a className="text-tide" href={application.applicationUrl} target="_blank" rel="noreferrer">Open application URL</a></p>
+        <p className="mt-2 text-sm">Source {application.source}. <a className="text-tide" href={application.applicationUrl} target="_blank" rel="noreferrer">Open the employer application manually</a></p>
+      </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Blocker {blocker ?? "None recorded"}</h2>
+        <p className="mt-2 text-sm">{action?.readiness ?? readinessLine ?? "No preparation blocker is stored."}</p>
+        <p className="mt-2 text-sm">Human action required: {action?.instruction ?? "Review the unresolved fields, then open the employer application manually."}</p>
+        <p className="text-sm text-muted">ProspectPilot does not bypass CAPTCHA, Cloudflare, login, or rate limits. Manual completion is not a system-confirmed submission.</p>
+        <p className="mt-2 text-sm">Manual review {manualMarker ?? "MANUAL_ACTION_NOT_COMPLETED"}.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <form action={recordManualReview}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="marker" value="MANUAL_REVIEW_STARTED" /><SubmitButton pendingLabel="Saving" variant="secondary">Start manual review</SubmitButton></form>
+          <form action={recordManualReview}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="marker" value="MANUAL_REVIEW_COMPLETED" /><SubmitButton pendingLabel="Saving" variant="secondary">Mark manually completed</SubmitButton></form>
+          <form action={recordManualReview}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="marker" value="MANUAL_ACTION_NOT_COMPLETED" /><SubmitButton pendingLabel="Saving" variant="secondary">Mark not completed</SubmitButton></form>
+        </div>
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Readiness</h2>
@@ -130,7 +157,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">CV</h2>
-        <p className="mt-2 text-sm">Status {cv ? "Stored" : "Missing"}. Version {cv?.version ?? "—"}. Validation {cv ? cvCheck.status : "NOT_GENERATED"}.</p>
+        <p className="mt-2 text-sm">Document {cv?.fileName ?? "No CV stored"}. Profile {application.profile}. Status {cv ? "Stored" : "Missing"}. Version {cv?.version ?? "—"}. Package version {application.package?.version ?? 1}. Validation {cv ? cvCheck.status : "NOT_GENERATED"}.</p>
         {documents.filter((document) => document.kind === "CV").map((document) => <p key={document.id} className="mt-2 text-sm">Version {document.version} · {document.createdAt.toISOString()} · {document.version === latestVersion(documents, "CV", document.fileType) ? pipelineState(application.status) : "SUPERSEDED"} · <a className="text-tide" href={`/api/jobs/documents/${document.id}`}>{document.fileName}</a></p>)}
         {!cv ? <p className="mt-2 text-sm text-muted">{cvStorageFailure(application.candidate.email, application.package?.warnings ?? []).message}</p> : null}
         {cvCheck.issues.map((issue) => <p key={`${issue.kind}-${issue.value}`} className="mt-2 text-sm">REVIEW REQUIRED · unsupported {issue.kind}: {issue.value}</p>)}
@@ -138,9 +165,22 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Cover letter</h2>
-        <p className="mt-2 text-sm">Status {letter ? "Stored" : "Missing"}. Version {letter?.version ?? "—"}. Validation {letterValidation}. {letterWriting.status === "REVIEW_REQUIRED" ? "Review reason: writing needs review." : ""}</p>
+        <p className="mt-2 text-sm">Document {letter?.fileName ?? "No cover letter stored"}. Status {letter ? "Stored" : "Missing"}. Version {letter?.version ?? "—"}. Package version {application.package?.version ?? 1}. Validation {letterValidation}. {letterWriting.status === "REVIEW_REQUIRED" ? "Review reason: writing needs review." : ""}</p>
         {documents.filter((document) => document.kind === "COVER_LETTER").map((document) => <p key={document.id} className="mt-2 text-sm">Version {document.version} · {document.createdAt.toISOString()} · {document.version === latestVersion(documents, "COVER_LETTER", document.fileType) ? pipelineState(application.status) : "SUPERSEDED"} · <a className="text-tide" href={`/api/jobs/documents/${document.id}`}>{document.fileName}</a></p>)}
         {letter ? <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap text-sm">{letter.text.slice(0, 1200)}</pre> : <p className="mt-2 text-sm text-muted">No cover letter stored.</p>}
+      </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Evidence</h2>
+        <p className="mt-2 text-sm text-muted">Verified candidate facts only. Generated CV and cover-letter text is not evidence.</p>
+        {evidence.length === 0 ? <p className="mt-2 text-sm">No verified facts are stored.</p> : evidence.map((item) => <p key={item.claim} className="mt-2 text-sm">Claim {item.claim}. Source {item.source}. Verification {item.verification}.</p>)}
+      </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Field review</h2>
+        <FieldGroup title="Automatically resolved" fields={fieldReview.resolved} />
+        <FieldGroup title="Review required" fields={fieldReview.review} />
+        <FieldGroup title="Unknown" fields={fieldReview.unknown} />
+        <FieldGroup title="Custom questions" fields={fieldReview.custom} />
+        <FieldGroup title="Sensitive questions" fields={fieldReview.sensitive} />
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Employer questions</h2>
@@ -150,10 +190,10 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Approval</h2>
-        <p className="mt-2 text-sm text-muted">Approve does not submit. Submission needs a separate confirmation, and this build still will not send the application.</p>
+        <p className="mt-2 text-sm text-muted">Approve package means the documents and answers are approved for manual application completion. It does not submit the application.</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="APPROVED" /><SubmitButton pendingLabel="Saving">Approve</SubmitButton></form>
-          <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="REJECTED" /><SubmitButton pendingLabel="Saving" variant="secondary">Reject</SubmitButton></form>
+          <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="APPROVED" /><SubmitButton pendingLabel="Saving">Approve package</SubmitButton></form>
+          <form action={decideApplication} className="flex flex-wrap items-center gap-2"><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="REJECTED" /><input name="reason" placeholder="Rejection reason" required /><SubmitButton pendingLabel="Saving" variant="secondary">Reject package</SubmitButton></form>
           <a className="inline-flex items-center rounded border border-line px-3 py-2 text-sm" href="/jobs/candidate">Edit</a>
           <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="reprepare" value="on" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate CV</SubmitButton></form>
           <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="reprepare" value="on" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate letter</SubmitButton></form>
@@ -182,6 +222,8 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       </Panel>
       <Panel>
         <h2 className="font-display text-2xl">Browser preparation</h2>
+        <p className="mt-2 text-sm">Browser {browser.platform ?? "not recorded"}. Fields detected {browser.fieldsDetected ?? "—"}. Fields classified {browser.fieldsClassified ?? "—"}. Required fields {browser.requiredFields ?? "—"}. Review required {browser.reviewRequired ?? "—"}.</p>
+        <p className="text-sm">Blocker {browser.blocker ?? "None"}. {browser.readiness ?? "No blocker line."} Preparation stopped {browser.stopped ? "Yes" : "No"}. Submitted No. submittedAt {browser.submittedAt}.</p>
         <p className="mt-2 text-sm">{browserLine(application.package?.timings)}</p>
         <p className="mt-2 text-sm">Prepared means the form was opened. CAPTCHA, Cloudflare, and login stay manual. Preparation is not approval.</p>
       </Panel>
@@ -282,6 +324,17 @@ function fieldLine(name: string, value: string | null) {
     source: value ? "candidate" : null,
     reason: value ? null : "unknown value",
   };
+}
+
+function FieldGroup({ title, fields }: { title: string; fields: Array<{ label: string; classification: string; required: boolean; answer: string | null; source: string | null; confidence: number; reviewState: string }> }) {
+  return (
+    <div className="mt-3">
+      <p className="text-sm text-muted">{title}</p>
+      {fields.length === 0 ? <p className="mt-1 text-sm">None</p> : fields.map((field) => (
+        <p key={`${title}-${field.label}`} className="mt-2 text-sm">{field.label}. Classification {field.classification}. {field.required ? "Required" : "Optional"}. Answer {field.answer || "None"}. Source {field.source || "None"}. Confidence {field.confidence}. Review {field.reviewState}.</p>
+      ))}
+    </div>
+  );
 }
 
 function List({ title, items }: { title: string; items?: string[] }) {

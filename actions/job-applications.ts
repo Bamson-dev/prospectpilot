@@ -10,10 +10,11 @@ import { ensureCandidate } from "@/lib/applications/service";
 import { optionalCandidateFacts } from "@/lib/applications/candidate-fields";
 import { validateCandidateProfile } from "@/lib/applications/profile-validation";
 import { canTransition } from "@/lib/applications/state";
+import { blockerFromTimings, manualReviewRecord, packageApproval } from "@/lib/applications/manual-review";
 import { evaluateSubmissionGate } from "@/lib/applications/submission-gate";
 import { MANUAL_QUEUE_REASON, discoveryLimit, queueAdmission, selectBulkPrepare, storedFitDecision } from "@/lib/applications/application-queue";
 import { sourceValidity } from "@/lib/applications/source-validity";
-import { preparationDecision, safeAuditDetail } from "@/lib/applications/package-version";
+import { preparationDecision } from "@/lib/applications/package-version";
 import { checksum } from "@/lib/applications/documents";
 import type { ApplicationStatus } from "@/lib/applications/types";
 
@@ -331,16 +332,57 @@ export async function decideApplication(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const decision = String(formData.get("decision") ?? "");
   if (decision !== "APPROVED" && decision !== "REJECTED") redirect("/jobs/applications?error=Unknown+decision.");
-  const application = await prisma.jobApplication.findFirst({ where: { id, organizationId: organization.id } });
+  const application = await prisma.jobApplication.findFirst({
+    where: { id, organizationId: organization.id },
+    include: { package: true },
+  });
   if (!application) redirect("/jobs/applications?error=Application+not+found.");
-  if (!canTransition(application.status as ApplicationStatus, decision)) {
+  if (application.submittedAt || application.status === "SUBMITTED" || application.status === "SUBMITTING") {
+    redirect(`/jobs/applications/${id}?error=A+submission+cannot+be+created+from+package+review.`);
+  }
+  const result = packageApproval({
+    status: application.status,
+    decision,
+    reason: String(formData.get("reason") ?? ""),
+    packageVersion: application.package?.version ?? 1,
+    blocker: blockerFromTimings(application.package?.timings),
+  });
+  if ("error" in result && result.error) redirect(`/jobs/applications/${id}?error=${encodeURIComponent(result.error)}`);
+  if (result.requiresTransition && !canTransition(application.status as ApplicationStatus, result.status as ApplicationStatus)) {
     redirect(`/jobs/applications/${id}?error=That+status+change+is+not+allowed.`);
   }
-  await prisma.jobApplication.update({ where: { id: application.id }, data: { status: decision } });
+  if (result.status !== application.status) {
+    await prisma.jobApplication.update({ where: { id: application.id }, data: { status: result.status as ApplicationStatus, submittedAt: null } });
+  }
   await prisma.applicationEvent.create({
-    data: { applicationId: application.id, type: decision === "APPROVED" ? "APPROVED" : "REJECTED", detail: safeAuditDetail(decision === "APPROVED" ? "Approved for review. Not submitted." : "Rejected before submission.") },
+    data: { applicationId: application.id, type: result.event, detail: result.detail },
   });
-  redirect(`/jobs/applications/${id}?notice=Status+saved.+Nothing+was+submitted.`);
+  redirect(`/jobs/applications/${id}?notice=Package+decision+saved.+Nothing+was+submitted.`);
+}
+
+export async function recordManualReview(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const id = String(formData.get("id") ?? "");
+  const application = await prisma.jobApplication.findFirst({
+    where: { id, organizationId: organization.id },
+    include: { package: true },
+  });
+  if (!application) redirect("/jobs/applications?error=Application+not+found.");
+  const result = manualReviewRecord({
+    marker: String(formData.get("marker") ?? ""),
+    status: application.status as ApplicationStatus,
+    packageVersion: application.package?.version ?? 1,
+    blocker: blockerFromTimings(application.package?.timings),
+    reason: String(formData.get("reason") ?? ""),
+  });
+  if ("error" in result && result.error) redirect(`/jobs/applications/${id}?error=${encodeURIComponent(result.error)}`);
+  if (application.submittedAt) {
+    await prisma.jobApplication.update({ where: { id: application.id }, data: { submittedAt: null } });
+  }
+  await prisma.applicationEvent.create({
+    data: { applicationId: application.id, type: result.event, detail: result.detail },
+  });
+  redirect(`/jobs/applications/${id}?notice=Manual+review+recorded.+Nothing+was+submitted.`);
 }
 
 export async function recordSubmissionConfirmation(formData: FormData) {

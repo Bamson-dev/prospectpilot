@@ -773,6 +773,51 @@ enum ApplicationEventType {
   QUESTIONS_GENERATED
   APPROVED
   REJECTED
+  AUTOMATION_STARTED
+  AUTOMATION_RESUMED
+  FORM_DISCOVERED
+  FIELDS_DETECTED
+  ANSWERS_RESOLVED
+  FORM_FILL_STARTED
+  DOCUMENT_UPLOADED
+  FORM_VALIDATED
+  AUTOMATION_FAILED
+  AUTOMATION_RETRY_SCHEDULED
+}
+
+enum AutomationRunStatus {
+  QUEUED
+  RUNNING
+  PAUSED
+  WAITING
+  COMPLETED
+  FAILED
+  BLOCKED
+}
+
+enum BrowserSessionStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  BLOCKED
+}
+
+enum FieldResolutionStatus {
+  DETECTED
+  CLASSIFIED
+  RESOLVED
+  UNRESOLVED
+  FILLED
+  VALIDATED
+  FAILED
+}
+
+enum DocumentUploadStatus {
+  NOT_STARTED
+  UPLOADING
+  UPLOADED
+  VALIDATED
+  FAILED
 }
 
 enum GeneratedDocumentKind {
@@ -1100,6 +1145,7 @@ model ApplicationPackage {
   warnings       String[]                 @default([])
   timings        Json?
   application    JobApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  automationRuns ApplicationAutomationRun[]
 }
 
 model CandidateDocument {
@@ -1143,6 +1189,9 @@ model JobApplication {
   events          ApplicationEvent[]
   answers         ApplicationAnswer[]
   followUps       ApplicationFollowUp[]
+  automationRuns  ApplicationAutomationRun[]
+  browserSessions ApplicationBrowserSession[]
+  fieldResolutions ApplicationFieldResolution[]
 
   @@unique([organizationId, vacancyId, candidateId])
   @@index([organizationId, status, createdAt])
@@ -1182,4 +1231,83 @@ model ApplicationFollowUp {
   application   JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@index([applicationId, runAt])
+}
+
+model ApplicationAutomationRun {
+  id             String               @id @default(cuid())
+  applicationId  String
+  packageId      String
+  packageVersion Int
+  status         AutomationRunStatus  @default(QUEUED)
+  attempt        Int                  @default(1)
+  currentStep    String               @default("BROWSER_STARTED")
+  currentUrl     String?
+  idempotencyKey String               @unique
+  heartbeatAt    DateTime             @default(now())
+  startedAt      DateTime             @default(now())
+  completedAt    DateTime?
+  nextRetryAt    DateTime?
+  errorCode      String?
+  errorMessage   String?
+  blocker        String?
+  cvUpload       DocumentUploadStatus @default(NOT_STARTED)
+  coverUpload    DocumentUploadStatus @default(NOT_STARTED)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  application    JobApplication       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  package        ApplicationPackage   @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  sessions       ApplicationBrowserSession[]
+  fields         ApplicationFieldResolution[]
+
+  @@index([applicationId, status])
+  @@index([packageId])
+}
+
+model ApplicationBrowserSession {
+  id              String               @id @default(cuid())
+  automationRunId String
+  applicationId   String
+  platform        String
+  adapter         String
+  status          BrowserSessionStatus @default(RUNNING)
+  currentUrl      String?
+  pageTitle       String?
+  attempt         Int                  @default(1)
+  startedAt       DateTime             @default(now())
+  heartbeatAt     DateTime             @default(now())
+  endedAt         DateTime?
+  errorCode       String?
+  errorMessage    String?
+  automationRun   ApplicationAutomationRun @relation(fields: [automationRunId], references: [id], onDelete: Cascade)
+  application     JobApplication       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, startedAt])
+  @@index([automationRunId])
+}
+
+model ApplicationFieldResolution {
+  id             String                @id @default(cuid())
+  applicationId  String
+  automationRunId String
+  packageId      String
+  fieldKey       String
+  label          String
+  name           String
+  elementId      String
+  fieldType      String
+  required       Boolean               @default(false)
+  classification String
+  confidence     Float                 @default(0)
+  answer         String?
+  answerSource   String?
+  resolution     FieldResolutionStatus @default(DETECTED)
+  filled         Boolean               @default(false)
+  validated      Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  application    JobApplication        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  automationRun  ApplicationAutomationRun @relation(fields: [automationRunId], references: [id], onDelete: Cascade)
+
+  @@unique([automationRunId, fieldKey])
+  @@index([applicationId])
 }

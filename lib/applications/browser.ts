@@ -109,6 +109,7 @@ export async function fillApplicationPage(
     status: verdict.verified ? "SUBMITTED" as const : verdict.status,
     reason: verdict.verified ? "confirmed" : "unconfirmed",
     audit: audit(page.url(), adapter.name, inspected, mapped, verdict.verified ? null : "unconfirmed", verdict.verified ? "SUBMITTED" : "REQUIRES_MANUAL_ACTION", verdict.verified),
+    resolvedFields: fieldSnapshot(inspected, mapped),
   };
 }
 
@@ -120,7 +121,25 @@ function finish(url: string, platform: string, inspected: ReturnType<typeof insp
     status: blocked ? "REQUIRES_MANUAL_ACTION" as const : "READY_FOR_HUMAN_SUBMISSION" as const,
     reason: manual ?? "pause before submit",
     audit: audit(url, platform, inspected, mapped, manual, blocked ? "REQUIRES_MANUAL_ACTION" : "READY_FOR_HUMAN_SUBMISSION", false),
+    resolvedFields: fieldSnapshot(inspected, mapped),
   };
+}
+
+function fieldSnapshot(inspected: ReturnType<typeof inspectFields>, mapped: ReturnType<typeof mapCandidateToFields>) {
+  return inspected.map((field, index) => ({
+    label: field.label,
+    name: field.name,
+    id: field.id,
+    type: field.type,
+    required: field.required,
+    autocomplete: field.ariaLabel,
+    nearby: field.question,
+    classification: mapped[index]?.taxonomy ?? field.taxonomy,
+    confidence: mapped[index]?.confidence ?? field.confidence,
+    answer: mapped[index]?.value ?? null,
+    answerSource: mapped[index]?.source ?? null,
+    resolution: mapped[index]?.status,
+  }));
 }
 
 function audit(url: string, platform: string, inspected: ReturnType<typeof inspectFields>, mapped: ReturnType<typeof mapCandidateToFields>, manual: string | null, finalState: PreparationAudit["finalState"], submitted: boolean): PreparationAudit {

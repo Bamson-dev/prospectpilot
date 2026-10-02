@@ -6,6 +6,7 @@ import { jobRetryDelayMs } from "@/lib/research/failure";
 import { applicationWorkerConcurrency } from "@/lib/applications/config";
 import { getQueue, getRedis } from "@/lib/queues";
 import { analyzeVacancy } from "@/lib/applications/service";
+import { recoverStaleAutomationRuns, runApplicationAutomation } from "@/lib/applications/automation-service";
 import { processApplicationFollowUp, processApplicationPreparation, processApplicationSubmit, processJobDiscovery } from "@/worker/processors/job-applications";
 import { processDiscovery } from "@/worker/processors/discovery";
 import { processDueFollowUps, processReply } from "@/worker/processors/follow-up";
@@ -162,6 +163,31 @@ const applicationFollowUps = new Worker(
 applicationFollowUps.on("failed", (job, error) => {
   logInfo("worker.job_failed", { queue: "application-followup", jobId: job?.id, message: error.message });
 });
+
+const applicationBrowser = new Worker(
+  "application-browser",
+  async (job) => {
+    if (job.name === "recover") {
+      await recoverStaleAutomationRuns();
+      return;
+    }
+    const data = job.data as Record<string, string>;
+    await runJob(data.jobId, async () => {
+      if (!data.applicationId) throw new Error("Application browser job is missing an application.");
+      await runApplicationAutomation(data.applicationId);
+    });
+  },
+  { connection, concurrency: concurrency("application-browser"), settings: { backoffStrategy: retryBackoff } },
+);
+applicationBrowser.on("failed", (job, error) => {
+  logInfo("worker.job_failed", { queue: "application-browser", jobId: job?.id, message: error.message });
+});
+
+void getQueue("application-browser")
+  .add("recover", {}, { repeat: { every: 15 * 60 * 1000 }, jobId: "application-browser-recover" })
+  .catch((error: unknown) => {
+    logInfo("worker.application_browser_schedule_failed", { message: error instanceof Error ? error.message : "unknown" });
+  });
 
 void getQueue("application-followup")
   .add("scan", {}, { repeat: { every: 60 * 60 * 1000 }, jobId: "application-followup-scan" })

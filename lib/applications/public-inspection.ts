@@ -1,5 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { logInfo } from "@/lib/logger";
+import { recordInspectionRun } from "@/lib/applications/automation-service";
+import type { DetectedField } from "@/lib/applications/automation-engine";
 import { assertResolvedPublicUrl } from "@/lib/network";
 import { fillApplicationPage, type PreparationAudit } from "@/lib/applications/browser";
 import { safeAuditDetail } from "@/lib/applications/package-version";
@@ -16,6 +19,7 @@ export type InspectionOutcome = {
   blocker: PreparationBlocker | null;
   status: "REQUIRES_MANUAL_ACTION" | "READY_FOR_HUMAN_SUBMISSION";
   fields: number;
+  resolvedFields: DetectedField[];
   platform: string;
   ms: number;
   metrics: PreparationAudit["metrics"] | null;
@@ -78,6 +82,7 @@ export async function inspectPublicApplication(url: string, values: Record<strin
       blocker,
       status: blocker || result.status === "REQUIRES_MANUAL_ACTION" ? "REQUIRES_MANUAL_ACTION" : "READY_FOR_HUMAN_SUBMISSION",
       fields: result.audit.fieldsDetected,
+      resolvedFields: result.resolvedFields,
       platform: result.audit.platform,
       ms: Date.now() - started,
       metrics: result.audit.metrics,
@@ -89,7 +94,7 @@ export async function inspectPublicApplication(url: string, values: Record<strin
 
 function stopped(blocker: PreparationBlocker, ms: number, note?: string, platform = "UNKNOWN", fields = 0, metrics: PreparationAudit["metrics"] | null = null): InspectionOutcome {
   const opened = blocker === "EMPLOYER_SERVER_ERROR" || blocker === "APPLICATION_FORM_NOT_FOUND" || blocker === "SECURITY_BLOCK";
-  return { opened, submitted: false, reason: note ? `${blocker} ${note}` : blocker, blocker, status: "REQUIRES_MANUAL_ACTION", fields, platform, ms, metrics };
+  return { opened, submitted: false, reason: note ? `${blocker} ${note}` : blocker, blocker, status: "REQUIRES_MANUAL_ACTION", fields, resolvedFields: [], platform, ms, metrics };
 }
 
 export async function attachBrowserInspection(applicationId: string) {
@@ -166,6 +171,21 @@ export async function attachBrowserInspection(applicationId: string) {
     await prisma.applicationEvent.create({
       data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: safeAuditDetail(`${outcome.blocker ?? "MANUAL"}; ${outcome.fields} fields; not submitted`) },
     });
+  }
+  if (application.package) {
+    try {
+      await recordInspectionRun({
+        applicationId: application.id,
+        packageId: application.package.id,
+        packageVersion: application.package.version,
+        url: application.applicationUrl,
+        platform: outcome.platform,
+        blocker: outcome.blocker,
+        fields: outcome.resolvedFields,
+      });
+    } catch (error) {
+      logInfo("application.automation_record_failed", { applicationId: application.id, message: error instanceof Error ? error.message : "record failed" });
+    }
   }
   return outcome;
 }

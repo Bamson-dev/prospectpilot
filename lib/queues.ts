@@ -17,6 +17,7 @@ export const QUEUE_NAMES = [
   "cv-generation",
   "cover-letter",
   "application-preparation",
+  "application-browser",
   "application-submit",
   "application-verification",
   "application-followup",

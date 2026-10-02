@@ -11,7 +11,6 @@ import { optionalCandidateFacts } from "@/lib/applications/candidate-fields";
 import { validateCandidateProfile } from "@/lib/applications/profile-validation";
 import { canTransition } from "@/lib/applications/state";
 import { blockerFromTimings, manualReviewRecord, packageApproval } from "@/lib/applications/manual-review";
-import { legacyAutomationHold } from "@/lib/applications/automation-engine";
 import { evaluateSubmissionGate } from "@/lib/applications/submission-gate";
 import { MANUAL_QUEUE_REASON, discoveryLimit, queueAdmission, selectBulkPrepare, storedFitDecision } from "@/lib/applications/application-queue";
 import { sourceValidity } from "@/lib/applications/source-validity";
@@ -434,40 +433,6 @@ export async function recordSubmissionConfirmation(formData: FormData) {
     data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: "Confirmation recorded. Nothing was submitted." },
   });
   redirect(`/jobs/applications/${id}?notice=Confirmation+recorded.+Nothing+was+submitted.`);
-}
-
-export async function enqueueBrowserAutomation(formData: FormData) {
-  const { organization } = await requireOrganization("MEMBER");
-  const id = String(formData.get("id") ?? "");
-  const application = await prisma.jobApplication.findFirst({
-    where: { id, organizationId: organization.id },
-    include: { package: true },
-  });
-  if (!application) redirect("/jobs/applications?error=Application+not+found.");
-  
-  if (legacyAutomationHold(application.status as ApplicationStatus)) {
-    redirect(`/jobs/applications/${id}?error=Application+status+prevents+browser+automation.`);
-  }
-  
-  if (!application.package) {
-    redirect(`/jobs/applications/${id}?error=Application+package+is+missing.`);
-  }
-  if (!application.applicationUrl) {
-    redirect(`/jobs/applications/${id}?error=Public+employer+URL+is+missing.`);
-  }
-
-  try {
-    await queueJob({
-      organizationId: organization.id,
-      queue: "application-browser",
-      name: "run",
-      payload: { applicationId: application.id },
-    });
-  } catch (error) {
-    redirect(`/jobs/applications/${id}?error=${encodeURIComponent(errorMessage(error))}`);
-  }
-  
-  redirect(`/jobs/applications/${id}?notice=Browser+automation+queued.+Refresh+to+see+updates.`);
 }
 
 export async function saveCandidateDocument(formData: FormData) {

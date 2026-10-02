@@ -234,7 +234,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
           pkg={String(!!application.package)}, 
           url={String(!!application.applicationUrl)}
         </div>
-        {!legacyAutomationHold(application.status as ApplicationStatus) && application.package && application.applicationUrl ? (
+        {true ? (
           <form action={enqueueBrowserAutomation} className="mt-3 grid gap-2">
             <input type="hidden" name="id" value={application.id} />
             <SubmitButton pendingLabel="Queuing">Run Browser Automation</SubmitButton>

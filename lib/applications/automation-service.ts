@@ -155,7 +155,7 @@ export async function runApplicationAutomation(applicationId: string) {
   });
   try {
     const { inspectPublicApplication, inspectionValues } = await import("@/lib/applications/public-inspection");
-    const outcome = await inspectPublicApplication(application.applicationUrl, inspectionValues(application.candidate));
+    const outcome = await inspectPublicApplication(application.applicationUrl, inspectionValues(application.candidate), { fill: true });
     const stored = outcome.resolvedFields.map(persistDetectedField);
     if (stored.length) {
       await prisma.applicationFieldResolution.createMany({

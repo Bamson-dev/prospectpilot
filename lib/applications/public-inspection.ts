@@ -51,7 +51,7 @@ export function inspectionIsBlocked(outcome: Pick<InspectionOutcome, "submitted"
   return Boolean(outcome.reason && outcome.reason !== "pause before submit");
 }
 
-export async function inspectPublicApplication(url: string, values: Record<string, string>): Promise<InspectionOutcome> {
+export async function inspectPublicApplication(url: string, values: Record<string, string>, options?: { fill?: boolean }): Promise<InspectionOutcome> {
   const started = Date.now();
   await assertResolvedPublicUrl(url);
   const { chromium } = await import("playwright");
@@ -69,7 +69,7 @@ export async function inspectPublicApplication(url: string, values: Record<strin
     if (employerServerError(response?.status(), body)) {
       return stopped("EMPLOYER_SERVER_ERROR", Date.now() - started, `HTTP ${response?.status() ?? "error"}`);
     }
-    const result = await fillApplicationPage(page, values, { fill: false, mode: "PREPARE_ONLY", submit: false, statusCode: response?.status() });
+    const result = await fillApplicationPage(page, values, { fill: options?.fill === true, mode: "PREPARE_ONLY", submit: false, statusCode: response?.status() });
     if (result.submitted) return stopped("SECURITY_BLOCK", Date.now() - started, undefined, result.audit.platform, result.audit.fieldsDetected, result.audit.metrics);
     if (result.audit.fieldsDetected === 0 && preparationBlocker(result.reason) == null) {
       return stopped("APPLICATION_FORM_NOT_FOUND", Date.now() - started, undefined, result.audit.platform, 0, result.audit.metrics);

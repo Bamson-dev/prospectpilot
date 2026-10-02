@@ -308,7 +308,7 @@ export function stopForBlocker(state: EngineState, runId: string, code: string, 
   const next = markRun(state, runId, {
     status: plan.status,
     blocker: mapped,
-    errorCode: mapped,
+    errorCode: mapped === "REQUIRES_MANUAL_ACTION" ? code : mapped,
     currentStep: state.runs.find((run) => run.id === runId)?.currentStep ?? "FORM_DISCOVERY",
     heartbeatAt: now,
     nextRetryAt: plan.nextRetryAt,

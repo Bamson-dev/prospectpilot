@@ -5,6 +5,7 @@ import { detectPlatform } from "@/lib/applications/platforms";
 import { classifyObservedBarrier, employerServerError, unexpectedRedirect } from "@/lib/applications/security";
 import { submissionAllowed } from "@/lib/applications/submission-gate";
 import { verificationFromPage } from "@/lib/applications/browser-plan";
+import { checkboxAction, matchOption, textFillPlan, uploadDecision, visibleValidationProblem } from "@/lib/applications/form-completion";
 
 export type PreparationAudit = {
   url: string;
@@ -50,6 +51,7 @@ export async function readFormFields(page: Page): Promise<RawField[]> {
       required: input.required || input.getAttribute("aria-required") === "true",
       nearby: input.parentElement?.textContent?.slice(0, 160) ?? "",
       options: element.tagName === "SELECT" ? [...select.options].map((option) => option.text).slice(0, 30) : [],
+      value: input.type === "file" ? input.files?.[0]?.name ?? "" : input.type === "checkbox" || input.type === "radio" ? (input.checked ? input.value || "on" : "") : element.tagName === "SELECT" ? select.selectedOptions[0]?.text ?? "" : input.value,
     };
   }));
 }
@@ -57,7 +59,7 @@ export async function readFormFields(page: Page): Promise<RawField[]> {
 export async function fillApplicationPage(
   page: Page,
   values: Record<string, string>,
-  options: { submit?: boolean; mode?: "PREPARE_ONLY" | "CONFIRMED_SUBMIT"; confirmationPhrase?: string; cvPath?: string; fill?: boolean; statusCode?: number },
+  options: { submit?: boolean; mode?: "PREPARE_ONLY" | "CONFIRMED_SUBMIT"; confirmationPhrase?: string; cvPath?: string; coverPath?: string; fill?: boolean; statusCode?: number },
 ) {
   const started = page.url();
   const body = await page.locator("body").innerText().catch(() => "");
@@ -71,27 +73,72 @@ export async function fillApplicationPage(
   const inspected = inspectFields(raw);
   const mapped = mapCandidateToFields(inspected, values);
   const adapter = adapterFor(page.url());
-  const manual = security ?? adapter.requiresManualAction({ text: body, fieldTypes: raw.map((field) => field.type), mapped });
-  if (manual && manual !== "unknown-required-field") {
-    return finish(page.url(), adapter.name, inspected, mapped, manual, false);
-  }
-  if (mapped.some((item) => item.status === "UNSUPPORTED")) {
-    return finish(page.url(), adapter.name, inspected, mapped, "unknown-required-field", false);
-  }
+  const manual = security ?? adapter.requiresManualAction({ text: body, fieldTypes: raw.map((field) => field.type), mapped })
+    ?? (mapped.some((item) => item.status === "UNSUPPORTED") ? "unknown-required-field" : null);
+  const defer = manual === "unknown-required-field" || manual === "required-field-needs-review";
+  if (manual && !defer) return finish(page.url(), adapter.name, inspected, mapped, manual, false);
   if (options.fill !== false) {
     for (const field of inspected) {
-      const answer = mapped.find((item) => item.name === (field.name || field.question));
-      if (!answer || answer.status !== "ANSWERED" || !answer.value) continue;
+      const answer = mapped.find((item) => item.name === (field.name || field.id || field.question));
       const selector = field.name ? `[name="${css(field.name)}"]` : field.id ? `[id="${css(field.id)}"]` : "";
       if (!selector) continue;
-      if (answer.classification === "RESUME" && options.cvPath) {
-        await page.locator(selector).setInputFiles(options.cvPath);
+      const control = page.locator(selector).first();
+      if (field.type === "checkbox") {
+        const action = checkboxAction({ classification: field.taxonomy, label: field.label, required: field.required, checked: Boolean(fieldLive(raw, field)) });
+        if (action === "check") await control.check({ timeout: 5000 });
         continue;
       }
-      if (field.type === "file") continue;
-      await page.locator(selector).fill(answer.value);
+      if (field.type === "file") {
+        const cover = field.taxonomy === "COVER_LETTER" || answer?.classification === "COVER_LETTER";
+        const decision = uploadDecision({
+          classification: cover ? "COVER_LETTER" : "RESUME",
+          attachedFile: fieldLive(raw, field),
+          expectedFile: (cover ? options.coverPath : options.cvPath)?.split(/[/\\]/).pop() ?? null,
+          valid: true,
+          supported: cover ? Boolean(options.coverPath) : Boolean(options.cvPath),
+        });
+        const path = cover ? options.coverPath : options.cvPath;
+        if (decision === "upload" && path) await control.setInputFiles(path);
+        continue;
+      }
+      if (!answer || answer.status !== "ANSWERED" || !answer.value) continue;
+      if (field.type === "select" || field.type === "radio") {
+        const option = matchOption(field.options, answer.value);
+        if (!option) continue;
+        if (field.type === "select") {
+          await control.selectOption({ label: option }, { timeout: 5000 });
+          continue;
+        }
+        const group = page.locator(`input[type="radio"][name="${css(field.name)}"]`);
+        const count = await group.count();
+        for (let index = 0; index < count; index += 1) {
+          const label = await group.nth(index).evaluate((element) => {
+            const input = element as HTMLInputElement;
+            return (input.labels?.[0]?.textContent ?? input.value ?? "").trim();
+          });
+          if (label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() === option.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()) {
+            await group.nth(index).check({ timeout: 5000 });
+            break;
+          }
+        }
+        continue;
+      }
+      const current = await control.inputValue().catch(() => "");
+      if (textFillPlan(current, answer.value) !== "fill") continue;
+      await control.fill(answer.value, { timeout: 5000 });
+      const confirmed = await control.inputValue().catch(() => "");
+      if (confirmed.trim().toLowerCase() !== answer.value.trim().toLowerCase() && field.required) {
+        return finish(page.url(), adapter.name, inspected, mapped, "FORM_VALIDATION_FAILED", true);
+      }
     }
   }
+  const afterBody = await page.locator("body").innerText().catch(() => "");
+  const afterHtml = await page.content().catch(() => "");
+  const afterBarrier = classifyObservedBarrier({ text: `${afterBody}\n${afterHtml}`, fieldTypes: raw.map((field) => field.type), statusCode: options.statusCode });
+  if (afterBarrier) return finish(page.url(), adapter.name, inspected, mapped, afterBarrier, true);
+  const validationProblem = visibleValidationProblem(afterBody);
+  if (validationProblem) return finish(page.url(), adapter.name, inspected, mapped, validationProblem, true);
+  if (manual) return finish(page.url(), adapter.name, inspected, mapped, manual, true);
   const allowed = options.mode === "CONFIRMED_SUBMIT" && submissionAllowed({
     phrase: options.confirmationPhrase ?? "",
     pageUrl: page.url(),
@@ -160,4 +207,8 @@ function audit(url: string, platform: string, inspected: ReturnType<typeof inspe
 
 function css(value: string) {
   return value.replace(/["\\]/g, "");
+}
+
+function fieldLive(raw: RawField[], field: { name: string; id: string }) {
+  return raw.find((item) => (field.name && item.name === field.name) || (field.id && item.id === field.id))?.value ?? "";
 }

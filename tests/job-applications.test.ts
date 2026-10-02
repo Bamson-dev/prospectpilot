@@ -1,5 +1,7 @@
 import { createServer, type Server } from "node:http";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { sustainableDailyAttempts } from "@/lib/applications/benchmark";
 import { planApplication, verificationFromPage } from "@/lib/applications/browser-plan";
@@ -166,6 +168,46 @@ describe("local application form", () => {
       expect(result.status).toBe("READY_FOR_HUMAN_SUBMISSION");
       expect(result.submitted).toBe(false);
       expect(await page.locator("[name=first_name]").inputValue()).toBe("Bamidele");
+    } finally {
+      await browser.close();
+      await close(server);
+    }
+  }, 30000);
+
+  it("fills select, radio, consent, and the current CV without submitting", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "prospectpilot-cv-"));
+    const cvPath = join(directory, "cv.pdf");
+    writeFileSync(cvPath, "current cv");
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "Content-Type": "text/html" });
+      response.end(`<html><body><form>
+        <div><label for="first_name">First name</label><input id="first_name" name="first_name" autocomplete="given-name" value="Bamidele" /></div>
+        <div><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" /></div>
+        <div><label for="city">Current location</label><select id="city" name="city"><option>Choose</option><option>London</option><option>Berlin</option></select></div>
+        <fieldset><legend>Where are you currently based</legend><label><input type="radio" name="based" value="London" /> London</label><label><input type="radio" name="based" value="Berlin" /> Berlin</label></fieldset>
+        <div><label for="terms">I agree to the terms</label><input id="terms" type="checkbox" name="terms" required /></div>
+        <div><label for="marketing">Email me product updates</label><input id="marketing" type="checkbox" name="marketing" /></div>
+        <div><label for="resume">Resume</label><input id="resume" type="file" name="resume" /></div>
+        <button type="submit">Send</button>
+      </form></body></html>`);
+    });
+    await listen(server);
+    const port = (server.address() as { port: number }).port;
+    const browser = await launchChromium();
+    try {
+      const page = await browser.newPage();
+      await page.goto(`http://127.0.0.1:${port}/`);
+      const result = await fillApplicationPage(page, { firstName: "Bamidele", email: "bamidele@example.com", location: "London" }, { mode: "PREPARE_ONLY", submit: true, cvPath });
+      expect(result.submitted).toBe(false);
+      expect(result.status).not.toBe("SUBMITTED");
+      expect(await page.locator("[name=first_name]").inputValue()).toBe("Bamidele");
+      expect(await page.locator("[name=email]").inputValue()).toBe("bamidele@example.com");
+      expect(await page.locator("[name=city]").inputValue()).toBe("London");
+      expect(await page.locator("[name=based][value=London]").isChecked()).toBe(true);
+      expect(await page.locator("[name=based][value=Berlin]").isChecked()).toBe(false);
+      expect(await page.locator("[name=terms]").isChecked()).toBe(true);
+      expect(await page.locator("[name=marketing]").isChecked()).toBe(false);
+      expect(await page.locator("[name=resume]").inputValue()).toContain("cv.pdf");
     } finally {
       await browser.close();
       await close(server);

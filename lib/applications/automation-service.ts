@@ -190,7 +190,7 @@ export async function runApplicationAutomation(applicationId: string) {
     const outcome = await inspectPublicApplication(
       application.applicationUrl,
       inspectionValues(application.candidate),
-      { fill: true, cvPath: cvTmpPath, coverPath: coverTmpPath, storageState: resumeToken, allowSubmit: process.env.APPLICATION_LIVE_SUBMIT === "true" }
+      { fill: true, cvPath: cvTmpPath, coverPath: coverTmpPath, storageState: resumeToken, allowSubmit: process.env.APPLICATION_LIVE_SUBMIT === "true", manualResume: Boolean(manualAction?.resolved) }
     );
     const stored = outcome.resolvedFields.map(persistDetectedField);
     for (const field of stored) {

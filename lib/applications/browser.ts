@@ -59,24 +59,35 @@ export async function readFormFields(page: Page): Promise<RawField[]> {
 export async function fillApplicationPage(
   page: Page,
   values: Record<string, string>,
-  options: { submit?: boolean; mode?: "PREPARE_ONLY" | "CONFIRMED_SUBMIT"; confirmationPhrase?: string; cvPath?: string; coverPath?: string; fill?: boolean; statusCode?: number },
+  options: { submit?: boolean; mode?: "PREPARE_ONLY" | "CONFIRMED_SUBMIT" | "AUTO_SUBMIT" | "MANUAL_RESUME"; confirmationPhrase?: string; cvPath?: string; coverPath?: string; fill?: boolean; statusCode?: number },
 ) {
   const started = page.url();
   const body = await page.locator("body").innerText().catch(() => "");
   const html = await page.content().catch(() => "");
   const raw = await readFormFields(page).catch(() => []);
   if (employerServerError(undefined, body)) {
-    return finish(page.url(), detectPlatform({ url: page.url() }), [], [], "EMPLOYER_SERVER_ERROR", false);
+    return finish(page, page.url(), detectPlatform({ url: page.url() }), [], [], "EMPLOYER_SERVER_ERROR", false);
   }
-  const security = classifyObservedBarrier({ text: `${body}\n${html}`, fieldTypes: raw.map((field) => field.type), statusCode: options.statusCode })
+  let security = classifyObservedBarrier({ text: `${body}\n${html}`, fieldTypes: raw.map((field) => field.type), statusCode: options.statusCode })
     ?? (unexpectedRedirect(started, page.url()) ? "LOGIN_REQUIRED" as const : null);
+    
+  if ((security === "CAPTCHA_REQUIRED" || security === "CLOUDFLARE_CHALLENGE" || security === "BOT_VERIFICATION") && options.mode === "MANUAL_RESUME") {
+    await page.waitForFunction(() => {
+      const t = document.body.innerText.toLowerCase();
+      return !t.includes("captcha") && !t.includes("cloudflare") && !t.includes("verify you are human") && !t.includes("are you a robot");
+    }, { timeout: 60000 }).catch(() => {});
+    const newBody = await page.locator("body").innerText().catch(() => "");
+    const newHtml = await page.content().catch(() => "");
+    security = classifyObservedBarrier({ text: `${newBody}\n${newHtml}`, fieldTypes: raw.map((field) => field.type), statusCode: options.statusCode });
+  }
+  
   const inspected = inspectFields(raw);
   const mapped = mapCandidateToFields(inspected, values);
   const adapter = adapterFor(page.url());
   const manual = security ?? adapter.requiresManualAction({ text: body, fieldTypes: raw.map((field) => field.type), mapped })
     ?? (mapped.some((item) => item.status === "UNSUPPORTED") ? "unknown-required-field" : null);
   const defer = manual === "unknown-required-field" || manual === "required-field-needs-review";
-  if (manual && !defer) return finish(page.url(), adapter.name, inspected, mapped, manual, false);
+  if (manual && !defer) return finish(page, page.url(), adapter.name, inspected, mapped, manual, false);
   if (options.fill !== false) {
     const sortedInspected = [...inspected].sort((a, b) => taxonomyFillPriority(a.taxonomy) - taxonomyFillPriority(b.taxonomy));
     for (const field of sortedInspected) {
@@ -129,25 +140,26 @@ export async function fillApplicationPage(
       await control.fill(answer.value, { timeout: 5000 });
       const confirmed = await control.inputValue().catch(() => "");
       if (confirmed.trim().toLowerCase() !== answer.value.trim().toLowerCase() && field.required) {
-        return finish(page.url(), adapter.name, inspected, mapped, "FORM_VALIDATION_FAILED", true);
+        return finish(page, page.url(), adapter.name, inspected, mapped, "FORM_VALIDATION_FAILED", true);
       }
     }
   }
   const afterBody = await page.locator("body").innerText().catch(() => "");
   const afterHtml = await page.content().catch(() => "");
   const afterBarrier = classifyObservedBarrier({ text: `${afterBody}\n${afterHtml}`, fieldTypes: raw.map((field) => field.type), statusCode: options.statusCode });
-  if (afterBarrier) return finish(page.url(), adapter.name, inspected, mapped, afterBarrier, true);
+  if (afterBarrier) return finish(page, page.url(), adapter.name, inspected, mapped, afterBarrier, true);
   const validationProblem = visibleValidationProblem(afterBody);
-  if (validationProblem) return finish(page.url(), adapter.name, inspected, mapped, validationProblem, true);
-  if (manual) return finish(page.url(), adapter.name, inspected, mapped, manual, true);
-  const allowed = options.mode === "CONFIRMED_SUBMIT" && submissionAllowed({
+  if (validationProblem) return finish(page, page.url(), adapter.name, inspected, mapped, validationProblem, true);
+  if (manual) return finish(page, page.url(), adapter.name, inspected, mapped, manual, true);
+  const allowed = (options.mode === "CONFIRMED_SUBMIT" || options.mode === "AUTO_SUBMIT") && submissionAllowed({
     phrase: options.confirmationPhrase ?? "",
     pageUrl: page.url(),
     liveFlag: process.env.APPLICATION_LIVE_SUBMIT === "true",
+    mode: options.mode,
   });
-  if (!allowed) return finish(page.url(), detectPlatform({ url: page.url() }), inspected, mapped, null, true);
+  if (!allowed) return finish(page, page.url(), detectPlatform({ url: page.url() }), inspected, mapped, null, true);
   const submit = page.locator("button[type='submit'], input[type='submit']").first();
-  if (await submit.count() === 0) return finish(page.url(), adapter.name, inspected, mapped, "no submit control", true);
+  if (await submit.count() === 0) return finish(page, page.url(), adapter.name, inspected, mapped, "no submit control", true);
   await submit.click();
   const after = await page.locator("body").innerText();
   const verdict = verificationFromPage(after);
@@ -158,11 +170,13 @@ export async function fillApplicationPage(
     reason: verdict.verified ? "confirmed" : "unconfirmed",
     audit: audit(page.url(), adapter.name, inspected, mapped, verdict.verified ? null : "unconfirmed", verdict.verified ? "SUBMITTED" : "REQUIRES_MANUAL_ACTION", verdict.verified),
     resolvedFields: fieldSnapshot(inspected, mapped),
+    storageState: null,
   };
 }
 
-function finish(url: string, platform: string, inspected: ReturnType<typeof inspectFields>, mapped: ReturnType<typeof mapCandidateToFields>, manual: string | null, filled: boolean) {
+async function finish(page: Page, url: string, platform: string, inspected: ReturnType<typeof inspectFields>, mapped: ReturnType<typeof mapCandidateToFields>, manual: string | null, filled: boolean) {
   const blocked = Boolean(manual);
+  const state = blocked ? await page.context().storageState().catch(() => null) : null;
   return {
     filled,
     submitted: false,
@@ -170,6 +184,7 @@ function finish(url: string, platform: string, inspected: ReturnType<typeof insp
     reason: manual ?? "pause before submit",
     audit: audit(url, platform, inspected, mapped, manual, blocked ? "REQUIRES_MANUAL_ACTION" : "READY_FOR_HUMAN_SUBMISSION", false),
     resolvedFields: fieldSnapshot(inspected, mapped),
+    storageState: state,
   };
 }
 

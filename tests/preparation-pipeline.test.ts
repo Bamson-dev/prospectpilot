@@ -121,7 +121,7 @@ describe("evidence-backed preparation", () => {
     expect(pack.answers.some((answer) => answer.reviewState === "REVIEW_REQUIRED")).toBe(true);
     expect(canTransition("REQUIRES_REVIEW", "SUBMITTED")).toBe(false);
     expect(canTransition("REQUIRES_MANUAL_ACTION", "SUBMITTED")).toBe(false);
-    expect(canTransition("REQUIRES_MANUAL_ACTION", "SUBMITTING")).toBe(false);
+    expect(canTransition("REQUIRES_MANUAL_ACTION", "SUBMITTING")).toBe(true);
     expect(automaticSubmissionAllowed()).toBe(false);
     expect(pipelineState("REQUIRES_MANUAL_ACTION")).toBe("REQUIRES_MANUAL_ACTION");
     expect(pipelineState("APPROVED")).toBe("APPROVED");

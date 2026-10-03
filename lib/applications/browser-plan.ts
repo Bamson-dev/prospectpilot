@@ -38,7 +38,7 @@ export function planApplication(input: {
     return { provider: input.provider, steps: [...base, "manual"], submit: false, reason: "unknown required field" };
   }
   if (input.mode === "AUTO_SUBMIT") {
-    return { provider: input.provider, steps: [...base, "pause"], submit: false, reason: "live submission is disabled" };
+    return { provider: input.provider, steps: [...base, "submit", "verify"], submit: true, reason: "autonomous submission" };
   }
   return { provider: input.provider, steps: [...base, "pause"], submit: false, reason: "pause before submit" };
 }
@@ -51,5 +51,5 @@ export function verificationFromPage(text: string) {
   if (/captcha|cloudflare|verify you are human|access denied/.test(lower)) {
     return { verified: false, status: "REQUIRES_MANUAL_ACTION" as const };
   }
-  return { verified: false, status: "VERIFICATION_REQUIRED" as const };
+  return { verified: false, status: "SUBMISSION_UNVERIFIED" as const };
 }

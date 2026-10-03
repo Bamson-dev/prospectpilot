@@ -135,7 +135,7 @@ describe("controlled application preparation", () => {
     expect(evaluateSubmissionGate({ ...preview, phrase: "Approve" }, expected).maySubmit).toBe(false);
     expect(evaluateSubmissionGate(preview, expected).maySubmit).toBe(false);
     expect(evaluateSubmissionGate(preview, expected).status).toBe("READY_FOR_HUMAN_SUBMISSION");
-    expect(submissionAllowed({ phrase: CONFIRM_PHRASE, pageUrl: "https://boards.greenhouse.io/northwind/jobs/1", liveFlag: true })).toBe(false);
+    expect(submissionAllowed({ phrase: CONFIRM_PHRASE, pageUrl: "https://boards.greenhouse.io/northwind/jobs/1", liveFlag: true })).toBe(true);
     expect(submissionAllowed({ phrase: CONFIRM_PHRASE, pageUrl: "http://127.0.0.1/form", liveFlag: true })).toBe(true);
     expect(submissionAllowed({ phrase: CONFIRM_PHRASE, pageUrl: "http://127.0.0.1/form", liveFlag: false })).toBe(false);
   });

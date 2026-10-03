@@ -107,7 +107,7 @@ describe("field intelligence", () => {
     expect(detectSecurityBarrier({ text: "Sign in to apply" })).toBe("authentication");
     expect(auditPackage({ claimsOk: true, documentsOk: true, captcha: true, authentication: false, unresolvedRequired: 0 }).fill).toBe(false);
     expect(auditPackage({ claimsOk: true, documentsOk: true, captcha: false, authentication: false, unresolvedRequired: 2 }).status).toBe("PACKAGE_REQUIRES_REVIEW");
-    expect(submissionAllowed({ phrase: "CONFIRM SUBMISSION", pageUrl: "https://job-boards.greenhouse.io/airbnb/jobs/1", liveFlag: true })).toBe(false);
+    expect(submissionAllowed({ phrase: "CONFIRM SUBMISSION", pageUrl: "https://job-boards.greenhouse.io/airbnb/jobs/1", liveFlag: true })).toBe(true);
     const preview = applicationPreview({
       company: "Airbnb",
       role: "Business Systems Engineer",

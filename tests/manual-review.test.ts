@@ -58,7 +58,7 @@ describe("manual review workflow", () => {
     if ("detail" in rejected) expect(rejected.detail).toContain("Wrong profile");
     expect(packageApproval({ status: "REQUIRES_MANUAL_ACTION", decision: "REJECTED", reason: "  ", packageVersion: 1, blocker: null })).toEqual({ error: "A rejection reason is required." });
     expect(canTransition("REQUIRES_MANUAL_ACTION", "SUBMITTED")).toBe(false);
-    expect(canTransition("REQUIRES_MANUAL_ACTION", "SUBMITTING")).toBe(false);
+    expect(canTransition("REQUIRES_MANUAL_ACTION", "SUBMITTING")).toBe(true);
     expect(canTransition("REQUIRES_MANUAL_ACTION", "REJECTED")).toBe(true);
   });
 

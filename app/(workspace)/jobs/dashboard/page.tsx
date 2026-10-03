@@ -21,9 +21,6 @@ export default async function DashboardPage() {
     where: { organizationId: organization.id, createdAt: { gte: today } }
   });
 
-  // Using fit snapshots for analysis counting
-
-
   const fitSnapshots = await prisma.jobFitSnapshot.findMany({
     where: { vacancy: { organizationId: organization.id, createdAt: { gte: today } } },
     select: { recommendation: true }
@@ -38,22 +35,38 @@ export default async function DashboardPage() {
     else reviewCount++;
   }
 
+  // Fetch applications for Operational Counter
+  const target = 500; // Target configurable in future
   const applications = await prisma.jobApplication.findMany({
-    where: { organizationId: organization.id },
-    select: { status: true }
+    where: { organizationId: organization.id, updatedAt: { gte: today } },
+    select: { status: true, submittedAt: true, id: true }
   });
 
-  let ready = 0;
-  let preparing = 0;
-  let blocked = 0;
-  let needsReview = 0;
-  
+  let verifiedSubmitted = 0;
+  let unverified = 0;
+  let manualAction = 0;
+  let failed = 0;
+  const applicationIds = new Set(applications.map(a => a.id));
+
   for (const app of applications) {
-    if (app.status === "APPROVED" || app.status === "READY_FOR_SUBMISSION" || app.status === "READY_TO_SUBMIT") ready++;
-    else if (app.status === "READY_FOR_REVIEW" || app.status === "REQUIRES_REVIEW" || app.status === "REQUIRES_MANUAL_ACTION") needsReview++;
-    else if (app.status.includes("REQUIRED") || app.status.includes("LIMITED") || app.status.includes("CHALLENGE") || app.status.includes("NOT_FOUND")) blocked++;
-    else preparing++;
+    if (app.status === "SUBMITTED" || app.status === "VERIFIED" || app.submittedAt) verifiedSubmitted++;
+    if (app.status === "SUBMISSION_UNVERIFIED") unverified++;
+    if (app.status === "REQUIRES_MANUAL_ACTION") manualAction++;
+    if (app.status === "FAILED" || app.status.includes("REQUIRED") && app.status !== "REQUIRES_MANUAL_ACTION" || app.status.includes("CHALLENGE")) failed++;
   }
+
+  // Count distinct attempts made today
+  const attempts = await prisma.applicationBrowserSession.groupBy({
+    by: ['applicationId'],
+    where: { 
+      applicationId: { in: Array.from(applicationIds) }, 
+      endedAt: { gte: today },
+      status: "COMPLETED" // Or reached step that attempted submit
+    },
+    _count: true
+  });
+  const attemptCount = attempts.length;
+  const remaining = Math.max(0, target - attemptCount);
 
   return (
     <div>
@@ -89,24 +102,36 @@ export default async function DashboardPage() {
         </Panel>
 
         <Panel className="lg:col-span-2">
-          <h2 className="text-xl font-display mb-4">Command Center Queue</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+          <h2 className="text-xl font-display mb-4">Autonomous Application Queue</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 text-center">
             <div className="p-4 bg-muted/20 rounded">
-              <p className="text-3xl font-display">{preparing}</p>
-              <p className="text-sm text-muted mt-1">Preparing</p>
+              <p className="text-3xl font-display">{target}</p>
+              <p className="text-xs text-muted mt-1 uppercase tracking-wider">Target</p>
             </div>
-            <div className="p-4 bg-muted/20 rounded border-2 border-primary/20">
-              <p className="text-3xl font-display">{needsReview}</p>
-              <p className="text-sm text-muted mt-1">Needs Human Review</p>
-              <Link href="/jobs/applications?filter=REVIEW_REQUIRED" className="mt-2 text-xs text-primary block">View Queue &rarr;</Link>
-            </div>
-            <div className="p-4 bg-muted/20 rounded">
-              <p className="text-3xl font-display">{ready}</p>
-              <p className="text-sm text-muted mt-1">Approved & Ready</p>
+            <div className="p-4 bg-primary/10 rounded border border-primary/20">
+              <p className="text-3xl font-display text-primary">{verifiedSubmitted}</p>
+              <p className="text-xs text-primary/80 mt-1 uppercase tracking-wider">Verified Submitted</p>
             </div>
             <div className="p-4 bg-muted/20 rounded">
-              <p className="text-3xl font-display text-destructive">{blocked}</p>
-              <p className="text-sm text-muted mt-1">Blocked / Requires Auth</p>
+              <p className="text-3xl font-display">{attemptCount}</p>
+              <p className="text-xs text-muted mt-1 uppercase tracking-wider">Attempts</p>
+            </div>
+            <div className="p-4 bg-muted/20 rounded">
+              <p className="text-3xl font-display">{unverified}</p>
+              <p className="text-xs text-muted mt-1 uppercase tracking-wider">Unverified</p>
+            </div>
+            <div className="p-4 bg-muted/20 rounded">
+              <p className="text-3xl font-display">{manualAction}</p>
+              <p className="text-xs text-muted mt-1 uppercase tracking-wider">Manual Action</p>
+              <Link href="/applications/manual-actions" className="text-primary text-xs mt-1 block hover:underline">View &rarr;</Link>
+            </div>
+            <div className="p-4 bg-muted/20 rounded">
+              <p className="text-3xl font-display text-destructive">{failed}</p>
+              <p className="text-xs text-muted mt-1 uppercase tracking-wider">Failed</p>
+            </div>
+            <div className="p-4 bg-muted/20 rounded">
+              <p className="text-3xl font-display opacity-50">{remaining}</p>
+              <p className="text-xs text-muted mt-1 uppercase tracking-wider">Remaining</p>
             </div>
           </div>
         </Panel>

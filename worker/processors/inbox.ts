@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
 import { classifyJobId, gmailReplyId, inboxImportDecision } from "@/lib/email/message-policy";
 import { AppError } from "@/lib/errors";
+import { classifyProviderFailure, isPermanentProviderFailure } from "@/lib/provider-errors";
 import { queueJob } from "@/lib/jobs";
 
 export async function processInboxSync(organizationId: string) {
@@ -17,7 +18,17 @@ export async function processInboxSync(organizationId: string) {
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(20000),
     });
-    if (!list.ok) throw new AppError(`Gmail inbox sync failed with status ${list.status}.`);
+    if (!list.ok) {
+      const body = await list.text().catch(() => "");
+      const kind = classifyProviderFailure(list.status, body);
+      if (isPermanentProviderFailure(kind)) {
+        await prisma.emailAccount.update({
+          where: { id: account.id },
+          data: { status: "RESTRICTED", lastError: `Inbox sync restricted: ${kind}` },
+        });
+      }
+      throw new AppError(`Gmail inbox sync failed with status ${list.status}.`);
+    }
     const payload = (await list.json()) as { messages?: Array<{ id: string }> };
     for (const item of payload.messages ?? []) {
       await importGmailMessage(organizationId, accessToken, item.id);
@@ -44,7 +55,55 @@ async function importGmailMessage(organizationId: string, accessToken: string, m
     where: { organizationId, email },
     include: { prospect: true },
   });
-  if (!contact) return;
+  
+  if (!contact) {
+    // Attempt to match EmployerReply for a JobApplication
+    const domain = email.split("@")[1]?.toLowerCase();
+    if (!domain) return;
+    const application = await prisma.jobApplication.findFirst({
+      where: {
+        organizationId,
+        vacancy: {
+          OR: [
+            { companyDomain: domain },
+            { applicationUrl: { contains: domain } }
+          ]
+        }
+      },
+      include: { vacancy: true },
+      orderBy: { createdAt: "desc" }
+    });
+    
+    if (application) {
+      const replyId = gmailReplyId(messageId) || messageId;
+      const stored = await prisma.employerReply.findUnique({ where: { messageId: replyId } });
+      if (stored) return;
+      
+      const reply = await prisma.employerReply.create({
+        data: {
+          organizationId,
+          applicationId: application.id,
+          messageId: replyId,
+          threadId: payload.payload?.headers?.find(h => h.name.toLowerCase() === "thread-id")?.value || replyId,
+          fromEmail: email,
+          fromName: from.replace(/<[^>]+>/g, "").trim(),
+          subject,
+          body: payload.snippet || "(No preview returned)",
+        }
+      });
+      // Optionally queue a job for AI classification of this reply.
+      await queueJob({
+        id: `employer-reply-classify-${reply.id}`,
+        organizationId,
+        prospectId: application.candidateId, // reuse field or use separate queue
+        queue: "employer-reply",
+        name: "employer_reply.classify",
+        payload: { replyId: reply.id },
+      });
+    }
+    return;
+  }
+
   const replyId = gmailReplyId(messageId);
   const stored = replyId ? await prisma.reply.findUnique({ where: { id: replyId }, select: { id: true } }) : null;
   if (inboxImportDecision(messageId, stored ? [stored.id] : []) !== "store") return;
@@ -112,4 +171,31 @@ async function gmailAccessToken(refreshToken: string) {
   const payload = (await response.json()) as { access_token?: string };
   if (!payload.access_token) throw new AppError("Gmail did not return an access token.");
   return payload.access_token;
+}
+
+import { classifyAndDraftEmployerReply } from "@/lib/applications/email-ai";
+
+export async function processEmployerReply(replyId: string) {
+  const reply = await prisma.employerReply.findUnique({
+    where: { id: replyId },
+    include: { application: { include: { vacancy: true, candidate: true } } }
+  });
+  if (!reply) return;
+  
+  const { classification, suggestedDraft } = await classifyAndDraftEmployerReply(
+    reply.subject || "",
+    reply.body,
+    reply.application.vacancy.companyName,
+    reply.application.vacancy.title,
+    `${reply.application.candidate.firstName} ${reply.application.candidate.lastName}`
+  );
+
+  await prisma.employerReply.update({
+    where: { id: replyId },
+    data: {
+      classification,
+      suggestedDraft,
+      draftStatus: "PENDING"
+    }
+  });
 }

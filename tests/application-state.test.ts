@@ -23,7 +23,7 @@ describe("application state model", () => {
     expect(statusAfterBlock("CLOUDFLARE_CHALLENGE")).toBe("CLOUDFLARE_CHALLENGE");
     expect(statusAfterBlock("APPLICATION_FORM_NOT_FOUND")).toBe("FORM_NOT_FOUND");
     expect(statusAfterBlock("SECURITY_BLOCK")).toBe("REQUIRES_MANUAL_ACTION");
-    expect(statusAfterBlock("verification")).toBe("VERIFICATION_REQUIRED");
+    expect(statusAfterBlock("verification")).toBe("SUBMISSION_UNVERIFIED");
     expect(statusAfterBlock(null)).toBe("REQUIRES_MANUAL_ACTION");
   });
 
@@ -31,9 +31,9 @@ describe("application state model", () => {
     expect(pipelineState("SUBMITTING")).toBe("SUBMITTING");
     expect(pipelineState("SUBMITTED")).toBe("SUBMITTED");
     expect(pipelineState("VERIFIED")).toBe("VERIFIED");
-    expect(pipelineState("VERIFICATION_REQUIRED")).toBe("VERIFICATION_REQUIRED");
+    expect(pipelineState("SUBMISSION_UNVERIFIED")).toBe("SUBMISSION_UNVERIFIED");
     expect(pipelineState("VERIFICATION_PENDING")).toBe("VERIFICATION_PENDING");
-    expect(pipelineState("SUBMISSION_UNCONFIRMED")).toBe("SUBMISSION_UNCONFIRMED");
+
     expect(pipelineState("CAPTCHA_REQUIRED")).toBe("CAPTCHA_REQUIRED");
     expect(pipelineState("RATE_LIMITED")).toBe("RATE_LIMITED");
     expect(pipelineState("REQUIRES_MANUAL_ACTION")).toBe("REQUIRES_MANUAL_ACTION");
@@ -52,11 +52,11 @@ describe("application state model", () => {
     expect(isRetryableState("RATE_LIMITED")).toBe(true);
     expect(isRetryableState("CAPTCHA_REQUIRED")).toBe(false);
     expect(canTransition("SUBMITTING", "SUBMITTED")).toBe(true);
-    expect(canTransition("SUBMITTING", "SUBMISSION_UNCONFIRMED")).toBe(true);
+    expect(canTransition("SUBMITTING", "SUBMISSION_UNVERIFIED")).toBe(true);
     expect(canTransition("SUBMITTED", "VERIFICATION_PENDING")).toBe(true);
-    expect(canTransition("SUBMISSION_UNCONFIRMED", "VERIFICATION_PENDING")).toBe(true);
-    expect(canTransition("SUBMISSION_UNCONFIRMED", "SUBMITTED")).toBe(false);
-    expect(isSuccessfulSubmissionState("SUBMISSION_UNCONFIRMED")).toBe(false);
+    expect(canTransition("SUBMISSION_UNVERIFIED", "VERIFICATION_PENDING")).toBe(false);
+    expect(canTransition("SUBMISSION_UNVERIFIED", "SUBMITTED")).toBe(false);
+    expect(isSuccessfulSubmissionState("SUBMISSION_UNVERIFIED")).toBe(false);
     expect(isSuccessfulSubmissionState("SUBMITTED")).toBe(true);
     expect(isSuccessfulSubmissionState("VERIFIED")).toBe(true);
   });
@@ -69,7 +69,7 @@ describe("application state model", () => {
     expect(canTransition("REJECTED", "READY_FOR_SUBMISSION")).toBe(false);
     expect(canTransition("WITHDRAWN", "SUBMITTING")).toBe(false);
     expect(canTransition("REQUIRES_MANUAL_ACTION", "SUBMITTED")).toBe(false);
-    expect(canTransition("REQUIRES_MANUAL_ACTION", "SUBMITTING")).toBe(false);
+    expect(canTransition("REQUIRES_MANUAL_ACTION", "SUBMITTING")).toBe(true);
     expect(canTransition("REQUIRES_MANUAL_ACTION", "READY_FOR_REVIEW")).toBe(true);
     expect(canTransition("REQUIRES_MANUAL_ACTION", "CAPTCHA_REQUIRED")).toBe(false);
     expect(isBlockerState("CAPTCHA_REQUIRED")).toBe(true);

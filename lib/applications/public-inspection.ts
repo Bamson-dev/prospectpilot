@@ -17,8 +17,9 @@ export type InspectionOutcome = {
   submitted: boolean;
   reason: string | null;
   blocker: PreparationBlocker | null;
-  status: "REQUIRES_MANUAL_ACTION" | "READY_FOR_HUMAN_SUBMISSION";
+  status: "REQUIRES_MANUAL_ACTION" | "READY_FOR_HUMAN_SUBMISSION" | "SUBMITTED" | "SUBMISSION_UNVERIFIED";
   fields: number;
+  storageState?: unknown;
   resolvedFields: DetectedField[];
   platform: string;
   ms: number;
@@ -51,13 +52,20 @@ export function inspectionIsBlocked(outcome: Pick<InspectionOutcome, "submitted"
   return Boolean(outcome.reason && outcome.reason !== "pause before submit");
 }
 
-export async function inspectPublicApplication(url: string, values: Record<string, string>, options?: { fill?: boolean; cvPath?: string; coverPath?: string }): Promise<InspectionOutcome> {
+export async function inspectPublicApplication(url: string, values: Record<string, string>, options?: { fill?: boolean; cvPath?: string; coverPath?: string; storageState?: string; allowSubmit?: boolean; manualResume?: boolean }): Promise<InspectionOutcome> {
   const started = Date.now();
   await assertResolvedPublicUrl(url);
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: options?.manualResume ? false : true });
   try {
-    const page = await browser.newPage();
+    const contextOptions: Record<string, unknown> = {};
+    if (options?.storageState) {
+      try {
+        contextOptions.storageState = JSON.parse(options.storageState);
+      } catch {}
+    }
+    const context = await browser.newContext(contextOptions);
+    const page = await context.newPage();
     let response: { status(): number } | null = null;
     try {
       response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
@@ -69,23 +77,44 @@ export async function inspectPublicApplication(url: string, values: Record<strin
     if (employerServerError(response?.status(), body)) {
       return stopped("EMPLOYER_SERVER_ERROR", Date.now() - started, `HTTP ${response?.status() ?? "error"}`);
     }
-    const result = await fillApplicationPage(page, values, { fill: options?.fill === true, mode: "PREPARE_ONLY", submit: false, statusCode: response?.status(), cvPath: options?.cvPath, coverPath: options?.coverPath });
-    if (result.submitted) return stopped("SECURITY_BLOCK", Date.now() - started, undefined, result.audit.platform, result.audit.fieldsDetected, result.audit.metrics);
+    const result = await fillApplicationPage(page, values, { fill: options?.fill === true, mode: options?.manualResume ? "MANUAL_RESUME" : (options?.allowSubmit ? "AUTO_SUBMIT" : "PREPARE_ONLY"), submit: options?.allowSubmit === true, statusCode: response?.status(), cvPath: options?.cvPath, coverPath: options?.coverPath });
+    if (result.submitted && !options?.allowSubmit) return stopped("SECURITY_BLOCK", Date.now() - started, undefined, result.audit.platform, result.audit.fieldsDetected, result.audit.metrics);
+    if (result.submitted && options?.allowSubmit) {
+      return {
+        opened: true,
+        submitted: true,
+        reason: result.reason,
+        blocker: null,
+        status: "SUBMITTED",
+        fields: result.audit.fieldsDetected,
+        resolvedFields: result.resolvedFields,
+        platform: result.audit.platform,
+        ms: Date.now() - started,
+        metrics: result.audit.metrics,
+        storageState: result.storageState,
+      };
+    }
     if (result.audit.fieldsDetected === 0 && preparationBlocker(result.reason) == null) {
       return stopped("APPLICATION_FORM_NOT_FOUND", Date.now() - started, undefined, result.audit.platform, 0, result.audit.metrics);
     }
     const blocker = preparationBlocker(result.reason);
+    
+    let returnedStatus: InspectionOutcome["status"] = "READY_FOR_HUMAN_SUBMISSION";
+    if (blocker || result.status === "REQUIRES_MANUAL_ACTION") returnedStatus = "REQUIRES_MANUAL_ACTION";
+    else if (result.status === "SUBMISSION_UNVERIFIED") returnedStatus = "SUBMISSION_UNVERIFIED";
+
     return {
       opened: true,
       submitted: false,
       reason: blocker ?? result.reason,
       blocker,
-      status: blocker || result.status === "REQUIRES_MANUAL_ACTION" ? "REQUIRES_MANUAL_ACTION" : "READY_FOR_HUMAN_SUBMISSION",
+      status: returnedStatus,
       fields: result.audit.fieldsDetected,
       resolvedFields: result.resolvedFields,
       platform: result.audit.platform,
       ms: Date.now() - started,
       metrics: result.audit.metrics,
+      storageState: result.storageState,
     };
   } finally {
     await browser.close();
@@ -94,7 +123,7 @@ export async function inspectPublicApplication(url: string, values: Record<strin
 
 function stopped(blocker: PreparationBlocker, ms: number, note?: string, platform = "UNKNOWN", fields = 0, metrics: PreparationAudit["metrics"] | null = null): InspectionOutcome {
   const opened = blocker === "EMPLOYER_SERVER_ERROR" || blocker === "APPLICATION_FORM_NOT_FOUND" || blocker === "SECURITY_BLOCK";
-  return { opened, submitted: false, reason: note ? `${blocker} ${note}` : blocker, blocker, status: "REQUIRES_MANUAL_ACTION", fields, resolvedFields: [], platform, ms, metrics };
+  return { opened, submitted: false, reason: note ? `${blocker} ${note}` : blocker, blocker, status: "REQUIRES_MANUAL_ACTION", fields, resolvedFields: [], platform, ms, metrics, storageState: null };
 }
 
 export async function attachBrowserInspection(applicationId: string) {

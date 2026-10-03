@@ -739,7 +739,6 @@ enum ApplicationPackageStatus {
   READY_TO_SUBMIT
   SUBMITTING
   SUBMITTED
-  VERIFICATION_REQUIRED
   FAILED
   REQUIRES_MANUAL_ACTION
   WITHDRAWN
@@ -757,7 +756,7 @@ enum ApplicationPackageStatus {
   AUTH_REQUIRED
   CLOUDFLARE_CHALLENGE
   FORM_NOT_FOUND
-  SUBMISSION_UNCONFIRMED
+  SUBMISSION_UNVERIFIED
   REJECTED_BY_EMPLOYER
   OFFER
 }
@@ -1243,6 +1242,8 @@ model JobApplication {
   automationRuns   ApplicationAutomationRun[]
   browserSessions  ApplicationBrowserSession[]
   fieldResolutions ApplicationFieldResolution[]
+  manualAction     ApplicationManualAction?
+  employerReplies  EmployerReply[]
 
   @@unique([organizationId, vacancyId, candidateId])
   @@index([organizationId, status, createdAt])
@@ -1375,4 +1376,45 @@ model ApplicationFieldResolution {
 
   @@unique([automationRunId, fieldKey])
   @@index([applicationId])
+}
+
+model ApplicationManualAction {
+  id             String         @id @default(cuid())
+  applicationId  String         @unique
+  organizationId String
+  vacancyId      String
+  companyName    String
+  applicationUrl String
+  blockerType    String
+  blockerMessage String?
+  currentStep    String
+  browserStatus  String?
+  retryCount     Int            @default(0)
+  resumeToken    String?        @db.Text
+  resolved       Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  application    JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, resolved])
+}
+
+model EmployerReply {
+  id             String         @id @default(cuid())
+  organizationId String
+  applicationId  String
+  messageId      String         @unique
+  threadId       String
+  fromEmail      String
+  fromName       String?
+  subject        String?
+  body           String         @db.Text
+  receivedAt     DateTime       @default(now())
+  classification String         @default("UNKNOWN")
+  suggestedDraft String?        @db.Text
+  draftStatus    String         @default("PENDING")
+  createdAt      DateTime       @default(now())
+  application    JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, receivedAt])
 }

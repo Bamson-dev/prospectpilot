@@ -91,7 +91,18 @@ export async function processJobDiscovery(organizationId: string, runId: string)
   const pref = run.candidate.preference;
   const locations = pref?.remoteOnly ? ["remote"] : (pref?.locations?.length ? pref.locations : ["remote"]);
   const dailyTarget = pref?.dailyTarget ?? 500;
-  const limitPerQuery = Math.min(50, Math.ceil(dailyTarget / queries.size));
+  
+  const expandedQueries = new Set<string>();
+  for (const query of queries) {
+    expandedQueries.add(`${query} site:ashbyhq.com`);
+    expandedQueries.add(`${query} site:jobs.workable.com`);
+    expandedQueries.add(`${query} site:jobs.smartrecruiters.com`);
+    expandedQueries.add(`${query} site:greenhouse.io`);
+    expandedQueries.add(`${query} site:lever.co`);
+    expandedQueries.add(query); // direct employer career pages
+  }
+
+  const limitPerQuery = Math.min(50, Math.ceil(dailyTarget / expandedQueries.size));
   
   let totalQueries = 0;
   let totalRawResults = 0;
@@ -104,7 +115,7 @@ export async function processJobDiscovery(organizationId: string, runId: string)
   let totalQualificationJobsQueued = 0;
   let rateLimitHit = false;
 
-  for (const query of queries) {
+  for (const query of expandedQueries) {
     for (const loc of locations) {
       if (rateLimitHit) break;
       const fullQuery = `${query} ${loc}`.trim();

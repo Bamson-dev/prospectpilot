@@ -10,7 +10,7 @@ import { recoverStaleAutomationRuns, runApplicationAutomation } from "@/lib/appl
 import { processApplicationFollowUp, processApplicationPreparation, processApplicationSubmit, processJobDiscovery, processJobDiscoveryScheduler } from "@/worker/processors/job-applications";
 import { processDiscovery } from "@/worker/processors/discovery";
 import { processDueFollowUps, processReply } from "@/worker/processors/follow-up";
-import { processInboxSync } from "@/worker/processors/inbox";
+import { processInboxSync, processEmployerReply } from "@/worker/processors/inbox";
 import { processOutreach } from "@/worker/processors/outreach";
 import { processQualification } from "@/worker/processors/qualification";
 import { processResearch } from "@/worker/processors/research";
@@ -87,6 +87,12 @@ start("reply-analysis", async (data) => {
   await processReply(replyId);
 });
 
+start("employer-reply", async (data) => {
+  const replyId = readPayload(data, "replyId");
+  if (!replyId) throw new Error("Employer reply analysis is missing a reply.");
+  await processEmployerReply(replyId);
+});
+
 const followUps = new Worker(
   "follow-up",
   async (job) => {
@@ -111,23 +117,23 @@ followUps.on("failed", (job, error) => {
   logInfo("worker.job_failed", { queue: "follow-up", jobId: job?.id, message: error.message });
 });
 
-start("job-discovery", async (data) => {
-  if (!data.organizationId) throw new Error("Job discovery is missing an organization.");
-  await processJobDiscovery(data.organizationId, data.runId);
-});
-
-const jobDiscoveryScheduler = new Worker(
+const jobDiscoveryWorker = new Worker(
   "job-discovery",
   async (job) => {
     if (job.name === "scan") {
       await processJobDiscoveryScheduler();
       return;
     }
+    const data = job.data as Record<string, string>;
+    await runJob(data.jobId, async () => {
+      if (!data.organizationId) throw new Error("Job discovery is missing an organization.");
+      await processJobDiscovery(data.organizationId, data.runId);
+    });
   },
-  { connection, concurrency: 1, settings: { backoffStrategy: retryBackoff } }
+  { connection, concurrency: concurrency("job-discovery"), settings: { backoffStrategy: retryBackoff } }
 );
-jobDiscoveryScheduler.on("failed", (job, error) => {
-  logInfo("worker.job_failed", { queue: "job-discovery-scheduler", jobId: job?.id, message: error.message });
+jobDiscoveryWorker.on("failed", (job, error) => {
+  logInfo("worker.job_failed", { queue: "job-discovery", jobId: job?.id, message: error.message });
 });
 
 for (const name of ["job-analysis", "job-fit"] as const) {

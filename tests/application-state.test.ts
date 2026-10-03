@@ -76,6 +76,12 @@ describe("application state model", () => {
     expect(isBlockerState("REQUIRES_MANUAL_ACTION")).toBe(false);
     expect(pipelineState("APPROVED")).toBe("APPROVED");
     expect(pipelineState("READY_FOR_SUBMISSION")).toBe("READY");
+    
+    // Milestone H Additions
+    expect(isTerminalApplicationState("REJECTED_BY_EMPLOYER")).toBe(true);
+    expect(isTerminalApplicationState("OFFER")).toBe(true);
+    expect(canTransition("REJECTED_BY_EMPLOYER", "READY_FOR_SUBMISSION")).toBe(false);
+    expect(canTransition("OFFER", "SUBMITTED")).toBe(false);
   });
 
   it("allows automatic submission only through the existing safety gates", () => {

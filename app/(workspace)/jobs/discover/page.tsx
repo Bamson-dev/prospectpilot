@@ -9,16 +9,21 @@ import { prisma } from "@/lib/db";
 
 export const metadata = { title: "Discover jobs" };
 
-export default async function DiscoverJobsPage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string }> }) {
+export default async function DiscoverJobsPage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string; page?: string }> }) {
   const { organization } = await requireOrganization();
   const query = await searchParams;
-  const [vacancies, runs, activity, stats] = await Promise.all([
-    prisma.jobVacancy.findMany({ where: { organizationId: organization.id }, orderBy: { discoveredAt: "desc" }, take: 30, include: { fit: true, _count: { select: { requirements: true } } } }),
+  const page = Math.max(1, parseInt(query.page || "1", 10) || 1);
+  const take = 30;
+  const skip = (page - 1) * take;
+  const [vacancies, totalCount, runs, activity, stats] = await Promise.all([
+    prisma.jobVacancy.findMany({ where: { organizationId: organization.id }, orderBy: { discoveredAt: "desc" }, take, skip, include: { fit: true, _count: { select: { requirements: true } } } }),
+    prisma.jobVacancy.count({ where: { organizationId: organization.id } }),
     prisma.backgroundJob.findMany({ where: { organizationId: organization.id, queue: "job-discovery" }, orderBy: { createdAt: "desc" }, take: 8 }),
     prisma.activityLog.findFirst({ where: { organizationId: organization.id, action: "job.discovery_completed" }, orderBy: { createdAt: "desc" } }),
     applicationStats(organization.id),
   ]);
   const summary = readSummary(activity?.detail);
+  const totalPages = Math.max(1, Math.ceil(totalCount / take));
   return (
     <div>
       <PageHeader title="Discover jobs" detail="Public Greenhouse and Lever listings, plus SearXNG when it is configured. This does not submit applications or send email." />
@@ -54,13 +59,22 @@ export default async function DiscoverJobsPage({ searchParams }: { searchParams:
         {summary?.sources ? <p className="mt-2 text-sm">Sources · {Object.entries(summary.sources).map(([source, count]) => `${source} ${count}`).join(", ") || "none"}</p> : null}
       </Panel>
       <Panel>
-        <h2 className="font-display text-2xl">Discovered jobs</h2>
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="font-display text-2xl">Discovered jobs</h2>
+          <span className="text-sm text-muted">Showing {vacancies.length > 0 ? skip + 1 : 0}-{Math.min(skip + take, totalCount)} of {totalCount}</span>
+        </div>
         {vacancies.length === 0 ? <p className="mt-2 text-sm text-muted">No vacancies stored.</p> : vacancies.map((job) => (
           <p key={job.id} className="mt-2 text-sm">
             <a className="text-tide" href={`/jobs/vacancies/${job.id}`}>{job.title}</a>
             {" · "}{job.companyName} · {job.remoteType || "remote status unknown"} · {job.source} · {job.status} · {job._count.requirements} requirements · {job.discoveredAt.toISOString().slice(0, 10)}
           </p>
         ))}
+        {totalPages > 1 && (
+          <div className="mt-4 flex justify-center gap-2">
+            {page > 1 && <a href={`?page=${page - 1}`} className="px-3 py-1 rounded bg-muted/20 border border-line text-sm">Previous</a>}
+            {page < totalPages && <a href={`?page=${page + 1}`} className="px-3 py-1 rounded bg-muted/20 border border-line text-sm">Next</a>}
+          </div>
+        )}
       </Panel>
     </div>
   );

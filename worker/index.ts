@@ -145,8 +145,8 @@ for (const name of ["cv-generation", "cover-letter", "application-preparation", 
 }
 
 start("application-submit", async (data) => {
-  if (!data.applicationId) throw new Error("Application submit job is missing an application.");
-  await processApplicationSubmit(data.applicationId);
+  if (!data.organizationId || !data.applicationId) throw new Error("Application submit job is missing an application.");
+  await processApplicationSubmit(data.organizationId, data.applicationId);
 });
 
 const applicationFollowUps = new Worker(

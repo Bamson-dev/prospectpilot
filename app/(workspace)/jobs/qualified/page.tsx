@@ -9,22 +9,43 @@ export const metadata = { title: "Qualified jobs" };
 export default async function QualifiedJobsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const { organization } = await requireOrganization();
   const query = await searchParams;
-  const jobs = await prisma.jobVacancy.findMany({
-    where: {
-      organizationId: organization.id,
-      status: { in: ["DISCOVERED", "ANALYZED", "QUALIFIED"] },
-      ...(query.company ? { companyName: { contains: query.company, mode: "insensitive" } } : {}),
-      ...(query.source ? { source: query.source } : {}),
-      ...(query.remote ? { remoteType: query.remote } : {}),
-      ...(query.employment ? { employmentType: { contains: query.employment, mode: "insensitive" } } : {}),
-      ...(query.location ? { location: { contains: query.location, mode: "insensitive" } } : {}),
-      ...(query.technology ? { requirements: { some: { text: { contains: query.technology, mode: "insensitive" } } } } : {}),
-      ...(query.since ? { discoveredAt: { gte: new Date(query.since) } } : {}),
-    },
-    orderBy: { discoveredAt: "desc" },
-    include: { fit: true },
-    take: 80,
-  });
+  const page = Math.max(1, parseInt(query.page || "1", 10) || 1);
+  const take = 50;
+  const skip = (page - 1) * take;
+  const [jobs, totalCount] = await Promise.all([
+    prisma.jobVacancy.findMany({
+      where: {
+        organizationId: organization.id,
+        status: { in: ["DISCOVERED", "ANALYZED", "QUALIFIED"] },
+        ...(query.company ? { companyName: { contains: query.company, mode: "insensitive" } } : {}),
+        ...(query.source ? { source: query.source } : {}),
+        ...(query.remote ? { remoteType: query.remote } : {}),
+        ...(query.employment ? { employmentType: { contains: query.employment, mode: "insensitive" } } : {}),
+        ...(query.location ? { location: { contains: query.location, mode: "insensitive" } } : {}),
+        ...(query.technology ? { requirements: { some: { text: { contains: query.technology, mode: "insensitive" } } } } : {}),
+        ...(query.since ? { discoveredAt: { gte: new Date(query.since) } } : {}),
+      },
+      orderBy: { discoveredAt: "desc" },
+      include: { fit: true },
+      take,
+      skip,
+    }),
+    prisma.jobVacancy.count({
+      where: {
+        organizationId: organization.id,
+        status: { in: ["DISCOVERED", "ANALYZED", "QUALIFIED"] },
+        ...(query.company ? { companyName: { contains: query.company, mode: "insensitive" } } : {}),
+        ...(query.source ? { source: query.source } : {}),
+        ...(query.remote ? { remoteType: query.remote } : {}),
+        ...(query.employment ? { employmentType: { contains: query.employment, mode: "insensitive" } } : {}),
+        ...(query.location ? { location: { contains: query.location, mode: "insensitive" } } : {}),
+        ...(query.technology ? { requirements: { some: { text: { contains: query.technology, mode: "insensitive" } } } } : {}),
+        ...(query.since ? { discoveredAt: { gte: new Date(query.since) } } : {}),
+      }
+    })
+  ]);
+  
+  const totalPages = Math.max(1, Math.ceil(totalCount / take));
   const visible = jobs.filter((job) => !query.fit || fitLabel(job) === query.fit);
   return (
     <div>
@@ -53,6 +74,9 @@ export default async function QualifiedJobsPage({ searchParams }: { searchParams
           <button className="rounded border border-line px-3 py-2 text-sm" type="submit">Filter</button>
         </form>
       </Panel>
+      <div className="mb-4 text-sm text-muted">
+        Showing {visible.length > 0 ? skip + 1 : 0}-{Math.min(skip + take, totalCount)} of {totalCount} qualified jobs (Page {page} of {totalPages})
+      </div>
       {visible.length === 0 ? <Empty title="No jobs" detail="Discovery has not stored a vacancy for this filter." /> : visible.map((job) => {
         return (
           <Panel key={job.id} className="mb-3">
@@ -63,8 +87,23 @@ export default async function QualifiedJobsPage({ searchParams }: { searchParams
           </Panel>
         );
       })}
+      
+      {totalPages > 1 && (
+        <div className="mt-8 flex justify-center gap-2">
+          {page > 1 && <a href={`?page=${page - 1}${toQueryString(query)}`} className="px-3 py-1 rounded bg-muted/20 border border-line text-sm">Previous</a>}
+          {page < totalPages && <a href={`?page=${page + 1}${toQueryString(query)}`} className="px-3 py-1 rounded bg-muted/20 border border-line text-sm">Next</a>}
+        </div>
+      )}
     </div>
   );
+}
+
+function toQueryString(query: Record<string, string | undefined>) {
+  const parts = [];
+  for (const [key, value] of Object.entries(query)) {
+    if (key !== "page" && value) parts.push(`&${key}=${encodeURIComponent(value)}`);
+  }
+  return parts.join("");
 }
 
 function fitLabel(job: { fit: { recommendation: string; analysis: unknown } | null }) {

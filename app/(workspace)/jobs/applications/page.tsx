@@ -6,23 +6,40 @@ import { prisma } from "@/lib/db";
 
 export const metadata = { title: "Applications" };
 
-export default async function ApplicationsPage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string; sort?: string; filter?: string }> }) {
+export default async function ApplicationsPage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string; sort?: string; filter?: string; page?: string }> }) {
   const { organization } = await requireOrganization();
   const query = await searchParams;
   const sort = query.sort === "match" ? { vacancy: { fit: { overallMatch: "desc" as const } } } : { createdAt: "desc" as const };
   const filter = query.filter || "ALL";
 
-  const applications = await prisma.jobApplication.findMany({
-    where: { 
-      organizationId: organization.id,
-      ...(filter === "REVIEW_REQUIRED" ? { status: { in: ["READY_FOR_REVIEW", "REQUIRES_REVIEW", "REQUIRES_MANUAL_ACTION"] } } : {}),
-      ...(filter === "APPROVED" ? { status: { in: ["APPROVED", "READY_FOR_SUBMISSION", "READY_TO_SUBMIT"] } } : {}),
-      ...(filter === "SUBMITTED" ? { status: { in: ["SUBMITTED", "VERIFIED"] } } : {}),
-    },
-    orderBy: sort,
-    include: { vacancy: { include: { fit: true } }, package: true },
-    take: 100,
-  });
+  const page = Math.max(1, parseInt(query.page || "1", 10) || 1);
+  const take = 50;
+  const skip = (page - 1) * take;
+
+  const [applications, totalCount] = await Promise.all([
+    prisma.jobApplication.findMany({
+      where: { 
+        organizationId: organization.id,
+        ...(filter === "REVIEW_REQUIRED" ? { status: { in: ["READY_FOR_REVIEW", "REQUIRES_REVIEW", "REQUIRES_MANUAL_ACTION"] } } : {}),
+        ...(filter === "APPROVED" ? { status: { in: ["APPROVED", "READY_FOR_SUBMISSION", "READY_TO_SUBMIT"] } } : {}),
+        ...(filter === "SUBMITTED" ? { status: { in: ["SUBMITTED", "VERIFIED"] } } : {}),
+      },
+      orderBy: sort,
+      include: { vacancy: { include: { fit: true } }, package: true },
+      take,
+      skip,
+    }),
+    prisma.jobApplication.count({
+      where: { 
+        organizationId: organization.id,
+        ...(filter === "REVIEW_REQUIRED" ? { status: { in: ["READY_FOR_REVIEW", "REQUIRES_REVIEW", "REQUIRES_MANUAL_ACTION"] } } : {}),
+        ...(filter === "APPROVED" ? { status: { in: ["APPROVED", "READY_FOR_SUBMISSION", "READY_TO_SUBMIT"] } } : {}),
+        ...(filter === "SUBMITTED" ? { status: { in: ["SUBMITTED", "VERIFIED"] } } : {}),
+      }
+    })
+  ]);
+  
+  const totalPages = Math.max(1, Math.ceil(totalCount / take));
 
   return (
     <div>
@@ -46,6 +63,9 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
               <span className="mx-1 text-muted">|</span>
               <a href={`?sort=${query.sort === "match" ? "recent" : "match"}&filter=${filter}`} className="px-2 py-1 rounded bg-muted/30">Sort: {query.sort === "match" ? "Match" : "Recent"}</a>
             </div>
+          </div>
+          <div className="mb-4 text-sm text-muted">
+            Showing {applications.length > 0 ? skip + 1 : 0}-{Math.min(skip + take, totalCount)} of {totalCount} applications (Page {page} of {totalPages})
           </div>
           <div className="space-y-4">
             {applications.map((item) => (
@@ -74,6 +94,13 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
               </Panel>
             ))}
           </div>
+          
+          {totalPages > 1 && (
+            <div className="mt-8 flex justify-center gap-2">
+              {page > 1 && <a href={`?page=${page - 1}&filter=${filter}${query.sort ? `&sort=${query.sort}` : ""}`} className="px-3 py-1 rounded bg-muted/20 border border-line text-sm">Previous</a>}
+              {page < totalPages && <a href={`?page=${page + 1}&filter=${filter}${query.sort ? `&sort=${query.sort}` : ""}`} className="px-3 py-1 rounded bg-muted/20 border border-line text-sm">Next</a>}
+            </div>
+          )}
         </form>
       )}
     </div>

@@ -11,18 +11,30 @@ import { prisma } from "@/lib/db";
 
 export const metadata = { title: "Application queue" };
 
-export default async function ApplicationQueuePage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string }> }) {
+export default async function ApplicationQueuePage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string; page?: string }> }) {
   const { organization } = await requireOrganization();
   const query = await searchParams;
-  const vacancies = await prisma.jobVacancy.findMany({
-    where: { organizationId: organization.id, status: { in: ["DISCOVERED", "ANALYZED", "QUALIFIED"] } },
-    orderBy: { discoveredAt: "desc" },
-    include: {
-      fit: true,
-      applications: { orderBy: { createdAt: "desc" }, take: 1, include: { package: true } },
-    },
-    take: 80,
-  });
+  const page = Math.max(1, parseInt(query.page || "1", 10) || 1);
+  const take = 50;
+  const skip = (page - 1) * take;
+
+  const [vacancies, totalCount] = await Promise.all([
+    prisma.jobVacancy.findMany({
+      where: { organizationId: organization.id, status: { in: ["DISCOVERED", "ANALYZED", "QUALIFIED"] } },
+      orderBy: { discoveredAt: "desc" },
+      include: {
+        fit: true,
+        applications: { orderBy: { createdAt: "desc" }, take: 1, include: { package: true } },
+      },
+      take,
+      skip,
+    }),
+    prisma.jobVacancy.count({
+      where: { organizationId: organization.id, status: { in: ["DISCOVERED", "ANALYZED", "QUALIFIED"] } }
+    })
+  ]);
+  
+  const totalPages = Math.max(1, Math.ceil(totalCount / take));
   const rows = vacancies.map((vacancy) => {
     const decision = storedFitDecision(vacancy.fit?.analysis);
     const application = vacancy.applications[0] ?? null;
@@ -49,6 +61,9 @@ export default async function ApplicationQueuePage({ searchParams }: { searchPar
           </form>
         </Panel>
       ) : null}
+      <div className="mb-4 text-sm text-muted">
+        Showing {vacancies.length > 0 ? skip + 1 : 0}-{Math.min(skip + take, totalCount)} of {totalCount} queue entries (Page {page} of {totalPages})
+      </div>
       {queued.length === 0 ? <Empty title="Queue is empty" detail="Discover vacancies first. Apply results appear here. Review results appear after you add them." /> : (
         <form action={enqueueApplicationBatch}>
           {queued.map((row) => {
@@ -70,6 +85,13 @@ export default async function ApplicationQueuePage({ searchParams }: { searchPar
             );
           })}
           <SubmitButton pendingLabel="Queuing">Prepare selected (max 10)</SubmitButton>
+          
+          {totalPages > 1 && (
+            <div className="mt-8 flex justify-center gap-2">
+              {page > 1 && <a href={`?page=${page - 1}`} className="px-3 py-1 rounded bg-muted/20 border border-line text-sm">Previous</a>}
+              {page < totalPages && <a href={`?page=${page + 1}`} className="px-3 py-1 rounded bg-muted/20 border border-line text-sm">Next</a>}
+            </div>
+          )}
         </form>
       )}
     </div>

@@ -240,6 +240,7 @@ export async function enqueueApplicationPreparation(formData: FormData) {
   }
   try {
     await queueJob({
+      id: `application-preparation:${organization.id}:${vacancyId}:${Date.now()}`,
       organizationId: organization.id,
       queue: "application-preparation",
       name: "prepare",
@@ -317,6 +318,7 @@ export async function enqueueApplicationBatch(formData: FormData) {
       continue;
     }
     await queueJob({
+      id: `application-preparation:${organization.id}:${vacancyId}`,
       organizationId: organization.id,
       queue: "application-preparation",
       name: "prepare",
@@ -433,6 +435,7 @@ export async function requestRegeneration(formData: FormData) {
   });
 
   await queueJob({
+    id: `application-preparation:${organization.id}:${application.vacancyId}:${Date.now()}`,
     organizationId: organization.id,
     queue: "application-preparation",
     name: "prepare",

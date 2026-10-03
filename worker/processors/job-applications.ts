@@ -210,9 +210,9 @@ export async function processApplicationPreparation(organizationId: string, vaca
   }
 }
 
-export async function processApplicationSubmit(applicationId: string) {
+export async function processApplicationSubmit(organizationId: string, applicationId: string) {
   const application = await prisma.jobApplication.findUnique({ where: { id: applicationId } });
-  if (!application) return;
+  if (!application || application.organizationId !== organizationId) return;
   if (!applicationAutomationEnabled() || applicationMode() !== "AUTO_SUBMIT") {
     await prisma.jobApplication.update({
       where: { id: application.id },

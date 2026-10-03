@@ -32,18 +32,38 @@ async function main() {
     data: {
       candidateId: candidate.id,
       discoverJobs: true,
-      dailyTarget: 50,
+      dailyTarget: 500,
       mode: "AUTO_SUBMIT"
     }
   });
 
-  await prisma.candidateCareerProfile.create({
-    data: {
-      candidateId: candidate.id,
-      kind: "SOFTWARE",
-      title: "Software Engineer",
-      summary: "I build robust web applications and data pipelines. I am open to all engineering roles, junior or senior, backend or frontend, remote or on-site."
-    }
+  await prisma.candidateCareerProfile.createMany({
+    data: [
+      {
+        candidateId: candidate.id,
+        kind: "SOFTWARE",
+        title: "Software Engineer",
+        summary: "I build robust web applications and data pipelines. I am open to all engineering roles, junior or senior, backend or frontend, remote or on-site."
+      },
+      {
+        candidateId: candidate.id,
+        kind: "SAAS",
+        title: "Product Manager",
+        summary: "I manage product lifecycle, roadmaps, and delivery for software teams."
+      },
+      {
+        candidateId: candidate.id,
+        kind: "GROWTH",
+        title: "Growth Marketing Manager",
+        summary: "I drive user acquisition, retention, and performance marketing campaigns."
+      },
+      {
+        candidateId: candidate.id,
+        kind: "WEB",
+        title: "Sales Manager",
+        summary: "I lead B2B outbound sales, pipeline management, and enterprise deals."
+      }
+    ]
   });
 
   console.log(`Created live test candidate: ${candidate.id}`);
@@ -213,6 +233,7 @@ async function main() {
   console.log(`Submission attempts: ${submissionAttempts}`);
   console.log(`Verified submissions: ${verifiedSubmissions}`);
   console.log(`Unverified: ${unverifiedSubmissions}`);
+  
   const cfCount = details.filter(d => d.status === "CLOUDFLARE_CHALLENGE").length;
   const loginCount = details.filter(d => d.status === "LOGIN_REQUIRED").length;
 
@@ -221,7 +242,41 @@ async function main() {
   console.log(`Login Required: ${loginCount}`);
   console.log(`Other manual blockers: ${otherManual}`);
   console.log(`Failed: ${failedApps}`);
-  console.log(`Total elapsed time: ${Math.round(totalTimeMs/1000)}s`);
+  
+  // Calculate ATS distribution and ATS Accessibility
+  const atsDist: Record<string, number> = {};
+  for (const v of vacancies) {
+    const ats = v.source || "UNKNOWN";
+    atsDist[ats] = (atsDist[ats] || 0) + 1;
+  }
+  console.log("\n--- ATS Distribution (Unique Vacancies) ---");
+  for (const [ats, count] of Object.entries(atsDist)) {
+    console.log(`${ats}: ${count}`);
+  }
+  
+  const atsAccess: Record<string, { attempts: number; captcha: number; cf: number; login: number; accessible: number; failed: number }> = {};
+  for (const d of details) {
+    const ats = d.ats || "UNKNOWN";
+    if (!atsAccess[ats]) atsAccess[ats] = { attempts: 0, captcha: 0, cf: 0, login: 0, accessible: 0, failed: 0 };
+    atsAccess[ats].attempts++;
+    if (d.status === "CAPTCHA_REQUIRED") atsAccess[ats].captcha++;
+    else if (d.status === "CLOUDFLARE_CHALLENGE") atsAccess[ats].cf++;
+    else if (d.status === "LOGIN_REQUIRED") atsAccess[ats].login++;
+    else if (d.status === "SUBMITTED" || d.status === "VERIFIED" || d.status === "SUBMISSION_UNVERIFIED") atsAccess[ats].accessible++;
+    else atsAccess[ats].failed++;
+  }
+  console.log("\n--- Source Accessibility by ATS ---");
+  for (const [ats, metrics] of Object.entries(atsAccess)) {
+    console.log(`${ats}:
+  ${metrics.attempts} URLs tested
+  ${metrics.accessible} accessible
+  ${metrics.captcha} CAPTCHA
+  ${metrics.cf} Cloudflare
+  ${metrics.login} Login
+  ${metrics.failed} Failed/Other`);
+  }
+
+  console.log(`\nTotal elapsed time: ${Math.round(totalTimeMs/1000)}s`);
   console.log(`Applications/hour: ${Math.round(submissionAttempts / (totalTimeMs/3600000))}`);
 
   console.log("\n--- Application Details ---");

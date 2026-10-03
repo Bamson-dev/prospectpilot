@@ -42,7 +42,7 @@ export async function collectPublicVacancies(input: { query: string; limit: numb
     }
   }
   if (searxngEnabled()) {
-    const searched = await searxngVacancies(input.query, Math.min(10, input.limit), fetchImpl);
+    const searched = await searxngVacancies(input.query, input.limit, fetchImpl);
     jobs.push(...searched.jobs);
     failures.push(...searched.failures);
   } else {
@@ -255,21 +255,29 @@ export function smartRecruitersJob(board: string, value: unknown): RawDiscovered
 
 async function searxngVacancies(query: string, limit: number, fetchImpl: typeof fetch = fetch): Promise<SourceCollection> {
   try {
-    const payload = await searxngSearch({ query: `${query} job`, limit, language: "en" });
-    const hits = parseSearxngResults(payload, query, limit);
+    const atsDomains = ["boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com", "apply.workable.com", "jobs.smartrecruiters.com"];
     const jobs: RawDiscoveredVacancy[] = [];
     const failures: SourceFailure[] = [];
 
-    for (const hit of hits) {
+    const perDomain = Math.ceil(limit / atsDomains.length);
+
+    for (const domain of atsDomains) {
       if (jobs.length >= limit) break;
-      const resolved = await resolveAtsUrl(fetchImpl, hit.url);
-      if (resolved.job) {
-        jobs.push(resolved.job);
-      } else if (resolved.failure) {
-        failures.push(resolved.failure);
+      const payload = await searxngSearch({ query: `${query} site:${domain}`, limit: perDomain, language: "en" });
+      const hits = parseSearxngResults(payload, query, limit);
+
+      for (const hit of hits) {
+        if (jobs.length >= limit) break;
+        const resolved = await resolveAtsUrl(fetchImpl, hit.url);
+        if (resolved.job) {
+          jobs.push(resolved.job);
+        } else if (resolved.failure) {
+          failures.push(resolved.failure);
+        }
+        await delay(200);
       }
-      await delay(200);
     }
+    
     return { jobs, failures };
   } catch (error) {
     return { jobs: [], failures: [{ source: "searxng", reason: error instanceof Error ? error.message : "unavailable" }] };

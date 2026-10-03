@@ -379,7 +379,7 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   if (cvGenerationEnabled() && contactIsReady(candidate.email) && !stopped) {
     const cvStarted = Date.now();
     const cv = buildCvDraft(job, candidate, fit);
-    const rewritten = await maybeRewrite(cv.text, candidate);
+    const rewritten = await maybeRewrite(cv.text, candidate, job.title, job.companyName, fit.profile, requirements.map((req) => req.text));
     const rewrittenOk = acceptCvRewrite({ draft: cv.text, rewritten, candidate, companyName: job.companyName, title: job.title });
     const text = rewrittenOk ? rewritten : cv.text;
     const validation = validateCvText(text, candidate, fit.selectedProjects.flatMap((project) => project.technologies).slice(0, 6), [job.companyName, job.title]);
@@ -402,7 +402,7 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   }
   if (coverLetterGenerationEnabled() && contactIsReady(candidate.email) && !stopped) {
     const letterStarted = Date.now();
-    const letter = buildCoverLetter(job, candidate, fit);
+    const letter = await buildCoverLetter(job, candidate, fit);
     const bytes = await renderPdf(letter);
     coverLetterId = await storeDocument({
       organizationId,
@@ -603,12 +603,18 @@ async function storeDocument(input: {
   return saved.id;
 }
 
-async function maybeRewrite(text: string, candidate: CandidateRecord) {
+async function maybeRewrite(text: string, candidate: CandidateRecord, jobTitle: string, companyName: string, careerLane: string, requirements: string[]) {
   if (!process.env.DEEPSEEK_API_KEY?.trim()) return text;
   try {
+    const evidence = [
+      ...candidate.facts.filter((fact) => fact.verified).map((fact) => fact.fact),
+      ...candidate.experiences.map((exp) => `${exp.title} at ${exp.organizationName}: ${exp.summary}`),
+      ...candidate.projects.map((proj) => `${proj.name} (${proj.role}): ${proj.description}`)
+    ];
+    
     const result = await completeJson([
       { role: "system", content: CV_SYSTEM_PROMPT },
-      { role: "user", content: evidencePrompt(candidate.facts.filter((fact) => fact.verified).map((fact) => fact.fact), text) },
+      { role: "user", content: evidencePrompt(evidence, text, jobTitle, companyName, careerLane, requirements) },
     ]);
     const parsed = JSON.parse(result.content) as { text?: unknown };
     if (typeof parsed.text !== "string" || !parsed.text.includes(candidate.fullName)) return text;

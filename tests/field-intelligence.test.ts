@@ -99,7 +99,7 @@ describe("field intelligence", () => {
     const job = { title: "Engineer", companyName: "Northwind", description: "TypeScript", applicationUrl: "https://example.com" };
     const fit = scoreJobFit(job, person, []);
     expect(answerQuestion("How many years of Node.js experience do you have?", job, person, fit).status).toBe("REVIEW_REQUIRED");
-    expect(answerQuestion("Have you used TypeScript?", job, person, fit).answer).toBe("Yes");
+    expect(answerQuestion("Have you used TypeScript?", job, person, fit).answer).toMatch(/^Yes\. For example, in ProspectPilot/);
     expect(answerQuestion("Rate your TypeScript skills from 1-10", job, person, fit).status).toBe("REVIEW_REQUIRED");
     expect(answerQuestion("What is your salary expectation?", job, person, fit).status).toBe("REVIEW_REQUIRED");
     expect(detectSecurityBarrier({ text: "recaptcha" })).toBe("captcha");

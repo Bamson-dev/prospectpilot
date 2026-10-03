@@ -7,6 +7,9 @@ import { classifyProviderFailure, isPermanentProviderFailure } from "@/lib/provi
 import { queueJob } from "@/lib/jobs";
 
 export async function processInboxSync(organizationId: string) {
+  if (process.env.GMAIL_INBOX_SYNC_ENABLED !== "true") {
+    return;
+  }
   const accounts = await prisma.emailAccount.findMany({
     where: { organizationId, provider: "GMAIL", status: "ACTIVE", refreshTokenEncrypted: { not: null } },
   });
@@ -33,6 +36,10 @@ export async function processInboxSync(organizationId: string) {
     for (const item of payload.messages ?? []) {
       await importGmailMessage(organizationId, accessToken, item.id);
     }
+    await prisma.emailAccount.update({
+      where: { id: account.id },
+      data: { lastSyncAt: new Date() }
+    });
   }
 }
 
@@ -91,6 +98,15 @@ async function importGmailMessage(organizationId: string, accessToken: string, m
           body: payload.snippet || "(No preview returned)",
         }
       });
+      
+      await prisma.applicationEvent.create({
+        data: {
+          applicationId: application.id,
+          type: "EMPLOYER_REPLY_RECEIVED" as any,
+          detail: `Received reply from ${email}: ${subject}`
+        }
+      });
+
       // Optionally queue a job for AI classification of this reply.
       await queueJob({
         id: `employer-reply-classify-${reply.id}`,
@@ -178,16 +194,26 @@ import { classifyAndDraftEmployerReply } from "@/lib/applications/email-ai";
 export async function processEmployerReply(replyId: string) {
   const reply = await prisma.employerReply.findUnique({
     where: { id: replyId },
-    include: { application: { include: { vacancy: true, candidate: true } } }
+    include: { 
+      application: { 
+        include: { 
+          vacancy: true, 
+          candidate: { include: { facts: true } } 
+        } 
+      } 
+    }
   });
   if (!reply) return;
   
+  const candidateFacts = reply.application.candidate.facts.map(f => f.text);
+
   const { classification, suggestedDraft } = await classifyAndDraftEmployerReply(
     reply.subject || "",
     reply.body,
     reply.application.vacancy.companyName,
     reply.application.vacancy.title,
-    `${reply.application.candidate.firstName} ${reply.application.candidate.lastName}`
+    `${reply.application.candidate.firstName} ${reply.application.candidate.lastName}`,
+    candidateFacts
   );
 
   await prisma.employerReply.update({

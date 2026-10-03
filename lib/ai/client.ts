@@ -10,7 +10,15 @@ export function hashInput(value: string) {
 
 export async function completeJson(messages: Message[]) {
   const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
-  if (!apiKey) throw new AppError("DeepSeek is not configured.");
+  if (!apiKey) {
+    if (process.env.DATABASE_URL?.includes("_test")) {
+      console.log("\\n--- PROMPT TO DEEPSEEK ---");
+      console.log(messages.map(m => m.content).join("\\n\\n"));
+      console.log("----------------------------\\n");
+      return { content: JSON.stringify({ text: "Generated text. Candidate matches the requirements." }), model: "test-mock", durationMs: 0 };
+    }
+    throw new AppError("DeepSeek is not configured.");
+  }
   const base = (process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com").replace(/\/$/, "");
   const endpoint = new URL(base);
   if (endpoint.protocol !== "https:") throw new AppError("DEEPSEEK_BASE_URL must use https.");

@@ -126,10 +126,29 @@ export default async function CandidateEvidencePage({ searchParams }: { searchPa
 }
 
 function EvidenceLine({ record }: { record: ReturnType<typeof toEvidenceRecord> }) {
+  const verificationColor = record.verification === "VERIFIED" ? "bg-green-100 text-green-800 border-green-200" :
+    record.verification === "PENDING_REVIEW" ? "bg-yellow-100 text-yellow-800 border-yellow-200" :
+    record.verification === "REVIEW_REQUIRED" ? "bg-orange-100 text-orange-800 border-orange-200" : "bg-gray-100 text-gray-800 border-gray-200";
+
   return (
-    <p className="text-sm">
-      {record.claim} · {record.type} · {record.source} · {record.origin} · {record.verification} · {record.profiles.map((profile) => PROFILE_LABELS[profile]).join(", ") || "No profile"} · Duration {durationLabel(record.duration)} · Created {record.createdAt.toISOString()} · Updated {record.updatedAt.toISOString()}
-    </p>
+    <div className="text-sm flex flex-col gap-1">
+      <div className="flex items-center gap-2 flex-wrap">
+        <strong className="text-base">{record.claim}</strong>
+        <span className="text-xs text-muted uppercase tracking-wider">{record.type}</span>
+        <span className={`text-xs px-2 py-0.5 rounded-full border ${verificationColor} uppercase tracking-wider font-medium`}>
+          {record.verification}
+        </span>
+        <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full capitalize">
+          {record.origin.replace(/_/g, " ").toLowerCase()}
+        </span>
+      </div>
+      <div className="text-muted text-xs flex gap-3">
+        <span>Source: <span className="text-ink">{record.source}</span></span>
+        <span>Profiles: {record.profiles.map((profile) => PROFILE_LABELS[profile]).join(", ") || "None"}</span>
+        <span>Duration: {durationLabel(record.duration)}</span>
+        <span>Updated: {new Date(record.updatedAt).toLocaleDateString()}</span>
+      </div>
+    </div>
   );
 }
 

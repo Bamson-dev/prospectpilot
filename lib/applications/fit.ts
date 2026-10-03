@@ -46,9 +46,9 @@ export type FitResult = {
 
 export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requirements: ExtractedRequirement[]): FitResult {
   const profile = chooseProfile(job);
-  const verifiedFacts = candidate.facts.filter((fact) => usableFact(fact) && fact.profiles.includes(profile));
-  const verifiedProjects = candidate.projects.filter((project) => project.verified && project.profiles.includes(profile) && hasEvidence(project));
-  const corpus = evidenceText(verifiedFacts, verifiedProjects, candidate.experiences.filter((item) => item.verified && item.profiles.includes(profile)));
+  const verifiedFacts = candidate.facts.filter((fact) => usableFact(fact));
+  const verifiedProjects = candidate.projects.filter((project) => project.verified && hasEvidence(project));
+  const corpus = evidenceText(verifiedFacts, verifiedProjects, candidate.experiences.filter((item) => item.verified));
   const required = requirements.filter((item) => isRequired(item));
   const preferred = requirements.filter((item) => item.certainty === "preferred" || (!item.certainty && !isRequired(item) && !META_KINDS.includes(item.kind)));
   const matched: string[] = [];
@@ -99,8 +99,9 @@ export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requireme
   const mustScore = required.length === 0 ? 70 : Math.round((matched.length / required.length) * 100);
   const projectScore = verifiedProjects.length === 0 ? 0 : Math.round((Math.max(projectHits.length, verifiedProjects.length ? 1 : 0) / verifiedProjects.length) * 100);
   const overall = clamp(Math.round(mustScore * 0.6 + profileMatch * 0.25 + Math.min(projectScore, 100) * 0.15));
-  const selectedFacts = rankFacts(verifiedFacts, job).slice(0, 8);
-  const selectedProjects = (projectHits.length ? projectHits : rankProjects(verifiedProjects, job)).slice(0, 3);
+  const selectedFacts = rankFacts(verifiedFacts, job, profile).filter(f => overlapCount(f.fact, `${job.title} ${job.description}`.toLowerCase()) > 0 || f.profiles.includes(profile)).slice(0, 8);
+  const rankedProjects = rankProjects(verifiedProjects, job, profile);
+  const selectedProjects = rankedProjects.filter(p => overlapCount(projectText(p), `${job.title} ${job.description}`.toLowerCase()) > 0 || p.profiles.includes(profile)).slice(0, 3);
   const skills = unique(selectedFacts.flatMap((fact) => fact.skills ?? []).concat(selectedProjects.flatMap((project) => project.technologies)));
   const legalUnknown = uncertain.some((item) => /authorization|visa|salary|notice|location/i.test(item)) || missingInformation.includes("work authorization");
   const evidenceFacts = candidate.yearsExperience == null
@@ -137,7 +138,14 @@ export function scoreJobFit(job: JobInput, candidate: CandidateRecord, requireme
     gaps: missing,
     selectedFacts,
     selectedProjects,
-    recommendedExperiences: candidate.experiences.filter((item) => item.verified && item.profiles.includes(profile)).map((item) => `${item.title}, ${item.organizationName}`),
+    recommendedExperiences: candidate.experiences.filter((item) => item.verified)
+      .sort((a, b) => {
+        const leftScore = overlapCount(`${a.title} ${a.organizationName} ${a.summary}`, `${job.title} ${job.description}`.toLowerCase()) + (a.profiles.includes(profile) ? 2 : 0);
+        const rightScore = overlapCount(`${b.title} ${b.organizationName} ${b.summary}`, `${job.title} ${job.description}`.toLowerCase()) + (b.profiles.includes(profile) ? 2 : 0);
+        return rightScore - leftScore;
+      })
+      .filter((item) => overlapCount(`${item.title} ${item.summary}`, `${job.title} ${job.description}`.toLowerCase()) > 0 || item.profiles.includes(profile))
+      .map((item) => `${item.title}, ${item.organizationName}`),
     recommendedSkills: skills.slice(0, 12),
     recommendedKeywords: skills.slice(0, 8),
     cvStructure: ["Summary", "Skills", "Experience", "Projects"],
@@ -279,14 +287,22 @@ function tokenize(value: string) {
   return value.toLowerCase().split(/[^a-z0-9+#.]+/).filter((token) => token.length > 3 && !["with", "this", "that", "from", "your", "have", "will", "role"].includes(token));
 }
 
-function rankFacts(facts: CandidateFactInput[], job: JobInput) {
+function rankFacts(facts: CandidateFactInput[], job: JobInput, profile?: CareerProfile) {
   const text = `${job.title} ${job.description}`.toLowerCase();
-  return [...facts].sort((left, right) => overlapCount(right.fact, text) - overlapCount(left.fact, text));
+  return [...facts].sort((left, right) => {
+    const leftScore = overlapCount(left.fact, text) + (profile && left.profiles.includes(profile) ? 2 : 0);
+    const rightScore = overlapCount(right.fact, text) + (profile && right.profiles.includes(profile) ? 2 : 0);
+    return rightScore - leftScore;
+  });
 }
 
-function rankProjects(projects: CandidateProjectInput[], job: JobInput) {
+function rankProjects(projects: CandidateProjectInput[], job: JobInput, profile?: CareerProfile) {
   const text = `${job.title} ${job.description}`.toLowerCase();
-  return [...projects].sort((left, right) => overlapCount(projectText(right), text) - overlapCount(projectText(left), text));
+  return [...projects].sort((left, right) => {
+    const leftScore = overlapCount(projectText(left), text) + (profile && left.profiles.includes(profile) ? 2 : 0);
+    const rightScore = overlapCount(projectText(right), text) + (profile && right.profiles.includes(profile) ? 2 : 0);
+    return rightScore - leftScore;
+  });
 }
 
 function overlapCount(fact: string, text: string) {

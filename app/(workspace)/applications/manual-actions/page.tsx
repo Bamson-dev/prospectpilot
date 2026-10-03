@@ -1,11 +1,15 @@
 import { prisma } from "@/lib/db";
-
 import { revalidatePath } from "next/cache";
+import { PageHeader, Panel, Flash } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
+import { JobsNav } from "@/components/jobs-nav";
+
+export const metadata = { title: "Manual Actions" };
 
 export default async function ManualActionsPage() {
   const actions = await prisma.applicationManualAction.findMany({
     where: { resolved: false },
-    include: { application: true },
+    include: { application: { include: { vacancy: true } } },
     orderBy: { createdAt: "desc" },
   });
 
@@ -20,51 +24,62 @@ export default async function ManualActionsPage() {
     if (action) {
       await prisma.jobApplication.update({
         where: { id: action.applicationId },
-        data: { status: "READY_FOR_SUBMISSION" }, // This will trigger the automation to resume
+        data: { status: "READY_FOR_SUBMISSION" },
       });
     }
     revalidatePath("/applications/manual-actions");
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Requires Manual Action</h1>
+    <div>
+      <PageHeader title="Manual Actions Center" detail="Resolve employer security challenges and missing information." />
+      <JobsNav />
+      
       {actions.length === 0 ? (
-        <p className="text-zinc-500">No applications currently require manual action.</p>
+        <Panel className="text-center py-12">
+          <p className="text-muted">No applications currently require manual action.</p>
+          <p className="text-sm mt-2 text-wine">The autonomous system is running smoothly.</p>
+        </Panel>
       ) : (
-        <div className="space-y-4">
+        <div className="grid gap-4 mt-6">
           {actions.map((action) => (
-            <div key={action.id} className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-5">
-              <div className="flex justify-between items-start">
+            <Panel key={action.id} className="border-l-4 border-l-wine">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 pb-4 border-b border-line">
                 <div>
-                  <h3 className="font-semibold text-lg">{action.companyName}</h3>
-                  <p className="text-sm text-zinc-500 mb-2">Blocker: <span className="font-mono bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-red-600 dark:text-red-400">{action.blockerType}</span></p>
-                  <p className="text-sm mb-4">{action.blockerMessage}</p>
+                  <h3 className="font-display text-xl">{action.companyName} · {action.application?.vacancy?.title || "Unknown Role"}</h3>
+                  <div className="flex gap-2 mt-2">
+                    <span className="text-xs bg-wine/10 text-wine px-2 py-0.5 rounded font-medium uppercase tracking-wider">{action.blockerType}</span>
+                    <span className="text-xs bg-muted/10 text-muted px-2 py-0.5 rounded font-medium uppercase tracking-wider">Step: {action.currentStep}</span>
+                  </div>
                 </div>
-                <div className="text-sm text-zinc-400">
-                  Step: {action.currentStep}
+                <div className="text-xs text-muted whitespace-nowrap">
+                  {action.createdAt.toLocaleString()}
                 </div>
               </div>
-              <div className="flex space-x-3 mt-4 border-t border-zinc-100 dark:border-zinc-800 pt-4">
+              
+              <div className="text-sm mb-6">
+                <p className="font-medium text-ink mb-1">Required Action:</p>
+                <p className="text-muted bg-muted/5 p-3 rounded border border-line">{action.blockerMessage}</p>
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-3">
                 <a 
                   href={action.applicationUrl} 
                   target="_blank" 
                   rel="noreferrer"
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium transition-colors"
+                  className="button button-primary"
                 >
-                  Continue Application
+                  Complete in Browser
                 </a>
                 <form action={resolveAction}>
                   <input type="hidden" name="actionId" value={action.id} />
-                  <button 
-                    type="submit"
-                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium transition-colors"
-                  >
-                    Resume Automation
-                  </button>
+                  <SubmitButton pendingLabel="Resuming...">Mark Resolved & Resume</SubmitButton>
                 </form>
+                <a href={`/jobs/applications/${action.applicationId}`} className="text-sm text-tide hover:underline underline-offset-2 ml-auto">
+                  View full application
+                </a>
               </div>
-            </div>
+            </Panel>
           ))}
         </div>
       )}

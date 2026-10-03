@@ -9,7 +9,11 @@ const LINKS = [
   ["/jobs/candidate", "Candidate"],
   ["/jobs/candidate/evidence", "Evidence"],
   ["/jobs/cv-library", "CV library"],
-  ["/jobs/settings", "Settings"],
+  ["/jobs/settings/readiness", "Readiness"],
+  ["/jobs/settings/preferences", "Preferences"],
+  ["/jobs/candidate/answers", "Answers"],
+  ["/applications/manual-actions", "Manual Actions"],
+  ["/jobs/settings/activation", "Activation"],
 ] as const;
 
 export function JobsNav() {

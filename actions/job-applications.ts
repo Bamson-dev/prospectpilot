@@ -78,7 +78,7 @@ export async function saveCandidateProfile(formData: FormData) {
       },
     });
   }
-  await replaceEnteredFact(candidate.id, "IDENTITY", "salary-expectation", draft.salaryCurrency ? `Salary expectation: ${[draft.salaryMin, draft.salaryTarget].filter((item) => item != null).join("-")} ${draft.salaryCurrency} per ${draft.salaryPeriod}` : "");
+  await replaceEnteredFact(candidate.id, "IDENTITY", "salary-expectation", textFact(formData, "salaryExpectation", "Salary expectation"));
   await replaceEnteredFact(candidate.id, "IDENTITY", "availability", draft.availability ? `Availability: ${draft.availability}` : "");
   await replaceEnteredFact(candidate.id, "IDENTITY", "sponsorship", draft.sponsorship ? `Sponsorship: ${draft.sponsorship}` : "");
   await replaceEnteredFact(candidate.id, "LINK", "github", draft.githubUrl ? `GitHub: ${draft.githubUrl}` : "");

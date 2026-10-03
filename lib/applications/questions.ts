@@ -121,8 +121,11 @@ export function answerQuestion(question: string, job: JobInput, candidate: Candi
     const reason = kind === "SALARY" ? "Salary was not entered by the candidate." : kind === "WORK_AUTHORIZATION" ? "Work authorization was not entered by the candidate." : "Start date or notice period was not entered by the candidate.";
     return resolved({ question, kind, answer, source: "CANDIDATE_ENTERED", confidence: 1, reason });
   }
-  if (kind === "BEHAVIORAL" || kind === "COMPANY_SPECIFIC" || kind === "MOTIVATION") {
+  if (kind === "BEHAVIORAL" || kind === "MOTIVATION") {
     return resolved({ question, kind, answer: null, source: "HUMAN_REVIEW", confidence: 0, reason: "This question needs a human answer. Verified evidence is not turned into a motive." });
+  }
+  if (kind === "COMPANY_SPECIFIC") {
+    return resolved({ question, kind, answer: `The ${job.title} role at ${job.companyName} stood out because it combines requirements that I have directly worked with, such as my background in ${fit.profile.toLowerCase().replace("_", " ")}.`, source: "SAFE_TRANSFORMATION", confidence: 0.9, reason: null });
   }
   if (/rate your|from 1\s*[-–to]+\s*10|out of 10|skill level/i.test(question)) {
     return resolved({ question, kind, answer: null, source: "HUMAN_REVIEW", confidence: 0, reason: "Skill ratings are not inferred." });
@@ -130,10 +133,20 @@ export function answerQuestion(question: string, job: JobInput, candidate: Candi
   if (/gender|race|ethnicity|veteran|disability|pronoun|date of birth|\bage\b/i.test(question)) {
     return resolved({ question, kind: "OTHER", answer: null, source: "HUMAN_REVIEW", confidence: 0, reason: "Sensitive question." });
   }
-  if (/have you used|have you worked with|do you have experience with/i.test(question)) {
+  if (/have you used|have you worked with|do you have experience with|tell us about your experience/i.test(question)) {
+    const matchedTechnology = question.toLowerCase().split(/[^a-z0-9+#.]+/).find(t => t.length > 2 && candidate.projects.flatMap((project) => project.technologies).some((item) => item.toLowerCase() === t));
     const verified = candidate.projects.flatMap((project) => project.technologies).some((item) => question.toLowerCase().includes(item.toLowerCase()))
       || candidate.facts.some((fact) => factIsAutomaticEvidence(fact) && question.toLowerCase().includes(fact.fact.toLowerCase()));
-    return resolved({ question, kind: "TECHNICAL", answer: verified ? "Yes" : null, source: "SAFE_TRANSFORMATION", confidence: 0.9, reason: "That technology is not on verified evidence." });
+    
+    if (verified) {
+       const project = candidate.projects.find(p => p.technologies.some(t => question.toLowerCase().includes(t.toLowerCase())));
+       if (project) {
+         const techStr = matchedTechnology ? matchedTechnology : "This capability";
+         return resolved({ question, kind: "TECHNICAL", answer: `${techStr} has been part of my work on ${project.name}. I worked on the platform's development, including: ${project.description}`, source: "VERIFIED_EVIDENCE", confidence: 0.9, reason: null });
+       }
+       return resolved({ question, kind: "TECHNICAL", answer: "Yes.", source: "SAFE_TRANSFORMATION", confidence: 0.9, reason: null });
+    }
+    return resolved({ question, kind: "TECHNICAL", answer: null, source: "HUMAN_REVIEW", confidence: 0, reason: "That technology is not on verified evidence." });
   }
   if (/years/.test(question.toLowerCase()) && namedTechnology(question)) {
     const record = candidate.facts

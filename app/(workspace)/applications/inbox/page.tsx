@@ -65,9 +65,15 @@ export default async function InboxPage() {
                         Approve & Send
                       </button>
                     </form>
-                  ) : (
-                    <span className="text-sm font-medium text-green-600 dark:text-green-400">✓ Approved & Sent</span>
-                  )}
+                  ) : reply.draftStatus === "APPROVED" ? (
+                    <span className="text-sm font-medium text-amber-600 dark:text-amber-400">⏳ Approved & Queued for Sending</span>
+                  ) : reply.draftStatus === "SENDING" ? (
+                    <span className="text-sm font-medium text-blue-600 dark:text-blue-400">⏳ Sending...</span>
+                  ) : reply.draftStatus === "SENT" ? (
+                    <span className="text-sm font-medium text-green-600 dark:text-green-400">✓ Sent successfully</span>
+                  ) : reply.draftStatus === "FAILED" ? (
+                    <span className="text-sm font-medium text-red-600 dark:text-red-400">❌ Failed to send</span>
+                  ) : null}
                 </div>
               )}
             </div>

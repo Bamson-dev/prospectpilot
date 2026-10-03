@@ -413,6 +413,8 @@ model EmailAccount {
   refreshTokenEncrypted String?
   status                AccountStatus     @default(ACTIVE)
   lastError             String?
+  lastSyncAt            DateTime?
+  lastSendAt            DateTime?
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
   organization          Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -794,6 +796,8 @@ enum ApplicationEventType {
   FORM_VALIDATED
   AUTOMATION_FAILED
   AUTOMATION_RETRY_SCHEDULED
+  EMPLOYER_REPLY_RECEIVED
+  EMPLOYER_REPLY_SENT
 }
 
 enum AutomationRunStatus {

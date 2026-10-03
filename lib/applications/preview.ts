@@ -23,5 +23,16 @@ export function applicationPreview(input: {
     `Authentication: ${input.authentication ? "DETECTED" : "not detected"}`,
     `Result: ${input.captcha || input.authentication || unresolved.length ? "REQUIRES_MANUAL_ACTION" : "READY_FOR_HUMAN_SUBMISSION"}`,
   ];
-  return { text: lines.join("\n"), unresolvedRequired: unresolved.length, result: lines.at(-1)?.replace("Result: ", "") ?? "REQUIRES_MANUAL_ACTION" };
+  return { 
+    text: lines.join("\n"), 
+    unresolvedRequired: unresolved.length, 
+    result: lines.at(-1)?.replace("Result: ", "") ?? "REQUIRES_MANUAL_ACTION",
+    structuredFields: input.fields,
+    meta: {
+      captcha: input.captcha,
+      authentication: input.authentication
+    },
+    resumeFileName: input.resumeFileName,
+    coverLetterFileName: input.coverLetterFileName,
+  };
 }

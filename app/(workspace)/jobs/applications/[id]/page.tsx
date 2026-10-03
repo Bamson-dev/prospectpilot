@@ -118,6 +118,37 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <p className="text-sm text-muted">{salary(application.vacancy.salaryMin, application.vacancy.salaryMax, application.vacancy.salaryCurrency)}</p>
         <p className="mt-2 text-sm">Source {application.source}. <a className="text-tide" href={application.applicationUrl} target="_blank" rel="noreferrer">Open the employer application manually</a></p>
       </Panel>
+      <Panel className="mb-3 border-l-4 border-l-tide">
+        <h2 className="font-display text-2xl">Generation Engine</h2>
+        <p className="mt-2 text-sm font-semibold">Assigned Career Lane: <span className="text-tide">{application.profile}</span></p>
+        <p className="text-sm mt-1">This application was generated specifically targeting the {application.profile} career lane, using only evidence mapped to this profile.</p>
+        
+        <div className="mt-4">
+          <h3 className="font-semibold text-sm">Evidence Selected for CV & Cover Letter:</h3>
+          {Array.isArray(application.vacancy.fit?.evidence) && application.vacancy.fit.evidence.length > 0 ? (
+            <ul className="list-disc pl-5 text-sm mt-2 space-y-1">
+              {(application.vacancy.fit.evidence as string[]).map((ev: string, idx: number) => (
+                <li key={idx}>{ev}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted mt-1">No specific facts matched.</p>
+          )}
+        </div>
+
+        <div className="mt-4">
+          <h3 className="font-semibold text-sm">Projects Highlighted:</h3>
+          {Array.isArray(application.vacancy.fit?.advantages) && application.vacancy.fit.advantages.length > 0 ? (
+            <ul className="list-disc pl-5 text-sm mt-2 space-y-1">
+              {(application.vacancy.fit.advantages as string[]).map((adv: string, idx: number) => (
+                <li key={idx}>{adv}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted mt-1">No projects matched.</p>
+          )}
+        </div>
+      </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Blocker {blocker ?? "None recorded"}</h2>
         <p className="mt-2 text-sm">{action?.readiness ?? readinessLine ?? "No preparation blocker is stored."}</p>
@@ -140,8 +171,66 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         </ul>
       </Panel>
       <Panel className="mb-3">
-        <h2 className="font-display text-2xl">Application preview</h2>
-        <pre className="mt-2 whitespace-pre-wrap text-sm">{preview.text}</pre>
+        <h2 className="font-display text-2xl mb-4">Application Preview</h2>
+        
+        <div className="grid gap-4 bg-muted/5 border border-line rounded p-4 mb-4">
+          <div className="flex flex-col md:flex-row gap-6">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-muted mb-1">Generated Cover Letter</p>
+              <p className="text-sm font-semibold">{preview.coverLetterFileName ?? "Not prepared"}</p>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-muted mb-1">Generated CV</p>
+              <p className="text-sm font-semibold">{preview.resumeFileName ?? "Not prepared"}</p>
+            </div>
+          </div>
+          
+          <div className="pt-3 border-t border-line flex flex-col md:flex-row gap-6">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-muted mb-1">Security Check</p>
+              <div className="flex items-center gap-2">
+                {preview.meta.captcha ? (
+                  <span className="text-xs bg-wine/10 text-wine px-2 py-0.5 rounded font-medium">CAPTCHA Detected</span>
+                ) : (
+                  <span className="text-xs bg-tide/10 text-tide px-2 py-0.5 rounded font-medium">No CAPTCHA</span>
+                )}
+                {preview.meta.authentication && (
+                  <span className="text-xs bg-wine/10 text-wine px-2 py-0.5 rounded font-medium">Login Required</span>
+                )}
+              </div>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-muted mb-1">Status</p>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${preview.result === "READY_FOR_HUMAN_SUBMISSION" ? "bg-tide/10 text-tide" : "bg-amber-100 text-amber-800"}`}>
+                {preview.result.replace(/_/g, " ")}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <h3 className="font-display text-xl mb-3">Form Fields</h3>
+        <div className="grid gap-3">
+          {preview.structuredFields.length === 0 ? (
+            <p className="text-sm text-muted">No form fields detected.</p>
+          ) : preview.structuredFields.map((field, idx) => (
+            <div key={idx} className="p-3 border border-line rounded text-sm flex flex-col gap-1">
+              <div className="flex justify-between items-start gap-4">
+                <span className="font-medium">{field.name || field.taxonomy}</span>
+                {field.status === "ANSWERED" ? (
+                  <span className="text-xs text-tide whitespace-nowrap bg-tide/10 px-2 py-0.5 rounded font-medium">ANSWERED</span>
+                ) : field.required ? (
+                  <span className="text-xs text-wine whitespace-nowrap bg-wine/10 px-2 py-0.5 rounded font-medium">REQUIRED</span>
+                ) : (
+                  <span className="text-xs text-muted whitespace-nowrap bg-muted/10 px-2 py-0.5 rounded font-medium">OPTIONAL</span>
+                )}
+              </div>
+              <div className="text-muted bg-panel p-2 rounded border border-line/50 mt-1">
+                {field.value ?? <span className="italic">No answer generated</span>}
+              </div>
+              {field.source && <p className="text-xs text-muted mt-1 text-right">Source: {field.source}</p>}
+            </div>
+          ))}
+        </div>
       </Panel>
       <Panel className="mb-3">
         <h2 className="font-display text-2xl">Fit</h2>

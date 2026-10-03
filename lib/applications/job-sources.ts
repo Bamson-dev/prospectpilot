@@ -1,6 +1,5 @@
 import { matchesQuery } from "@/lib/applications/job-normalize";
-import { discoveryBlock, type DiscoveredJob } from "@/lib/applications/providers";
-import { parseJobPage } from "@/lib/applications/providers";
+import { discoveryBlock } from "@/lib/applications/providers";
 import { searxngEnabled, searxngSearch, parseSearxngResults } from "@/lib/discovery/searxng";
 import type { RawDiscoveredVacancy } from "@/lib/applications/job-normalize";
 
@@ -37,9 +36,9 @@ export async function collectPublicVacancies(input: { query: string; limit: numb
     jobs.push(...found.jobs);
     failures.push(...found.failures);
     
-    // Stop querying this provider family entirely on rate limits to prevent IP bans
+    // Continue to next provider if one hits a rate limit instead of breaking the entire discovery run
     if (found.failures.some(f => f.reason.includes("429") || f.reason.includes("rate limit"))) {
-      break; 
+      continue; 
     }
   }
   if (searxngEnabled()) {
@@ -352,7 +351,7 @@ export async function resolveAtsUrl(fetchImpl: typeof fetch, url: string): Promi
     }
 
     return { job: null, failure: { source: "searxng", reason: "UNSUPPORTED_SOURCE" } };
-  } catch (error) {
+  } catch {
     return { job: null, failure: { source: "searxng", reason: "INVALID_JOB_URL" } };
   }
 }

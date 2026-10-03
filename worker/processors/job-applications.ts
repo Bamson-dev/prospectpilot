@@ -4,10 +4,9 @@ import { queueJob, recordActivity } from "@/lib/jobs";
 import { enqueue } from "@/lib/queues";
 import { applicationAutomationEnabled, applicationMode, jobDiscoveryEnabled } from "@/lib/applications/config";
 import { collectPublicVacancies } from "@/lib/applications/job-sources";
-import { discoveryLimit } from "@/lib/applications/application-queue";
 import { analysisJobDecision, emptySummary, prepareDiscoveredVacancies } from "@/lib/applications/job-pipeline";
 import { attachBrowserInspection } from "@/lib/applications/public-inspection";
-import { analyzeVacancy, persistNormalizedVacancies, prepareApplication } from "@/lib/applications/service";
+import { persistNormalizedVacancies, prepareApplication, archiveStaleVacancies } from "@/lib/applications/service";
 
 export async function processJobDiscoveryScheduler() {
   const preferences = await prisma.candidatePreference.findMany({
@@ -19,106 +18,167 @@ export async function processJobDiscoveryScheduler() {
     if (!pref.candidate.profiles.length) continue;
     const organizationId = pref.candidate.organizationId;
     
-    for (const profile of pref.candidate.profiles) {
-      // Derive search variants from profile title
-      const baseTitle = profile.title.toLowerCase().trim();
-      const queries = new Set<string>();
-      queries.add(baseTitle);
-      
-      if (baseTitle.includes("software") || baseTitle.includes("engineer") || baseTitle.includes("developer")) {
-        queries.add("software engineer");
-        queries.add("backend engineer");
-        queries.add("full stack engineer");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const existingRun = await prisma.jobDiscoveryRun.findFirst({
+      where: { organizationId, candidateId: pref.candidate.id, startedAt: { gte: today } }
+    });
+    if (existingRun) continue;
+
+    // Create the daily run model
+    const run = await prisma.jobDiscoveryRun.create({
+      data: {
+        organizationId,
+        candidateId: pref.candidate.id,
+        status: "STARTED",
       }
-      if (baseTitle.includes("product manager")) {
-        queries.add("product manager");
-        queries.add("senior product manager");
-      }
-      if (baseTitle.includes("marketing")) {
-        queries.add("growth marketing manager");
-        queries.add("performance marketing manager");
-        queries.add("product marketing manager");
-      }
-      if (baseTitle.includes("founder")) {
-        queries.add("founder");
-        queries.add("technical product");
-      }
-      
-      const locations = pref.remoteOnly ? ["remote"] : pref.locations.length > 0 ? pref.locations : ["remote"];
-      
-      for (const query of queries) {
-        for (const loc of locations) {
-          const fullQuery = `${query} ${loc}`.trim();
-          const jobId = `discovery:${organizationId}:${fullQuery.replace(/\s+/g, "-")}`;
-          await queueJob({
-            id: jobId,
-            organizationId,
-            queue: "job-discovery",
-            name: "run",
-            payload: { organizationId, query: fullQuery, limit: String(Math.min(50, Math.ceil(pref.dailyTarget / queries.size))) },
-          }).catch(() => { /* ignore unique constraint on id */ });
-        }
-      }
-    }
+    });
+
+    // Enqueue a single job-discovery task for this run
+    await queueJob({
+      id: `discovery:run:${run.id}`,
+      organizationId,
+      queue: "job-discovery",
+      name: "run",
+      payload: { organizationId, runId: run.id },
+    }).catch(() => { /* ignore unique constraint on id */ });
   }
 }
 
-export async function processJobDiscovery(organizationId: string, query: string, requestedLimit?: string) {
+export async function processJobDiscovery(organizationId: string, runId: string) {
   if (!jobDiscoveryEnabled()) {
     logInfo("job_discovery.disabled", { organizationId });
     return emptySummary();
   }
-  const started = Date.now();
-  const collected = await collectPublicVacancies({ query, limit: discoveryLimit(requestedLimit) });
-  const prepared = prepareDiscoveredVacancies(collected.jobs, query);
-  const capped = prepared.kept.slice(0, discoveryLimit(requestedLimit));
-  const saved = await persistNormalizedVacancies(organizationId, capped);
-  const summary = emptySummary();
-  summary.discovered = collected.jobs.length;
-  summary.normalized = prepared.normalized.length;
-  summary.duplicatesRemoved = prepared.duplicateReasons.length + saved.duplicateReasons.length;
-  summary.duplicateReasons = [...prepared.duplicateReasons, ...saved.duplicateReasons];
-  summary.stored = saved.ids.length;
-  summary.failed = prepared.failed + collected.failures.filter((failure) => failure.reason !== "not configured").length;
-  summary.failures = collected.failures;
-  summary.invalidSources = prepared.invalidSources.length;
-  summary.discoveryMs = Date.now() - started;
-  for (const job of capped) summary.sources[job.source] = (summary.sources[job.source] ?? 0) + 1;
-  const analysisStarted = Date.now();
-  for (const id of saved.ids) {
-    const assessed = await analyzeVacancy(organizationId, id);
-    if (!assessed) continue;
-    summary.analyzed += 1;
-    summary.requirements += assessed.requirements.length;
-    if (assessed.state === "APPLY") summary.qualified += 1;
-    else if (assessed.state === "NOT_A_FIT") summary.notAFit += 1;
-    else summary.review += 1;
+  
+  const run = await prisma.jobDiscoveryRun.findUnique({
+    where: { id: runId },
+    include: { candidate: { include: { profiles: true, preference: true } } }
+  });
+  if (!run || !run.candidate) return;
+
+  await prisma.jobDiscoveryRun.update({
+    where: { id: run.id },
+    data: { status: "RUNNING" }
+  });
+
+  const queries = new Set<string>();
+  for (const profile of run.candidate.profiles) {
+    const baseTitle = profile.title.toLowerCase().trim();
+    queries.add(baseTitle);
+    
+    if (baseTitle.includes("software") || baseTitle.includes("engineer") || baseTitle.includes("developer")) {
+      queries.add("software engineer");
+      queries.add("backend engineer");
+      queries.add("full stack engineer");
+    }
+    if (baseTitle.includes("product manager")) {
+      queries.add("product manager");
+      queries.add("senior product manager");
+    }
+    if (baseTitle.includes("marketing")) {
+      queries.add("growth marketing manager");
+      queries.add("performance marketing manager");
+      queries.add("product marketing manager");
+    }
+    if (baseTitle.includes("founder")) {
+      queries.add("founder");
+      queries.add("technical product");
+    }
   }
-  summary.analysisMs = summary.analyzed ? Date.now() - analysisStarted : 0;
+
+  const pref = run.candidate.preference;
+  const locations = pref?.remoteOnly ? ["remote"] : (pref?.locations?.length ? pref.locations : ["remote"]);
+  const dailyTarget = pref?.dailyTarget ?? 500;
+  const limitPerQuery = Math.min(50, Math.ceil(dailyTarget / queries.size));
+  
+  let totalQueries = 0;
+  let totalRawResults = 0;
+  let totalValidVacancies = 0;
+  let totalDuplicates = 0;
+  let totalNewVacancies = 0;
+  let totalRejectedVacancies = 0;
+  let totalProviderErrors = 0;
+  let totalRateLimits = 0;
+  let totalQualificationJobsQueued = 0;
+  let rateLimitHit = false;
+
+  for (const query of queries) {
+    for (const loc of locations) {
+      if (rateLimitHit) break;
+      const fullQuery = `${query} ${loc}`.trim();
+      totalQueries += 1;
+
+      try {
+        const collected = await collectPublicVacancies({ query: fullQuery, limit: limitPerQuery });
+        totalRawResults += collected.jobs.length;
+        
+        // Count errors
+        const failures = collected.failures.filter((failure) => failure.reason !== "not configured");
+        totalProviderErrors += failures.length;
+        
+        const rateLimitFailure = failures.find(f => f.reason.includes("429") || f.reason.includes("rate limit"));
+        if (rateLimitFailure) {
+          totalRateLimits += 1;
+          rateLimitHit = true;
+          // We don't throw, we process what we collected, then break the loop.
+        }
+        
+        const prepared = prepareDiscoveredVacancies(collected.jobs, fullQuery);
+        const capped = prepared.kept.slice(0, limitPerQuery);
+        totalRejectedVacancies += prepared.invalidSources.length;
+        
+        const saved = await persistNormalizedVacancies(organizationId, capped);
+        
+        totalValidVacancies += capped.length;
+        totalDuplicates += prepared.duplicateReasons.length + saved.duplicateReasons.length;
+        totalNewVacancies += saved.ids.length; // Approximate "new" - actually they might be updated too. We'll just count as new for now.
+        
+        for (const id of saved.ids) {
+          await queueVacancyAnalysis(organizationId, id);
+          totalQualificationJobsQueued += 1;
+        }
+      } catch (err) {
+        logInfo("job_discovery.error", { organizationId, query: fullQuery, error: String(err) });
+        totalProviderErrors += 1;
+      }
+    }
+  }
+
+  await archiveStaleVacancies(organizationId);
+
+  await prisma.jobDiscoveryRun.update({
+    where: { id: run.id },
+    data: {
+      status: rateLimitHit ? "PARTIALLY_COMPLETED" : "COMPLETED",
+      completedAt: new Date(),
+      queries: totalQueries,
+      rawResults: totalRawResults,
+      validVacancies: totalValidVacancies,
+      duplicates: totalDuplicates,
+      newVacancies: totalNewVacancies,
+      rejectedVacancies: totalRejectedVacancies,
+      providerErrors: totalProviderErrors,
+      rateLimits: totalRateLimits,
+      qualificationJobsQueued: totalQualificationJobsQueued,
+    }
+  });
+
   await recordActivity({
     organizationId,
-    action: "job.discovery_completed",
+    action: "job.discovery_run_completed",
     detail: JSON.stringify({
-      query,
-      discovered: summary.discovered,
-      normalized: summary.normalized,
-      duplicatesRemoved: summary.duplicatesRemoved,
-      stored: summary.stored,
-      analyzed: summary.analyzed,
-      qualified: summary.qualified,
-      review: summary.review,
-      notReady: summary.notReady,
-      notAFit: summary.notAFit,
-      invalidSources: summary.invalidSources,
-      failed: summary.failed,
-      failures: summary.failures,
-      sources: summary.sources,
-      discoveryMs: summary.discoveryMs,
-      analysisMs: summary.analysisMs,
+      runId: run.id,
+      queries: totalQueries,
+      newVacancies: totalNewVacancies,
+      qualificationJobsQueued: totalQualificationJobsQueued,
+      rateLimitHit,
     }).slice(0, 2000),
   });
-  logInfo("job_discovery.stored", { organizationId, count: summary.stored, duplicates: summary.duplicatesRemoved, failed: summary.failed });
-  return summary;
+
+  if (rateLimitHit) {
+    throw new Error("Rate limit reached during discovery run. Retrying via backoff.");
+  }
 }
 
 export async function queueVacancyAnalysis(organizationId: string, vacancyId: string) {
@@ -135,8 +195,8 @@ export async function queueVacancyAnalysis(organizationId: string, vacancyId: st
   return created.id;
 }
 
-export async function processApplicationPreparation(organizationId: string, vacancyId: string) {
-  const applicationId = await prepareApplication(organizationId, vacancyId);
+export async function processApplicationPreparation(organizationId: string, vacancyId: string, forceRegenerate = false) {
+  const applicationId = await prepareApplication(organizationId, vacancyId, forceRegenerate);
   await attachBrowserInspection(applicationId);
   const submitted = await prisma.jobApplication.findFirst({
     where: { id: applicationId, organizationId },

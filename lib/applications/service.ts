@@ -24,6 +24,7 @@ import { assessVacancy } from "@/lib/applications/job-pipeline";
 import { normalizeVacancy, type NormalizedVacancy } from "@/lib/applications/job-normalize";
 import type { DiscoveredJob } from "@/lib/applications/providers";
 import { cvGenerationEnabled, coverLetterGenerationEnabled } from "@/lib/applications/config";
+import { queueJob } from "@/lib/jobs";
 
 export async function ensureCandidate(organizationId: string) {
   const seed = seedCandidateRecord();
@@ -210,7 +211,7 @@ export async function persistNormalizedVacancies(organizationId: string, jobs: N
   const duplicateReasons: string[] = [];
   const existing = await prisma.jobVacancy.findMany({
     where: { organizationId },
-    select: { id: true, companyName: true, title: true, applicationUrl: true, sourceUrl: true, location: true, externalId: true },
+    select: { id: true, companyName: true, title: true, applicationUrl: true, sourceUrl: true, location: true, externalId: true, status: true },
     orderBy: { createdAt: "desc" },
     take: 500,
   });
@@ -219,7 +220,11 @@ export async function persistNormalizedVacancies(organizationId: string, jobs: N
     if (match) {
       duplicateReasons.push(duplicateDecision(match, job).reason ?? "duplicate");
       // Update freshness for discovered jobs
-      await prisma.jobVacancy.update({ where: { id: match.id }, data: { lastCheckedAt: new Date() } }).catch(() => {});
+      const updateData: { lastCheckedAt: Date; status?: "DISCOVERED" } = { lastCheckedAt: new Date() };
+      if (match.status === "ARCHIVED") {
+        updateData.status = "DISCOVERED"; // Reactivate the vacancy if it was previously archived
+      }
+      await prisma.jobVacancy.update({ where: { id: match.id }, data: updateData }).catch(() => {});
       continue;
     }
     try {
@@ -253,7 +258,7 @@ export async function persistNormalizedVacancies(organizationId: string, jobs: N
         },
       });
       ids.push(created.id);
-      existing.push({ ...job, id: created.id, sourceUrl: job.originalSourceUrl });
+      existing.push({ ...job, id: created.id, sourceUrl: job.originalSourceUrl, status: "DISCOVERED" });
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
         duplicateReasons.push("canonical application URL");
@@ -294,14 +299,41 @@ export async function analyzeVacancy(organizationId: string, vacancyId: string) 
     where: { id: vacancyId },
     data: { status: assessed.state === "APPLY" ? "QUALIFIED" : "ANALYZED" },
   });
+  
+  if (assessed.state === "APPLY") {
+    const jobId = `application-preparation:${organizationId}:${vacancyId}`;
+    try {
+      await queueJob({
+        id: jobId,
+        organizationId,
+        queue: "application-preparation",
+        name: "prepare",
+        payload: { organizationId, vacancyId },
+      });
+    } catch {
+      // Ignore if job already queued (unique constraint)
+    }
+  }
+
   return assessed;
 }
 
-export async function prepareApplication(organizationId: string, vacancyId: string) {
+export async function prepareApplication(organizationId: string, vacancyId: string, forceRegenerate = false) {
   const started = Date.now();
   const vacancy = await prisma.jobVacancy.findFirst({ where: { id: vacancyId, organizationId } });
   if (!vacancy) throw new AppError("Vacancy not found.");
   const candidateRow = await ensureCandidate(organizationId);
+
+  const previousApp = await prisma.jobApplication.findUnique({
+    where: { organizationId_vacancyId_candidateId: { organizationId, vacancyId, candidateId: candidateRow.id } },
+    include: { package: true },
+  });
+
+  // Idempotency check: Reuse existing package if already prepared and not forced
+  if (!forceRegenerate && previousApp && previousApp.cvId && previousApp.package) {
+    return previousApp.id;
+  }
+
   const candidate = await loadCandidateRecord(candidateRow.id);
   const job: JobInput = {
     title: vacancy.title,
@@ -431,11 +463,7 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
       section: answer.section,
     })),
   };
-  const previous = await prisma.jobApplication.findUnique({
-    where: { organizationId_vacancyId_candidateId: { organizationId, vacancyId, candidateId: candidateRow.id } },
-    include: { package: true },
-  });
-  const version = nextPackageVersion(previous?.package?.version);
+  const version = nextPackageVersion(previousApp?.package?.version);
   const application = await prisma.jobApplication.upsert({
     where: { organizationId_vacancyId_candidateId: { organizationId, vacancyId, candidateId: candidateRow.id } },
     update: { profile: fit.profile, status, cvId, coverLetterId, source: vacancy.source, applicationUrl: vacancy.applicationUrl },
@@ -590,4 +618,17 @@ async function maybeRewrite(text: string, candidate: CandidateRecord) {
   } catch {
     return text;
   }
+}
+
+export async function archiveStaleVacancies(organizationId: string, olderThanDays = 14) {
+  const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+  const result = await prisma.jobVacancy.updateMany({
+    where: { 
+      organizationId, 
+      lastCheckedAt: { lt: cutoff },
+      status: { notIn: ["ARCHIVED", "REJECTED", "DUPLICATE"] },
+    },
+    data: { status: "ARCHIVED" }
+  });
+  return result.count;
 }

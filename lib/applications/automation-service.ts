@@ -49,7 +49,7 @@ export async function recordInspectionRun(input: {
       nextRetryAt: plan?.nextRetryAt ? new Date(plan.nextRetryAt) : null,
       completedAt: new Date(),
       fields: {
-        create: stored.map((field) => ({
+        create: Array.from(new Map(stored.map((field) => [field.fieldKey, field])).values()).map((field) => ({
           applicationId: input.applicationId,
           packageId: input.packageId,
           fieldKey: field.fieldKey,

@@ -243,7 +243,7 @@ export async function enqueueApplicationPreparation(formData: FormData) {
       organizationId: organization.id,
       queue: "application-preparation",
       name: "prepare",
-      payload: { organizationId: organization.id, vacancyId },
+      payload: { organizationId: organization.id, vacancyId, forceRegenerate: String(formData.get("reprepare") === "on") },
     });
   } catch (error) {
     redirect(`/jobs?error=${encodeURIComponent(errorMessage(error))}`);

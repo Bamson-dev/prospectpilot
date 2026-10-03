@@ -113,7 +113,7 @@ followUps.on("failed", (job, error) => {
 
 start("job-discovery", async (data) => {
   if (!data.organizationId) throw new Error("Job discovery is missing an organization.");
-  await processJobDiscovery(data.organizationId, data.query || "software engineer remote", data.limit);
+  await processJobDiscovery(data.organizationId, data.runId);
 });
 
 const jobDiscoveryScheduler = new Worker(
@@ -140,7 +140,7 @@ for (const name of ["job-analysis", "job-fit"] as const) {
 for (const name of ["cv-generation", "cover-letter", "application-preparation", "application-verification"] as const) {
   start(name, async (data) => {
     if (!data.organizationId || !data.vacancyId) throw new Error("Application job is missing its target.");
-    await processApplicationPreparation(data.organizationId, data.vacancyId);
+    await processApplicationPreparation(data.organizationId, data.vacancyId, data.forceRegenerate === "true");
   });
 }
 

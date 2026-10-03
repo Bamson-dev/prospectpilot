@@ -348,16 +348,98 @@ export async function decideApplication(formData: FormData) {
     blocker: blockerFromTimings(application.package?.timings),
   });
   if ("error" in result && result.error) redirect(`/jobs/applications/${id}?error=${encodeURIComponent(result.error)}`);
-  if (result.requiresTransition && !canTransition(application.status as ApplicationStatus, result.status as ApplicationStatus)) {
+  
+  const targetStatus = result.status === "APPROVED" ? "READY_FOR_SUBMISSION" : result.status;
+  
+  if (result.requiresTransition && !canTransition(application.status as ApplicationStatus, targetStatus as ApplicationStatus)) {
     redirect(`/jobs/applications/${id}?error=That+status+change+is+not+allowed.`);
   }
-  if (result.status !== application.status) {
-    await prisma.jobApplication.update({ where: { id: application.id }, data: { status: result.status as ApplicationStatus, submittedAt: null } });
+  if (targetStatus !== application.status) {
+    await prisma.jobApplication.update({ where: { id: application.id }, data: { status: targetStatus as ApplicationStatus, submittedAt: null } });
   }
   await prisma.applicationEvent.create({
     data: { applicationId: application.id, type: result.event, detail: result.detail },
   });
   redirect(`/jobs/applications/${id}?notice=Package+decision+saved.+Nothing+was+submitted.`);
+}
+
+export async function batchDecideApplications(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const decision = String(formData.get("decision") ?? "");
+  if (decision !== "APPROVED" && decision !== "REJECTED") redirect("/jobs/applications?error=Unknown+decision.");
+  const ids = formData.getAll("id").map(String).filter(Boolean);
+  if (ids.length === 0) redirect("/jobs/applications?error=No+applications+selected.");
+  
+  const applications = await prisma.jobApplication.findMany({
+    where: { id: { in: ids }, organizationId: organization.id },
+    include: { package: true },
+  });
+
+  let success = 0;
+  let failed = 0;
+
+  for (const application of applications) {
+    if (application.submittedAt || application.status === "SUBMITTED" || application.status === "SUBMITTING") {
+      failed++;
+      continue;
+    }
+    const result = packageApproval({
+      status: application.status,
+      decision,
+      reason: String(formData.get("reason") ?? "Batch decision"),
+      packageVersion: application.package?.version ?? 1,
+      blocker: blockerFromTimings(application.package?.timings),
+    });
+    if ("error" in result) {
+      failed++;
+      continue;
+    }
+    const targetStatus = result.status === "APPROVED" ? "READY_FOR_SUBMISSION" : result.status;
+    if (result.requiresTransition && !canTransition(application.status as ApplicationStatus, targetStatus as ApplicationStatus)) {
+      failed++;
+      continue;
+    }
+    if (targetStatus !== application.status) {
+      await prisma.jobApplication.update({ where: { id: application.id }, data: { status: targetStatus as ApplicationStatus, submittedAt: null } });
+    }
+    await prisma.applicationEvent.create({
+      data: { applicationId: application.id, type: result.event, detail: result.detail },
+    });
+    success++;
+  }
+  
+  redirect(`/jobs/applications?notice=Batch+${decision.toLowerCase()}+completed.+Success:+${success},+Failed:+${failed}`);
+}
+
+export async function requestRegeneration(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const id = String(formData.get("id") ?? "");
+  const application = await prisma.jobApplication.findFirst({
+    where: { id, organizationId: organization.id },
+  });
+  if (!application) redirect("/jobs/applications?error=Application+not+found.");
+  
+  if (application.status === "SUBMITTED" || application.status === "VERIFIED") {
+    redirect(`/jobs/applications/${id}?error=Cannot+regenerate+a+submitted+application.`);
+  }
+
+  await prisma.jobApplication.update({
+    where: { id: application.id },
+    data: { status: "PREPARING" },
+  });
+
+  await prisma.applicationEvent.create({
+    data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: "Human requested package regeneration." },
+  });
+
+  await queueJob({
+    organizationId: organization.id,
+    queue: "application-preparation",
+    name: "prepare",
+    payload: { organizationId: organization.id, vacancyId: application.vacancyId, forceRegenerate: true },
+  });
+
+  redirect(`/jobs/applications/${id}?notice=Regeneration+requested.`);
 }
 
 export async function recordManualReview(formData: FormData) {
@@ -423,16 +505,100 @@ export async function recordSubmissionConfirmation(formData: FormData) {
   if (phrase !== "CONFIRM SUBMISSION" || gate.status === "REQUIRES_MANUAL_ACTION") {
     redirect(`/jobs/applications/${id}?error=${encodeURIComponent(gate.reason)}`);
   }
-  if (application.status !== "APPROVED" && application.status !== "READY_FOR_SUBMISSION") {
+  if (application.status !== "APPROVED" && application.status !== "READY_FOR_SUBMISSION" && application.status !== "READY_TO_SUBMIT") {
     redirect(`/jobs/applications/${id}?error=Approve+the+package+before+confirming+submission.`);
   }
-  if (application.status === "APPROVED" && canTransition(application.status, "READY_FOR_SUBMISSION")) {
-    await prisma.jobApplication.update({ where: { id: application.id }, data: { status: "READY_FOR_SUBMISSION", blockedReason: gate.reason } });
-  }
-  await prisma.applicationEvent.create({
-    data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: "Confirmation recorded. Nothing was submitted." },
+  
+  await prisma.jobApplication.update({
+    where: { id: application.id },
+    data: { status: "SUBMITTED", submittedAt: new Date(), blockedReason: null },
   });
-  redirect(`/jobs/applications/${id}?notice=Confirmation+recorded.+Nothing+was+submitted.`);
+  
+  await prisma.applicationEvent.create({
+    data: { applicationId: application.id, type: "SUBMITTED", detail: "Human marked application as externally submitted." },
+  });
+  redirect(`/jobs/applications/${id}?notice=Application+marked+as+submitted.`);
+}
+
+export async function withdrawApplication(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const id = String(formData.get("id") ?? "");
+  const note = String(formData.get("note") ?? "");
+  
+  const application = await prisma.jobApplication.findFirst({
+    where: { id, organizationId: organization.id },
+    include: { package: true },
+  });
+  if (!application) redirect("/jobs/applications?error=Application+not+found.");
+  
+  if (!canTransition(application.status as ApplicationStatus, "WITHDRAWN")) {
+    redirect(`/jobs/applications/${id}?error=Cannot+withdraw+from+current+state.`);
+  }
+
+  await prisma.jobApplication.update({
+    where: { id: application.id },
+    data: { status: "WITHDRAWN" },
+  });
+
+  await prisma.applicationEvent.create({
+    data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: `Application withdrawn. Note: ${note}` },
+  });
+  
+  redirect(`/jobs/applications/${id}?notice=Application+withdrawn.`);
+}
+
+export async function addApplicationNote(formData: FormData) {
+  const { user, organization } = await requireOrganization("MEMBER");
+  const id = String(formData.get("id") ?? "");
+  const body = String(formData.get("body") ?? "").trim();
+  
+  if (!body) redirect(`/jobs/applications/${id}?error=Note+cannot+be+empty.`);
+
+  const application = await prisma.jobApplication.findFirst({
+    where: { id, organizationId: organization.id },
+  });
+  if (!application) redirect("/jobs/applications?error=Application+not+found.");
+
+  await prisma.applicationNote.create({
+    data: {
+      applicationId: application.id,
+      userId: user.id,
+      author: user.name,
+      body,
+    },
+  });
+  
+  redirect(`/jobs/applications/${id}?notice=Note+added.`);
+}
+
+export async function scheduleApplicationFollowUp(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const id = String(formData.get("id") ?? "");
+  const runAtStr = String(formData.get("runAt") ?? "");
+  const channel = String(formData.get("channel") ?? "EMAIL");
+  const note = String(formData.get("note") ?? "").trim();
+  
+  if (!note || !runAtStr) redirect(`/jobs/applications/${id}?error=Date+and+note+are+required.`);
+
+  const application = await prisma.jobApplication.findFirst({
+    where: { id, organizationId: organization.id },
+  });
+  if (!application) redirect("/jobs/applications?error=Application+not+found.");
+
+  const runAt = new Date(runAtStr);
+  if (isNaN(runAt.getTime())) redirect(`/jobs/applications/${id}?error=Invalid+date.`);
+
+  await prisma.applicationFollowUp.create({
+    data: {
+      applicationId: application.id,
+      runAt,
+      channel,
+      status: "DRAFT",
+      draft: note,
+    },
+  });
+  
+  redirect(`/jobs/applications/${id}?notice=Follow-up+scheduled.`);
 }
 
 export async function saveCandidateDocument(formData: FormData) {

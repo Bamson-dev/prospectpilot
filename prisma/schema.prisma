@@ -142,14 +142,15 @@ enum OpportunityStatus {
 }
 
 model User {
-  id           String        @id @default(cuid())
-  email        String        @unique
-  name         String
-  passwordHash String
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  memberships  Membership[]
-  activity     ActivityLog[]
+  id               String            @id @default(cuid())
+  email            String            @unique
+  name             String
+  passwordHash     String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  memberships      Membership[]
+  activity         ActivityLog[]
+  applicationNotes ApplicationNote[]
 }
 
 model Organization {
@@ -757,6 +758,8 @@ enum ApplicationPackageStatus {
   CLOUDFLARE_CHALLENGE
   FORM_NOT_FOUND
   SUBMISSION_UNCONFIRMED
+  REJECTED_BY_EMPLOYER
+  OFFER
 }
 
 enum ApplicationEventType {
@@ -1234,6 +1237,7 @@ model JobApplication {
   vacancy          JobVacancy                   @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
   package          ApplicationPackage?
   events           ApplicationEvent[]
+  notes            ApplicationNote[]
   answers          ApplicationAnswer[]
   followUps        ApplicationFollowUp[]
   automationRuns   ApplicationAutomationRun[]
@@ -1252,6 +1256,20 @@ model ApplicationEvent {
   detail        String?
   createdAt     DateTime             @default(now())
   application   JobApplication       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+}
+
+model ApplicationNote {
+  id            String         @id @default(cuid())
+  applicationId String
+  userId        String?
+  author        String?
+  body          String         @db.Text
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  application   JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([applicationId, createdAt])
 }

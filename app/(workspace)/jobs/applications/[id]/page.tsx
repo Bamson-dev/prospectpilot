@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { decideApplication, enqueueApplicationPreparation, recordManualReview, recordSubmissionConfirmation } from "@/actions/job-applications";
+import { decideApplication, recordManualReview, recordSubmissionConfirmation, requestRegeneration, withdrawApplication, addApplicationNote, scheduleApplicationFollowUp } from "@/actions/job-applications";
 import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -32,6 +32,7 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
       events: { orderBy: { createdAt: "desc" }, take: 30 },
       followUps: true,
       candidate: { include: { facts: true, projects: true, experiences: true } },
+      notes: { orderBy: { createdAt: "desc" } },
     },
   });
   if (!application) notFound();
@@ -194,9 +195,34 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <div className="mt-3 flex flex-wrap gap-2">
           <form action={decideApplication}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="APPROVED" /><SubmitButton pendingLabel="Saving">Approve package</SubmitButton></form>
           <form action={decideApplication} className="flex flex-wrap items-center gap-2"><input type="hidden" name="id" value={application.id} /><input type="hidden" name="decision" value="REJECTED" /><input name="reason" placeholder="Rejection reason" required /><SubmitButton pendingLabel="Saving" variant="secondary">Reject package</SubmitButton></form>
-          <a className="inline-flex items-center rounded border border-line px-3 py-2 text-sm" href="/jobs/candidate">Edit</a>
-          <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="reprepare" value="on" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate CV</SubmitButton></form>
-          <form action={enqueueApplicationPreparation}><input type="hidden" name="vacancyId" value={application.vacancyId} /><input type="hidden" name="reprepare" value="on" /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate letter</SubmitButton></form>
+          <form action={withdrawApplication} className="flex flex-wrap items-center gap-2"><input type="hidden" name="id" value={application.id} /><input name="note" placeholder="Withdrawal reason" required /><SubmitButton pendingLabel="Saving" variant="secondary">Withdraw</SubmitButton></form>
+          <a className="inline-flex items-center rounded border border-line px-3 py-2 text-sm" href="/jobs/candidate">Edit Profile</a>
+          <form action={requestRegeneration}><input type="hidden" name="id" value={application.id} /><SubmitButton pendingLabel="Queuing" variant="secondary">Regenerate package</SubmitButton></form>
+        </div>
+      </Panel>
+      <Panel className="mb-3">
+        <h2 className="font-display text-2xl">Notes & Follow-ups</h2>
+        <div className="mt-2 grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <p className="text-sm font-semibold">Add Internal Note</p>
+            <form action={addApplicationNote} className="mt-2 grid gap-2">
+              <input type="hidden" name="id" value={application.id} />
+              <textarea name="body" className="w-full rounded border border-line p-2 text-sm" placeholder="Internal note..." required rows={3}></textarea>
+              <SubmitButton pendingLabel="Saving">Add note</SubmitButton>
+            </form>
+            <div className="mt-4">
+              {application.notes.map((note) => <p key={note.id} className="mt-2 text-sm"><strong>{note.author ?? "Unknown"}</strong> {note.createdAt.toLocaleDateString()}: {note.body}</p>)}
+            </div>
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Schedule Follow-up</p>
+            <form action={scheduleApplicationFollowUp} className="mt-2 grid gap-2">
+              <input type="hidden" name="id" value={application.id} />
+              <input type="date" name="runAt" required className="w-full rounded border border-line p-2 text-sm" />
+              <input name="note" placeholder="Follow-up reason/note" required className="w-full rounded border border-line p-2 text-sm" />
+              <SubmitButton pendingLabel="Scheduling">Schedule</SubmitButton>
+            </form>
+          </div>
         </div>
       </Panel>
       <Panel className="mb-3">

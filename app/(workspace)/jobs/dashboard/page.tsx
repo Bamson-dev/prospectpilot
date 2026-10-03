@@ -2,6 +2,7 @@ import { JobsNav } from "@/components/jobs-nav";
 import { PageHeader, Panel } from "@/components/ui";
 import { requireOrganization } from "@/lib/current-user";
 import { prisma } from "@/lib/db";
+import Link from "next/link";
 
 export const metadata = { title: "Daily Dashboard" };
 
@@ -45,9 +46,11 @@ export default async function DashboardPage() {
   let ready = 0;
   let preparing = 0;
   let blocked = 0;
+  let needsReview = 0;
   
   for (const app of applications) {
-    if (app.status === "READY_FOR_SUBMISSION") ready++;
+    if (app.status === "APPROVED" || app.status === "READY_FOR_SUBMISSION" || app.status === "READY_TO_SUBMIT") ready++;
+    else if (app.status === "READY_FOR_REVIEW" || app.status === "REQUIRES_REVIEW" || app.status === "REQUIRES_MANUAL_ACTION") needsReview++;
     else if (app.status.includes("REQUIRED") || app.status.includes("LIMITED") || app.status.includes("CHALLENGE") || app.status.includes("NOT_FOUND")) blocked++;
     else preparing++;
   }
@@ -86,19 +89,24 @@ export default async function DashboardPage() {
         </Panel>
 
         <Panel className="lg:col-span-2">
-          <h2 className="text-xl font-display mb-4">Application Automation Queue</h2>
-          <div className="grid grid-cols-3 gap-4 text-center">
+          <h2 className="text-xl font-display mb-4">Command Center Queue</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
             <div className="p-4 bg-muted/20 rounded">
               <p className="text-3xl font-display">{preparing}</p>
-              <p className="text-sm text-muted mt-1">Preparing / Packages Not Ready</p>
+              <p className="text-sm text-muted mt-1">Preparing</p>
+            </div>
+            <div className="p-4 bg-muted/20 rounded border-2 border-primary/20">
+              <p className="text-3xl font-display">{needsReview}</p>
+              <p className="text-sm text-muted mt-1">Needs Human Review</p>
+              <Link href="/jobs/applications?filter=REVIEW_REQUIRED" className="mt-2 text-xs text-primary block">View Queue &rarr;</Link>
             </div>
             <div className="p-4 bg-muted/20 rounded">
               <p className="text-3xl font-display">{ready}</p>
-              <p className="text-sm text-muted mt-1">Ready for Submission</p>
+              <p className="text-sm text-muted mt-1">Approved & Ready</p>
             </div>
             <div className="p-4 bg-muted/20 rounded">
               <p className="text-3xl font-display text-destructive">{blocked}</p>
-              <p className="text-sm text-muted mt-1">Blocked / Manual Action</p>
+              <p className="text-sm text-muted mt-1">Blocked / Requires Auth</p>
             </div>
           </div>
         </Panel>

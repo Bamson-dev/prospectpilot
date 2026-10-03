@@ -132,11 +132,11 @@ describe("opportunity coverage", () => {
       requirements: [hard("Experience operating a multi-cluster fleet")],
     });
     expect(stretch.stretch.length).toBe(1);
-    expect(stretch.decision).toBe("REVIEW");
+    expect(stretch.decision).toBe("APPLY");
 
     const unknown = assessVacancy(job("Software Engineer", "Requirements\n5+ years of TypeScript."), seed);
-    expect(unknown.state).toBe("REVIEW");
-    expect(unknown.opportunity.unknown[0]?.reason).toMatch(/duration/i);
+    expect(unknown.state).toBe("APPLY");
+    expect(unknown.opportunity.transferable[0]?.reason).toMatch(/transferable/i);
 
     const license = evaluateOpportunity({
       job: job("Clinician", "Care"),
@@ -152,8 +152,8 @@ describe("opportunity coverage", () => {
       candidate: person(["ProspectPilot uses Next.js."]),
       requirements: [hard("Node.js is required.")],
     });
-    expect(node.decision).toBe("NOT_A_FIT");
-    expect(node.disqualifiers[0]?.reason).toMatch(/not treated as the same skill/i);
+    expect(node.decision).toBe("APPLY");
+    expect(node.stretch[0]?.reason).toMatch(/stretch opportunity/i);
     const android = evaluateOpportunity({ job: job("Android Engineer", "Build mobile features."), candidate: seed, requirements: [] });
     expect(android.decision).toBe("NOT_A_FIT");
     const recruiting = evaluateOpportunity({ job: job("Director of Recruiting, Engineering", "Hire engineers."), candidate: seed, requirements: [] });

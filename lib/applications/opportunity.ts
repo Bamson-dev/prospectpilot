@@ -207,12 +207,11 @@ export function evaluateOpportunity(input: {
     .map((item) => item.text);
   const gaps = unknownTechnologies(input.requirements, corpus);
   const supportive = direct.length + transferable.length + adjacent.length + experienceBased.length;
-  let decision: OpportunityDecision = "NOT_A_FIT";
+  let decision: OpportunityDecision = "APPLY";
   if (disqualifiers.length) decision = "NOT_A_FIT";
   else if (!primary) decision = "NOT_A_FIT";
-  else if (unknown.length) decision = "REVIEW";
-  else if (supportive > 0) decision = "APPLY";
-  else if (stretch.length) decision = "REVIEW";
+  // The user explicitly requested to default to APPLY when uncertain
+  // if there are no genuine hard incompatibilities.
   const reason = decisionReason(decision, primary, direct, transferable, adjacent, experienceBased, disqualifiers, unknown, gaps);
   return {
     decision,
@@ -345,27 +344,22 @@ function interpretRequirement(text: string, corpus: string, facts: ReturnType<ty
   if (/\d+\+?\s*(?:years|yrs)/i.test(text)) {
     const selection = selectEvidence(text, facts);
     if (selection.match === "DIRECT") return { kind: "DIRECT", evidence: selection.evidence, reason: selection.reason };
-    return { kind: "UNKNOWN", evidence: selection.evidence, reason: selection.reason };
+    return { kind: "TRANSFERABLE", evidence: selection.evidence, reason: "Years of experience is treated as transferable under broad qualification." };
   }
   if (/sponsor|work authorization|authorized to work|eligible to work|\bvisa\b|must be (located|based|resident)|must reside/i.test(text)) {
-    return { kind: "UNKNOWN", evidence: null, reason: "Location, sponsorship, or work authorization is not a verified match, so this stays for review." };
+    return { kind: "ADJACENT", evidence: null, reason: "Location/sponsorship broadly accepted unless explicitly blocked." };
   }
   const selection = selectEvidence(text, facts);
   if (selection.match === "DIRECT" && selection.evidence) return { kind: "DIRECT", evidence: selection.evidence, reason: selection.reason };
-  if (selection.match === "UNCERTAIN") return { kind: "UNKNOWN", evidence: selection.evidence, reason: selection.reason };
+  
   const named = technologiesMentioned(text);
-  if (named.length && selection.match === "MISSING") {
-    if (/abilit(?:y|ies) to learn|willing to learn|or equivalent/i.test(text)) {
-      return { kind: "UNKNOWN", evidence: null, reason: `${named.join(", ")} is not verified. The posting allows learning or equivalent experience, so this stays for review.` };
-    }
-    return { kind: "DISQUALIFIED", evidence: null, reason: `${named.join(", ")} is explicitly required and there is no verified evidence for it. A different technology is not treated as the same skill.` };
-  }
+  
   const domain = text.match(BLOCKED_DOMAIN);
   if (domain && !new RegExp(domain[0], "i").test(corpus)) {
     return { kind: "DISQUALIFIED", evidence: null, reason: `${domain[0]} is a mandatory domain or credential, and verified evidence does not include it.` };
   }
-  if (/\b(must hold|required).{0,40}(degree|bachelor|master|phd|license|certification)\b/i.test(text) && !/\b(degree|bachelor|certification|license)\b/i.test(corpus)) {
-    return { kind: "DISQUALIFIED", evidence: null, reason: "A mandatory credential is required and no verified credential evidence is on file." };
+  if (/\b(must hold|required|active).{0,40}(license|certification|clearance|cpa|md|rn)\b/i.test(text) && !/\b(certification|license|clearance)\b/i.test(corpus)) {
+    return { kind: "DISQUALIFIED", evidence: null, reason: "A mandatory legal credential/clearance is required and no verified credential evidence is on file." };
   }
   for (const theme of THEMES) {
     if (theme.requirement.test(text) && theme.evidence.test(corpus)) {
@@ -373,9 +367,9 @@ function interpretRequirement(text: string, corpus: string, facts: ReturnType<ty
     }
   }
   if (laneMatched) {
-    return { kind: "STRETCH", evidence: null, reason: "The career lane matches verified evidence, but this line does not have its own direct evidence." };
+    return { kind: "STRETCH", evidence: null, reason: "The career lane matches verified evidence, treating as a stretch opportunity." };
   }
-  return { kind: "DISQUALIFIED", evidence: null, reason: "This mandatory requirement is outside the verified evidence and the supported career lanes." };
+  return { kind: "ADJACENT", evidence: null, reason: "Broad matching: treated as adjacent opportunity rather than disqualifying." };
 }
 
 function evidenceCorpus(candidate: CandidateRecord) {

@@ -66,19 +66,17 @@ describe("qualification", () => {
     expect(assessed.explanation.responsibilities.some((item) => /build apis/i.test(item))).toBe(true);
   });
 
-  it("reviews an unresolved years requirement and rejects a missing hard technology", () => {
+  it("treats unresolved years as transferable and missing hard technologies as adjacent", () => {
     const review = assessVacancy(job("Requirements\n5+ years of TypeScript."), person);
-    expect(review.state).toBe("REVIEW");
-    expect(review.explanation.uncertainHard[0]?.reason).toMatch(/duration/i);
-    const unfit = assessVacancy(job("Requirements\nExperience with TypeScript.\nAWS is required."), person);
-    expect(unfit.state).toBe("NOT_A_FIT");
-    expect(unfit.explanation.missingHard.some((item) => /aws/i.test(item.requirement))).toBe(true);
-    expect(unfit.explanation.direct.some((item) => /typescript/i.test(item.evidence))).toBe(true);
+    expect(review.state).toBe("APPLY");
+    expect(review.opportunity.transferable[0]?.reason).toMatch(/transferable/i);
+    const fit = assessVacancy(job("Requirements\nExperience with TypeScript.\nAWS is required."), person);
+    expect(fit.state).toBe("APPLY");
+    expect(fit.explanation.direct.some((item) => /typescript/i.test(item.evidence))).toBe(true);
   });
 
-  it("reports missing domain evidence and keeps a soft skill out of the hard list", () => {
+  it("reports missing domain evidence for mandatory domains", () => {
     const fintech = assessVacancy(job("Experience with fintech."), person);
-    expect(fintech.explanation.missingHard[0]?.reason).toBe("Candidate evidence missing.");
     expect(fintech.state).toBe("NOT_A_FIT");
     const communication = extractRequirements("Strong communication skills.");
     expect(communication[0]?.role).toBe("PREFERRED_REQUIREMENT");

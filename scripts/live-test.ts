@@ -112,7 +112,7 @@ async function main() {
   const startTime = Date.now();
   let completed = false;
   
-  console.log("Monitoring progress. Waiting for 10 processed applications...");
+  console.log("Monitoring progress. Waiting for 200 processed applications...");
 
   while (!completed) {
     await delay(5000);
@@ -145,9 +145,9 @@ async function main() {
     const aq = await appQueue.getJobCounts();
     
     console.log(`Queues -> Disc: ${dq.active+dq.waiting}, Qual: ${qq.active+qq.waiting}, Prep: ${pq.active+pq.waiting}, App: ${aq.active+aq.waiting}`);
-    console.log(`Processed: ${totalProcessed}/10 (Submitted: ${submitted}, Unverified: ${unverified}, Manual: ${manual}, Failed: ${failed})`);
+    console.log(`Processed: ${totalProcessed}/200 (Submitted: ${submitted}, Unverified: ${unverified}, Manual: ${manual}, Failed: ${failed})`);
     
-    if (totalProcessed >= 10) {
+    if (totalProcessed >= 200) {
       completed = true;
     }
     
@@ -157,7 +157,7 @@ async function main() {
       completed = true;
     }
     
-    if (Date.now() - startTime > 15 * 60 * 1000) {
+    if (Date.now() - startTime > 45 * 60 * 1000) {
       console.log("Benchmark timed out after 15 minutes.");
       break;
     }

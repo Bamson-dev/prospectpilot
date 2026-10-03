@@ -4,6 +4,7 @@ import { queueJob, recordActivity } from "@/lib/jobs";
 import { enqueue } from "@/lib/queues";
 import { applicationAutomationEnabled, applicationMode, jobDiscoveryEnabled } from "@/lib/applications/config";
 import { collectPublicVacancies } from "@/lib/applications/job-sources";
+import { isApplicationAccessible } from "@/lib/discovery/health";
 import { analysisJobDecision, emptySummary, prepareDiscoveredVacancies } from "@/lib/applications/job-pipeline";
 import { attachBrowserInspection } from "@/lib/applications/public-inspection";
 import { persistNormalizedVacancies, prepareApplication, archiveStaleVacancies } from "@/lib/applications/service";
@@ -125,7 +126,17 @@ export async function processJobDiscovery(organizationId: string, runId: string)
         }
         
         const prepared = prepareDiscoveredVacancies(collected.jobs, fullQuery);
-        const capped = prepared.kept.slice(0, limitPerQuery);
+        
+        const accessibleJobs = [];
+        for (const job of prepared.kept) {
+          if (await isApplicationAccessible(job.applicationUrl, job.source)) {
+            accessibleJobs.push(job);
+          } else {
+            prepared.invalidSources.push(job.title);
+          }
+        }
+        
+        const capped = accessibleJobs.slice(0, limitPerQuery);
         totalRejectedVacancies += prepared.invalidSources.length;
         
         const saved = await persistNormalizedVacancies(organizationId, capped);

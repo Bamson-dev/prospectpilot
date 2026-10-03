@@ -121,7 +121,7 @@ export default async function CandidatePage({ searchParams }: { searchParams: Pr
         <Panel>
           <h2 className="font-display text-xl mb-4">Evidence by Career Lane</h2>
           <div className="space-y-6">
-            {["SOFTWARE", "MARKETING", "HYBRID"].map(lane => {
+            {(["SOFTWARE", "MARKETING", "HYBRID"] as import("@prisma/client").CareerProfileKind[]).map(lane => {
               const laneProjects = candidate.projects.filter(p => p.profiles.includes(lane));
               const laneExp = candidate.experiences.filter(e => e.profiles.includes(lane));
               

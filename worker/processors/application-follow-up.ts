@@ -30,7 +30,7 @@ export async function generateApplicationFollowUpDrafts() {
       continue;
     }
 
-    const candidateFacts = followUp.application.candidate.facts.map(f => f.text);
+    const candidateFacts = followUp.application.candidate.facts.map(f => f.fact);
     const candidateName = `${followUp.application.candidate.firstName} ${followUp.application.candidate.lastName}`;
     const vacancyTitle = followUp.application.vacancy.title;
     const companyName = followUp.application.vacancy.companyName;
@@ -159,7 +159,7 @@ export async function processApprovedApplicationFollowUps() {
       prisma.applicationEvent.create({
         data: {
           applicationId: followUp.applicationId,
-          type: "EMPLOYER_REPLY_SENT" as any, // Repurposed for outbound emails to employers
+          type: "EMPLOYER_REPLY_SENT", // Repurposed for outbound emails to employers
           detail: `Sent follow-up to ${followUp.channel} (Message ID: ${result.providerMessageId})`
         }
       })

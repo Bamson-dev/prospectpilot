@@ -86,7 +86,7 @@ export async function processApprovedEmployerReplies() {
       prisma.applicationEvent.create({
         data: {
           applicationId: reply.applicationId,
-          type: "EMPLOYER_REPLY_SENT" as any,
+          type: "EMPLOYER_REPLY_SENT",
           detail: `Sent reply to ${reply.fromEmail} (Message ID: ${result.providerMessageId})`
         }
       })

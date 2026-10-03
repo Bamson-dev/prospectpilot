@@ -102,7 +102,7 @@ async function importGmailMessage(organizationId: string, accessToken: string, m
       await prisma.applicationEvent.create({
         data: {
           applicationId: application.id,
-          type: "EMPLOYER_REPLY_RECEIVED" as any,
+          type: "EMPLOYER_REPLY_RECEIVED",
           detail: `Received reply from ${email}: ${subject}`
         }
       });
@@ -205,7 +205,7 @@ export async function processEmployerReply(replyId: string) {
   });
   if (!reply) return;
   
-  const candidateFacts = reply.application.candidate.facts.map(f => f.text);
+  const candidateFacts = reply.application.candidate.facts.map(f => f.fact);
 
   const { classification, suggestedDraft } = await classifyAndDraftEmployerReply(
     reply.subject || "",

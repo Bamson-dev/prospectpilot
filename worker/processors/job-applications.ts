@@ -46,7 +46,7 @@ export async function processJobDiscoveryScheduler() {
   }
 }
 
-export async function processJobDiscovery(organizationId: string, runId: string) {
+export async function processJobDiscovery(organizationId: string, runId: string, manualQuery?: string, manualLimit?: number) {
   if (!jobDiscoveryEnabled()) {
     logInfo("job_discovery.disabled", { organizationId });
     return emptySummary();
@@ -63,46 +63,50 @@ export async function processJobDiscovery(organizationId: string, runId: string)
     data: { status: "RUNNING" }
   });
 
-  const queries = new Set<string>();
-  for (const profile of run.candidate.profiles) {
-    const baseTitle = profile.title.toLowerCase().trim();
-    queries.add(baseTitle);
-    
-    if (baseTitle.includes("software") || baseTitle.includes("engineer") || baseTitle.includes("developer")) {
-      queries.add("software engineer");
-      queries.add("backend engineer");
-      queries.add("full stack engineer");
-    }
-    if (baseTitle.includes("product manager")) {
-      queries.add("product manager");
-      queries.add("senior product manager");
-    }
-    if (baseTitle.includes("marketing")) {
-      queries.add("growth marketing manager");
-      queries.add("performance marketing manager");
-      queries.add("product marketing manager");
-    }
-    if (baseTitle.includes("founder")) {
-      queries.add("founder");
-      queries.add("technical product");
-    }
-  }
-
   const pref = run.candidate.preference;
   const locations = pref?.remoteOnly ? ["remote"] : (pref?.locations?.length ? pref.locations : ["remote"]);
   const dailyTarget = pref?.dailyTarget ?? 500;
   
   const expandedQueries = new Set<string>();
-  for (const query of queries) {
-    expandedQueries.add(`${query} site:ashbyhq.com`);
-    expandedQueries.add(`${query} site:jobs.workable.com`);
-    expandedQueries.add(`${query} site:jobs.smartrecruiters.com`);
-    expandedQueries.add(`${query} site:greenhouse.io`);
-    expandedQueries.add(`${query} site:lever.co`);
-    expandedQueries.add(query); // direct employer career pages
+
+  if (manualQuery) {
+    expandedQueries.add(manualQuery);
+  } else {
+    const queries = new Set<string>();
+    for (const profile of run.candidate.profiles) {
+      const baseTitle = profile.title.toLowerCase().trim();
+      queries.add(baseTitle);
+      
+      if (baseTitle.includes("software") || baseTitle.includes("engineer") || baseTitle.includes("developer")) {
+        queries.add("software engineer");
+        queries.add("backend engineer");
+        queries.add("full stack engineer");
+      }
+      if (baseTitle.includes("product manager")) {
+        queries.add("product manager");
+        queries.add("senior product manager");
+      }
+      if (baseTitle.includes("marketing")) {
+        queries.add("growth marketing manager");
+        queries.add("performance marketing manager");
+        queries.add("product marketing manager");
+      }
+      if (baseTitle.includes("founder")) {
+        queries.add("founder");
+        queries.add("technical product");
+      }
+    }
+    for (const query of queries) {
+      expandedQueries.add(`${query} site:ashbyhq.com`);
+      expandedQueries.add(`${query} site:jobs.workable.com`);
+      expandedQueries.add(`${query} site:jobs.smartrecruiters.com`);
+      expandedQueries.add(`${query} site:greenhouse.io`);
+      expandedQueries.add(`${query} site:lever.co`);
+      expandedQueries.add(query); // direct employer career pages
+    }
   }
 
-  const limitPerQuery = Math.min(50, Math.ceil(dailyTarget / expandedQueries.size));
+  const limitPerQuery = manualLimit || Math.min(50, Math.ceil(dailyTarget / expandedQueries.size));
   
   let totalQueries = 0;
   let totalRawResults = 0;

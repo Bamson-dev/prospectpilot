@@ -127,7 +127,7 @@ const jobDiscoveryWorker = new Worker(
     const data = job.data as Record<string, string>;
     await runJob(data.jobId, async () => {
       if (!data.organizationId) throw new Error("Job discovery is missing an organization.");
-      await processJobDiscovery(data.organizationId, data.runId);
+      await processJobDiscovery(data.organizationId, data.runId, data.query, data.limit ? parseInt(data.limit, 10) : undefined);
     });
   },
   { connection, concurrency: concurrency("job-discovery"), settings: { backoffStrategy: retryBackoff } }

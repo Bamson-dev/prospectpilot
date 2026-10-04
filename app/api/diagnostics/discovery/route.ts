@@ -12,7 +12,7 @@ export async function authorizeAdmin(request: Request) {
   const authHeader = request.headers.get("authorization");
   if (authHeader && authHeader === `Bearer ${process.env.AUTH_SECRET}`) {
     const adminUser = await prisma.user.findFirst({
-      where: { memberships: { some: { role: "ADMIN" } } },
+      where: { memberships: { some: { role: { in: ["ADMIN", "OWNER"] } } } },
       orderBy: { createdAt: "desc" }
     });
     if (!adminUser) return null;
@@ -43,7 +43,7 @@ export async function authorizeAdmin(request: Request) {
 }
 
 export async function POST(request: Request) {
-  try {
+  try { console.log("API ROUTE HIT");
     const auth = await authorizeAdmin(request);
     if (!auth) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     const { organization } = auth;
     
     let body;
-    try {
+    try { console.log("API ROUTE HIT");
       body = await request.json();
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });

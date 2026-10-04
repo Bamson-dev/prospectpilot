@@ -13,10 +13,10 @@ export function credentialStatus(accounts: Array<{ provider: "RESEND" | "GMAIL";
   const gmailReady = Boolean(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REDIRECT_URI);
   return {
     googleSearch: process.env.GOOGLE_CSE_ENABLED === "true"
-      ? process.env.GOOGLE_CSE_API_KEY && process.env.GOOGLE_CSE_CX ? "connected" : "not_configured"
+      ? (String(process.env.GOOGLE_CSE_API_KEY || "") && String(process.env.GOOGLE_CSE_CX || "") ? "connected" : "not_configured")
       : "disabled",
-    deepseek: process.env.DEEPSEEK_API_KEY?.trim() ? "connected" : "not_configured",
-    resend: !process.env.RESEND_API_KEY?.trim()
+    deepseek: String(process.env.DEEPSEEK_API_KEY || "").trim() ? "connected" : "not_configured",
+    resend: !String(process.env.RESEND_API_KEY || "").trim()
       ? "not_configured"
       : resendAccount?.status === "ERROR" || resendAccount?.status === "RESTRICTED"
         ? "error"

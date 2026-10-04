@@ -8,7 +8,7 @@ beforeAll(async () => {
   }
 
   // HARD SAFETY CHECK
-  if (!dbUrl.includes("_test")) {
+  if (dbUrl.endsWith("/prospectpilot") || !dbUrl.includes("_test")) {
     throw new Error(`CRITICAL: Test suite attempted to run against production database! DATABASE_URL must end with '_test' (e.g. prospectpilot_test). Current: ${dbUrl}`);
   }
 

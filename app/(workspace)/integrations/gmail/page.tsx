@@ -5,6 +5,7 @@ import { gmailAuthUrl, GMAIL_STATE_PURPOSE } from "@/lib/email/gmail";
 import { SignJWT } from "jose";
 import { PageHeader, Panel, Pill } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
+import { disconnectGmail } from "@/actions/outreach";
 
 export default async function GmailIntegrationPage() {
   const { organization } = await requireOrganization();
@@ -73,13 +74,13 @@ export default async function GmailIntegrationPage() {
                 <div>
                   <span className="text-muted block">Last Sync</span>
                   <span className="font-medium">
-                    {emailAccounts[0].lastSyncAt ? new Date(emailAccounts[0].lastSyncAt).toLocaleString() : "Never"}
+                    {emailAccounts[0].lastSyncAt ? String(new Date(emailAccounts[0].lastSyncAt).toLocaleString()) : "Never"}
                   </span>
                 </div>
                 <div>
                   <span className="text-muted block">Last Send</span>
                   <span className="font-medium">
-                    {emailAccounts[0].lastSendAt ? new Date(emailAccounts[0].lastSendAt).toLocaleString() : "Never"}
+                    {emailAccounts[0].lastSendAt ? String(new Date(emailAccounts[0].lastSendAt).toLocaleString()) : "Never"}
                   </span>
                 </div>
               </div>
@@ -96,11 +97,7 @@ export default async function GmailIntegrationPage() {
               Please configure GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in your .env file to enable this feature.
             </p>
           ) : isConnected ? (
-            <form action={async () => {
-              "use server";
-              await prisma.emailAccount.deleteMany({ where: { organizationId: organization.id, provider: "GMAIL" } });
-              redirect("/integrations/gmail");
-            }}>
+            <form action={disconnectGmail}>
               <button type="submit" className="inline-flex h-9 items-center justify-center rounded-md bg-[#5a3030] px-4 py-2 text-sm font-medium text-white hover:bg-[#5a3030]/90 border-0">
                 Disconnect Gmail
               </button>

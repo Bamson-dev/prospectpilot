@@ -21,14 +21,14 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   return (
     <div>
       <PageHeader title="Integrations" detail="Status shows whether the server has a credential. Values are never displayed." />
-      <Flash error={query.error} notice={query.notice} />
+      <Flash error={query?.error ? String(query.error) : undefined} notice={query?.notice ? String(query.notice) : undefined} />
       <div className="mb-4 grid gap-3 md:grid-cols-3">
-        {flags.map(([label, state]) => <Panel key={label}><p>{label}</p><p className="text-sm text-muted">Status: {state}</p></Panel>)}
+        {flags.map(([label, state]) => <Panel key={String(label)}><p>{String(label)}</p><p className="text-sm text-muted">Status: {String(state)}</p></Panel>)}
       </div>
       <Panel className="mb-4">
         <h2 className="font-display text-2xl">Saved senders</h2>
         {accounts.length === 0 ? <p className="mt-2 text-sm text-muted">No sender identity saved.</p> : accounts.map((account) => (
-          <p key={account.id} className="mt-2 text-sm">{account.provider} · {account.fromEmail} · {account.status}{account.lastError ? ` · ${account.lastError}` : ""}</p>
+          <p key={account.id} className="mt-2 text-sm">{String(account.provider)} · {String(account.fromEmail)} · {String(account.status)}{account.lastError ? ` · ${String(account.lastError)}` : ""}</p>
         ))}
       </Panel>
       {membership.role === "MEMBER" ? <p className="text-sm text-muted">Only an owner or admin can add a sender.</p> : (

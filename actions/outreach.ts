@@ -196,3 +196,9 @@ export async function saveResendSender(formData: FormData) {
   });
   redirect("/integrations?notice=Resend+sender+saved.+The+API+key+stays+in+the+server+environment.");
 }
+
+export async function disconnectGmail() {
+  const { organization } = await requireOrganization("ADMIN");
+  await prisma.emailAccount.deleteMany({ where: { organizationId: organization.id, provider: "GMAIL" } });
+  redirect("/integrations/gmail");
+}

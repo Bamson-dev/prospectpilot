@@ -38,8 +38,8 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           <SubmitButton pendingLabel="Saving">Save Resend sender</SubmitButton>
         </form>
       )}
-      <p className="mt-4 text-sm"><a className="text-tide" href="/api/integrations/gmail/start">Connect Gmail</a></p>
-      <p className="mt-2 text-sm text-muted">Discovery uses the configured search providers. Google Custom Search stays disabled unless it is explicitly enabled, and Gmail is separate from search.</p>
+      <p className="mt-4"><a className="button button-secondary inline-block" href="/integrations/gmail">Configure Gmail</a></p>
+      <p className="mt-4 text-sm text-muted">Discovery uses the configured search providers. Google Custom Search stays disabled unless it is explicitly enabled, and Gmail is separate from search.</p>
     </div>
   );
 }

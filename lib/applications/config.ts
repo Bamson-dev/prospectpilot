@@ -19,7 +19,7 @@ export function coverLetterGenerationEnabled() {
 export function applicationMode(): ApplicationMode {
   const mode = process.env.APPLICATION_MODE;
   if (mode === "MANUAL" || mode === "AUTO_SUBMIT" || mode === "AUTO_PREPARE") return mode;
-  return "AUTO_PREPARE";
+  return "AUTO_SUBMIT";
 }
 
 export function applicationDailyTarget() {

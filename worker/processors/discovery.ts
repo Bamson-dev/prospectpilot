@@ -18,7 +18,7 @@ export async function processCampaignDiscoveryScheduler() {
   
   for (const campaign of campaigns) {
     await queueJob({
-      id: `discovery:campaign:${campaign.id}:${new Date().toISOString().split('T')[0]}`,
+      id: `discovery-campaign-${campaign.id}-${new Date().toISOString().split('T')[0]}`,
       organizationId: campaign.organizationId,
       campaignId: campaign.id,
       queue: "discovery",

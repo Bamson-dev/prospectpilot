@@ -279,13 +279,8 @@ export async function processApplicationSubmit(organizationId: string, applicati
     });
     return;
   }
-  await prisma.jobApplication.update({
-    where: { id: application.id },
-    data: { status: "REQUIRES_MANUAL_ACTION", blockedReason: "Live submission stays off until a supported adapter run is explicitly started." },
-  });
-  await prisma.applicationEvent.create({
-    data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: "Live submission was not started." },
-  });
+  
+  await attachBrowserInspection(applicationId, { allowSubmit: true });
 }
 
 export async function processApplicationFollowUp(organizationId: string) {

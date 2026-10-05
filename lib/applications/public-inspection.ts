@@ -47,7 +47,7 @@ export function inspectionValues(candidate: {
 }
 
 export function inspectionIsBlocked(outcome: Pick<InspectionOutcome, "submitted" | "reason" | "status">) {
-  if (outcome.submitted) return true;
+  if (outcome.submitted) return false;
   if (outcome.status === "REQUIRES_MANUAL_ACTION") return true;
   return Boolean(outcome.reason && outcome.reason !== "pause before submit");
 }
@@ -126,7 +126,7 @@ function stopped(blocker: PreparationBlocker, ms: number, note?: string, platfor
   return { opened, submitted: false, reason: note ? `${blocker} ${note}` : blocker, blocker, status: "REQUIRES_MANUAL_ACTION", fields, resolvedFields: [], platform, ms, metrics, storageState: null };
 }
 
-export async function attachBrowserInspection(applicationId: string) {
+export async function attachBrowserInspection(applicationId: string, options?: { allowSubmit?: boolean; cvPath?: string; coverPath?: string }) {
   const application = await prisma.jobApplication.findUnique({
     where: { id: applicationId },
     include: { vacancy: true, candidate: true, package: true },
@@ -137,7 +137,7 @@ export async function attachBrowserInspection(applicationId: string) {
     outcome = stopped("SOURCE_INVALID", 0, "SOURCE_INVALID");
   } else {
     try {
-      outcome = await inspectPublicApplication(application.applicationUrl, inspectionValues(application.candidate));
+      outcome = await inspectPublicApplication(application.applicationUrl, inspectionValues(application.candidate), options);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Browser inspection failed.";
       outcome = stopped(classifyNavigationError(message), 0);
@@ -163,17 +163,22 @@ export async function attachBrowserInspection(applicationId: string) {
   }
   const blocked = inspectionIsBlocked(outcome);
   const mapped = outcome.blocker ? statusAfterBlock(outcome.blocker) : "REQUIRES_MANUAL_ACTION";
-  const nextStatus = blocked && canTransition(application.status as ApplicationStatus, mapped)
+  let nextStatus = blocked && canTransition(application.status as ApplicationStatus, mapped)
     ? mapped
     : blocked && mapped !== "REQUIRES_MANUAL_ACTION" && canTransition(application.status as ApplicationStatus, "REQUIRES_MANUAL_ACTION")
       ? "REQUIRES_MANUAL_ACTION"
       : application.status;
+  
+  if (outcome.submitted) {
+    nextStatus = "SUBMITTED";
+  }
+
   await prisma.jobApplication.update({
     where: { id: application.id },
     data: {
       status: nextStatus,
-      blockedReason: blocked ? safeAuditDetail(outcome.blocker ?? outcome.reason ?? "Browser preparation needs review.") : application.blockedReason,
-      submittedAt: null,
+      blockedReason: blocked ? safeAuditDetail(outcome.blocker ?? outcome.reason ?? "Browser preparation needs review.") : (outcome.submitted ? null : application.blockedReason),
+      submittedAt: outcome.submitted ? new Date() : null,
     },
   });
   if (application.package) {

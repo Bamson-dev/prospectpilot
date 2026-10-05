@@ -47,7 +47,7 @@ export async function ensureCandidate(organizationId: string) {
       preference: { create: { discoverJobs: false, dailyTarget: 500, mode: "AUTO_PREPARE" } },
     }
   });
-  if (candidate.email === PLACEHOLDER_EMAIL && seed.email !== PLACEHOLDER_EMAIL) {
+  if (!contactIsReady(candidate.email) && seed.email && contactIsReady(seed.email)) {
     candidate = await prisma.candidate.update({
       where: { id: candidate.id },
       data: { email: seed.email },

@@ -79,7 +79,7 @@ export function seedCandidateRecord(): CandidateRecord {
     fullName: "Bamidele Matthew",
     firstName: "Bamidele",
     lastName: "Matthew",
-    email: PLACEHOLDER_EMAIL,
+    email: "Bamzonline01@gmail.com",
     phone: null,
     location: null,
     facts: [

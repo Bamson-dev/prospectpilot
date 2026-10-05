@@ -14,7 +14,7 @@ import { checksum, docxContains, pdfLooksReadable, renderDocx, renderPdf } from 
 import { documentFileName } from "@/lib/applications/filenames";
 import { answerQuestion } from "@/lib/applications/questions";
 import { extractRequirements } from "@/lib/applications/requirements";
-import { CAREER_PROFILES, contactIsReady, seedCandidateRecord, seedWritingProfile, selectExistingCandidate } from "@/lib/applications/seed-data";
+import { CAREER_PROFILES, contactIsReady, seedCandidateRecord, seedWritingProfile, selectExistingCandidate, PLACEHOLDER_EMAIL } from "@/lib/applications/seed-data";
 import type { CandidateRecord, JobInput } from "@/lib/applications/types";
 import { DateValidator, FormattingValidator } from "@/lib/applications/validators";
 import { CV_SYSTEM_PROMPT, evidencePrompt } from "@/lib/applications/prompts";
@@ -34,7 +34,7 @@ export async function ensureCandidate(organizationId: string) {
     include: { _count: { select: { applications: true } } },
   });
   const selected = selectExistingCandidate(rows.map((row) => ({ ...row, applicationCount: row._count.applications })));
-  const candidate = selected ?? await prisma.candidate.create({
+  let candidate = selected ?? await prisma.candidate.create({
     data: {
       organizationId,
       fullName: seed.fullName,
@@ -45,8 +45,15 @@ export async function ensureCandidate(organizationId: string) {
       profiles: { create: CAREER_PROFILES.map((profile) => ({ kind: profile.kind, title: profile.title, summary: profile.summary })) },
       writing: { create: seedWritingProfile() },
       preference: { create: { discoverJobs: false, dailyTarget: 500, mode: "AUTO_PREPARE" } },
-    },
+    }
   });
+  if (candidate.email === PLACEHOLDER_EMAIL && seed.email !== PLACEHOLDER_EMAIL) {
+    candidate = await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: { email: seed.email },
+    });
+  }
+
   for (const profile of CAREER_PROFILES) {
     await prisma.candidateCareerProfile.upsert({
       where: { candidateId_kind: { candidateId: candidate.id, kind: profile.kind } },

@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       payload: { 
         organizationId: auth.organization.id, 
         vacancyId,
-        forceRegenerate: true
+        forceRegenerate: "true"
       },
     });
 

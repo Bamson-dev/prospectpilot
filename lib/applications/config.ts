@@ -1,11 +1,11 @@
 import type { ApplicationMode } from "@/lib/applications/types";
 
 export function applicationAutomationEnabled() {
-  return process.env.APPLICATION_AUTOMATION_ENABLED === "true";
+  return process.env.APPLICATION_AUTOMATION_ENABLED !== "false";
 }
 
 export function jobDiscoveryEnabled() {
-  return process.env.JOB_DISCOVERY_ENABLED === "true";
+  return process.env.JOB_DISCOVERY_ENABLED !== "false";
 }
 
 export function cvGenerationEnabled() {

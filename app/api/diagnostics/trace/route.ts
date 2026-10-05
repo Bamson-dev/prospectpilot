@@ -67,9 +67,13 @@ export async function GET(request: Request) {
       orderBy: { createdAt: "desc" }
     }) : null;
 
-    const candidate = await prisma.candidate.findUnique({
-      where: { id: application?.candidateId || vacancy.candidateId || auth.organization.id }
-    });
+    let candidateEmail = null;
+    if (application) {
+      const candidate = await prisma.candidate.findUnique({
+        where: { id: application.candidateId }
+      });
+      candidateEmail = candidate?.email;
+    }
 
     return NextResponse.json({
       run,
@@ -79,7 +83,7 @@ export async function GET(request: Request) {
       cv,
       coverLetter,
       automationRun,
-      candidateEmail: candidate?.email
+      candidateEmail
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal Server Error";

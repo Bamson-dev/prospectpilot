@@ -19,12 +19,24 @@ export async function processJobDiscoveryScheduler() {
     if (!pref.candidate.profiles.length) continue;
     const organizationId = pref.candidate.organizationId;
     
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    
+    // Check if we have an ACTIVE run (STARTED or RUNNING) OR a run completed in the last 3 hours
     const existingRun = await prisma.jobDiscoveryRun.findFirst({
-      where: { organizationId, candidateId: pref.candidate.id, startedAt: { gte: today } }
+      where: { 
+        organizationId, 
+        candidateId: pref.candidate.id, 
+        OR: [
+          { status: { in: ["STARTED", "RUNNING"] } },
+          { startedAt: { gte: threeHoursAgo } }
+        ]
+      }
     });
-    if (existingRun) continue;
+    
+    if (existingRun) {
+      logInfo("scheduler.job_discovery.skip", { organizationId, reason: "Recent or active run exists", existingId: existingRun.id });
+      continue;
+    }
 
     // Create the daily run model
     const run = await prisma.jobDiscoveryRun.create({
@@ -233,6 +245,24 @@ export async function processApplicationPreparation(organizationId: string, vaca
       where: { id: applicationId },
       data: { submittedAt: null, status: "REQUIRES_MANUAL_ACTION", blockedReason: "Preparation must not submit." },
     });
+    return; // Don't enqueue browser for manual action
+  }
+  
+  if (submitted?.status === "READY_FOR_SUBMISSION" || submitted?.status === "PREPARED") {
+    // Automatically enqueue browser application worker
+    const jobId = `browser:${applicationId}`;
+    try {
+      await queueJob({
+        id: jobId,
+        organizationId,
+        queue: "application-browser",
+        name: "run",
+        payload: { applicationId },
+      });
+      logInfo("application.queued_for_browser", { applicationId });
+    } catch {
+      // Ignore if job already queued (unique constraint)
+    }
   }
 }
 

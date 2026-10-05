@@ -11,6 +11,23 @@ import { buildDiscoveryQueries } from "@/lib/search/queries";
 
 const AGGREGATORS = ["google.", "bing.com", "duckduckgo.com", "yahoo.com", "wikipedia.org"];
 
+export async function processCampaignDiscoveryScheduler() {
+  const campaigns = await prisma.campaign.findMany({
+    where: { status: "ACTIVE" },
+  });
+  
+  for (const campaign of campaigns) {
+    await queueJob({
+      id: `discovery:campaign:${campaign.id}:${new Date().toISOString().split('T')[0]}`,
+      organizationId: campaign.organizationId,
+      campaignId: campaign.id,
+      queue: "discovery",
+      name: "run",
+      payload: { campaignId: campaign.id },
+    }).catch(() => { /* ignore unique constraint */ });
+  }
+}
+
 export async function processDiscovery(campaignId: string) {
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign) throw new AppError("Campaign was not found.");

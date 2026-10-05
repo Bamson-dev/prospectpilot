@@ -7,6 +7,1082 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  name             String
+  passwordHash     String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  activity         ActivityLog[]
+  applicationNotes ApplicationNote[]
+  memberships      Membership[]
+}
+
+model Organization {
+  id                 String              @id @default(cuid())
+  name               String
+  slug               String              @unique
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  aiRequests         AIRequest[]
+  activity           ActivityLog[]
+  jobs               BackgroundJob[]
+  campaigns          Campaign[]
+  candidates         Candidate[]
+  candidateDocuments CandidateDocument[]
+  contacts           Contact[]
+  conversations      Conversation[]
+  discoverySources   DiscoverySource[]
+  emailAccounts      EmailAccount[]
+  generatedDocuments GeneratedDocument[]
+  jobApplications    JobApplication[]
+  jobDiscoveryRuns   JobDiscoveryRun[]
+  jobVacancies       JobVacancy[]
+  memberships        Membership[]
+  prospects          Prospect[]
+  sequences          Sequence[]
+  settings           Setting[]
+  suppressions       Suppression[]
+  tags               Tag[]
+}
+
+model Membership {
+  id             String         @id @default(cuid())
+  userId         String
+  organizationId String
+  role           MembershipRole @default(MEMBER)
+  createdAt      DateTime       @default(now())
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+}
+
+model Campaign {
+  id                      String             @id @default(cuid())
+  organizationId          String
+  name                    String
+  description             String?
+  industry                String?
+  country                 String?
+  city                    String?
+  searchTerms             String
+  opportunityFocus        OpportunityFocus   @default(SOFTWARE_AND_ADVERTISING)
+  targetCompanySize       String?
+  dailyDiscoveryLimit     Int                @default(25)
+  dailyResearchLimit      Int                @default(25)
+  dailyOutreachLimit      Int                @default(25)
+  provider                EmailProviderKind?
+  emailAccountId          String?
+  requireApproval         Boolean            @default(true)
+  autoFollowUp            Boolean            @default(false)
+  followUpSteps           Json
+  status                  CampaignStatus     @default(DRAFT)
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+  dailyQualificationLimit Int                @default(25)
+  excludedKeywords        String?
+  maxQueries              Int                @default(6)
+  maxPagesPerSite         Int                @default(10)
+  crawlDepth              Int                @default(2)
+  enableDirectory         Boolean            @default(false)
+  enableMap               Boolean            @default(false)
+  enableSocial            Boolean            @default(false)
+  activity                ActivityLog[]
+  jobs                    BackgroundJob[]
+  emailAccount            EmailAccount?      @relation(fields: [emailAccountId], references: [id])
+  organization            Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  discoverySources        DiscoverySource[]
+  followUps               FollowUp[]
+  messages                OutreachMessage[]
+  prospects               Prospect[]
+  sequences               Sequence[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, updatedAt])
+}
+
+model Prospect {
+  id                     String                  @id @default(cuid())
+  organizationId         String
+  campaignId             String?
+  companyName            String
+  domain                 String?
+  website                String?
+  industry               String?
+  country                String?
+  city                   String?
+  address                String?
+  phone                  String?
+  linkedinUrl            String?
+  facebookUrl            String?
+  instagramUrl           String?
+  description            String?
+  companySize            String?
+  source                 String
+  sourceUrl              String?
+  discoveryStatus        DiscoveryStatus         @default(NEW)
+  researchStatus         ResearchStatus          @default(PENDING)
+  qualificationStatus    QualificationStatus     @default(UNREVIEWED)
+  outreachState          OutreachState           @default(NONE)
+  softwareOpportunity    Int?
+  advertisingOpportunity Int?
+  automationOpportunity  Int?
+  opportunityScore       Int?
+  opportunityReason      String?
+  researchSummary        String?
+  painPoints             String[]
+  recommendedService     String?
+  personalizationAngle   String?
+  suggestedOpening       String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  notes                  String?
+  aiRequests             AIRequest[]
+  activity               ActivityLog[]
+  jobs                   BackgroundJob[]
+  contacts               Contact[]
+  conversations          Conversation[]
+  sources                DiscoverySource[]
+  opportunities          OpportunityAssessment[]
+  messages               OutreachMessage[]
+  campaign               Campaign?               @relation(fields: [campaignId], references: [id])
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tags                   ProspectTag[]
+  research               ResearchRecord[]
+
+  @@unique([organizationId, domain])
+  @@index([organizationId, qualificationStatus])
+  @@index([organizationId, outreachState])
+  @@index([organizationId, updatedAt])
+  @@index([campaignId, createdAt])
+}
+
+model DiscoverySource {
+  id             String       @id @default(cuid())
+  organizationId String
+  prospectId     String?
+  campaignId     String?
+  sourceType     String
+  sourceName     String
+  sourceUrl      String
+  query          String?
+  title          String?
+  snippet        String?
+  confidence     Int          @default(50)
+  createdAt      DateTime     @default(now())
+  campaign       Campaign?    @relation(fields: [campaignId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospect       Prospect?    @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId, createdAt])
+  @@index([organizationId, sourceType])
+}
+
+model SourceHealth {
+  id            String    @id @default(cuid())
+  name          String    @unique
+  status        String
+  requests      Int       @default(0)
+  successes     Int       @default(0)
+  failures      Int       @default(0)
+  blocked       Int       @default(0)
+  emptyResults  Int       @default(0)
+  lastError     String?
+  lastSuccessAt DateTime?
+  updatedAt     DateTime  @updatedAt
+}
+
+model Contact {
+  id             String            @id @default(cuid())
+  organizationId String
+  prospectId     String
+  firstName      String?
+  lastName       String?
+  fullName       String?
+  jobTitle       String?
+  email          String?
+  phone          String?
+  linkedinUrl    String?
+  source         String
+  sourceUrl      String?
+  confidence     Int               @default(0)
+  isPrimary      Boolean           @default(false)
+  suppressed     Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  notes          String?
+  activity       ActivityLog[]
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospect       Prospect          @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  messages       OutreachMessage[]
+  replies        Reply[]
+
+  @@index([organizationId, email])
+  @@index([prospectId, isPrimary])
+}
+
+model ResearchRecord {
+  id                 String   @id @default(cuid())
+  prospectId         String
+  url                String
+  fetchMethod        String
+  title              String?
+  metaDescription    String?
+  excerpt            String?
+  headings           String[]
+  signals            Json
+  createdAt          DateTime @default(now())
+  sourceType         String   @default("website")
+  content            String?
+  technologies       String[] @default([])
+  services           String[] @default([])
+  products           String[] @default([])
+  contactSignals     Json?
+  advertisingSignals Json?
+  softwareSignals    Json?
+  socialLinks        Json?
+  bookingSignals     Json?
+  trackingSignals    Json?
+  confidence         Int?
+  prospect           Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId, createdAt])
+}
+
+model OpportunityAssessment {
+  id                 String            @id @default(cuid())
+  prospectId         String
+  kind               OpportunityKind
+  evidence           Json
+  interpretation     String
+  recommendedService String?
+  confidence         Int
+  createdAt          DateTime          @default(now())
+  title              String?
+  description        String?
+  potentialValue     String?
+  status             OpportunityStatus @default(OPEN)
+  prospect           Prospect          @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId, kind])
+}
+
+model EmailAccount {
+  id                    String            @id @default(cuid())
+  organizationId        String
+  provider              EmailProviderKind
+  fromEmail             String
+  fromName              String?
+  refreshTokenEncrypted String?
+  status                AccountStatus     @default(ACTIVE)
+  lastError             String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  lastSendAt            DateTime?
+  lastSyncAt            DateTime?
+  campaigns             Campaign[]
+  organization          Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, provider])
+}
+
+model Conversation {
+  id             String             @id @default(cuid())
+  organizationId String
+  prospectId     String
+  subject        String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospect       Prospect           @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  notes          ConversationNote[]
+  messages       OutreachMessage[]
+  replies        Reply[]
+
+  @@index([organizationId, updatedAt])
+}
+
+model ConversationNote {
+  id             String       @id @default(cuid())
+  conversationId String
+  body           String
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model OutreachMessage {
+  id                String             @id @default(cuid())
+  organizationId    String
+  campaignId        String?
+  prospectId        String
+  contactId         String?
+  conversationId    String?
+  subject           String
+  body              String
+  state             OutreachState      @default(DRAFT)
+  provider          EmailProviderKind?
+  providerMessageId String?
+  error             String?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  openedAt          DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  scheduledAt       DateTime?
+  followUps         FollowUp[]
+  campaign          Campaign?          @relation(fields: [campaignId], references: [id])
+  contact           Contact?           @relation(fields: [contactId], references: [id])
+  conversation      Conversation?      @relation(fields: [conversationId], references: [id])
+  prospect          Prospect           @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId, state])
+  @@index([campaignId, state])
+  @@index([providerMessageId])
+}
+
+model Reply {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  conversationId     String
+  prospectId         String
+  contactId          String?
+  fromEmail          String?
+  subject            String?
+  body               String
+  receivedAt         DateTime     @default(now())
+  classification     ReplyClass   @default(UNCLASSIFIED)
+  classificationNote String?
+  suggestedSubject   String?
+  suggestedBody      String?
+  confidence         Int?
+  createdAt          DateTime     @default(now())
+  contact            Contact?     @relation(fields: [contactId], references: [id])
+  conversation       Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, receivedAt])
+  @@index([prospectId, classification])
+}
+
+model FollowUp {
+  id             String           @id @default(cuid())
+  organizationId String
+  campaignId     String
+  prospectId     String
+  messageId      String?
+  dayOffset      Int
+  subject        String
+  body           String
+  state          FollowUpState    @default(PENDING_APPROVAL)
+  runAt          DateTime?
+  error          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  campaign       Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  message        OutreachMessage? @relation(fields: [messageId], references: [id])
+
+  @@index([state, runAt])
+  @@index([campaignId, state])
+  @@index([prospectId])
+}
+
+model Suppression {
+  id             String       @id @default(cuid())
+  organizationId String
+  email          String
+  reason         String
+  source         String
+  createdAt      DateTime     @default(now())
+  notes          String?
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([organizationId, email])
+}
+
+model BackgroundJob {
+  id             String       @id @default(cuid())
+  organizationId String
+  campaignId     String?
+  prospectId     String?
+  queue          String
+  name           String
+  state          JobState     @default(QUEUED)
+  attempts       Int          @default(0)
+  maxAttempts    Int          @default(3)
+  error          String?
+  payload        Json?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  campaign       Campaign?    @relation(fields: [campaignId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospect       Prospect?    @relation(fields: [prospectId], references: [id])
+
+  @@index([organizationId, state])
+  @@index([queue, state])
+  @@index([campaignId])
+}
+
+model ActivityLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  campaignId     String?
+  prospectId     String?
+  action         String
+  detail         String?
+  createdAt      DateTime     @default(now())
+  userId         String?
+  contactId      String?
+  campaign       Campaign?    @relation(fields: [campaignId], references: [id])
+  contact        Contact?     @relation(fields: [contactId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospect       Prospect?    @relation(fields: [prospectId], references: [id])
+  user           User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([userId])
+  @@index([prospectId, createdAt])
+  @@index([campaignId, createdAt])
+}
+
+model AIRequest {
+  id             String       @id @default(cuid())
+  organizationId String
+  prospectId     String?
+  purpose        String
+  promptVersion  String
+  model          String
+  inputHash      String
+  status         String
+  error          String?
+  durationMs     Int?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prospect       Prospect?    @relation(fields: [prospectId], references: [id])
+
+  @@index([organizationId, purpose, inputHash])
+  @@index([prospectId, createdAt])
+}
+
+model Setting {
+  id             String       @id @default(cuid())
+  organizationId String
+  key            String
+  value          String
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+}
+
+model Tag {
+  id             String        @id @default(cuid())
+  organizationId String
+  name           String
+  createdAt      DateTime      @default(now())
+  prospects      ProspectTag[]
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+}
+
+model ProspectTag {
+  prospectId String
+  tagId      String
+  prospect   Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([prospectId, tagId])
+  @@index([tagId])
+}
+
+model Sequence {
+  id             String         @id @default(cuid())
+  organizationId String
+  campaignId     String
+  name           String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  campaign       Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  steps          SequenceStep[]
+
+  @@index([organizationId, campaignId])
+}
+
+model SequenceStep {
+  id         String   @id @default(cuid())
+  sequenceId String
+  position   Int
+  dayOffset  Int
+  subject    String
+  body       String
+  sequence   Sequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, position])
+}
+
+model Candidate {
+  id                   String                   @id @default(cuid())
+  organizationId       String
+  fullName             String
+  firstName            String
+  lastName             String
+  email                String
+  phone                String?
+  location             String?
+  headline             String?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  linkedinUrl          String?
+  portfolioUrl         String?
+  githubUrl            String?
+  yearsExperience      Int?
+  currentRole          String?
+  targetRoles          String[]                 @default([])
+  workAuthorization    String?
+  sponsorship          String?
+  availability         String?
+  noticePeriod         String?
+  employmentPreference String?
+  remotePreference     String?
+  relocationPreference String?
+  organization         Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  profiles             CandidateCareerProfile[]
+  certifications       CandidateCertification[]
+  baseDocuments        CandidateDocument[]
+  education            CandidateEducation[]
+  experiences          CandidateExperience[]
+  facts                CandidateFact[]
+  factEvents           CandidateFactEvent[]
+  preference           CandidatePreference?
+  projects             CandidateProject[]
+  writing              CandidateWritingProfile?
+  documents            GeneratedDocument[]
+  applications         JobApplication[]
+  discoveryRuns        JobDiscoveryRun[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+}
+
+model CandidateCareerProfile {
+  id          String            @id @default(cuid())
+  candidateId String
+  kind        CareerProfileKind
+  title       String
+  summary     String
+  candidate   Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, kind])
+}
+
+model CandidateExperience {
+  id               String              @id @default(cuid())
+  candidateId      String
+  title            String
+  organizationName String
+  summary          String
+  startDate        DateTime?
+  endDate          DateTime?
+  current          Boolean             @default(false)
+  verified         Boolean             @default(false)
+  source           String
+  profiles         CareerProfileKind[]
+  candidate        Candidate           @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model CandidateProject {
+  id               String              @id @default(cuid())
+  candidateId      String
+  name             String
+  description      String
+  role             String
+  industry         String?
+  projectType      String?
+  technologies     String[]            @default([])
+  features         String[]            @default([])
+  responsibilities String[]            @default([])
+  outcomes         String[]            @default([])
+  metrics          String[]            @default([])
+  url              String?
+  githubUrl        String?
+  demoUrl          String?
+  videoUrl         String?
+  verified         Boolean             @default(false)
+  source           String
+  profiles         CareerProfileKind[]
+  candidate        Candidate           @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, name])
+  @@index([candidateId])
+}
+
+model CandidateFact {
+  id               String               @id @default(cuid())
+  candidateId      String
+  category         FactCategory
+  subcategory      String?
+  fact             String
+  source           String
+  sourceDocumentId String?
+  verified         Boolean              @default(false)
+  confidence       Int                  @default(0)
+  startDate        DateTime?
+  endDate          DateTime?
+  profiles         CareerProfileKind[]
+  industries       String[]             @default([])
+  roles            String[]             @default([])
+  skills           String[]             @default([])
+  technologies     String[]             @default([])
+  keywords         String[]             @default([])
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  sourceType       FactSourceType       @default(CANDIDATE_ENTERED)
+  verification     EvidenceVerification @default(UNVERIFIED)
+  duration         String?
+  candidate        Candidate            @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, category, fact])
+  @@index([candidateId, category])
+}
+
+model CandidateFactEvent {
+  id          String         @id @default(cuid())
+  candidateId String
+  factId      String?
+  action      EvidenceChange
+  detail      String
+  createdAt   DateTime       @default(now())
+  candidate   Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId, createdAt])
+}
+
+model CandidateWritingProfile {
+  id          String    @id @default(cuid())
+  candidateId String    @unique
+  tone        String
+  formality   String
+  verbosity   String
+  voice       String
+  samples     String[]  @default([])
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidatePreference {
+  id             String    @id @default(cuid())
+  candidateId    String    @unique
+  discoverJobs   Boolean   @default(false)
+  dailyTarget    Int       @default(500)
+  mode           String    @default("AUTO_PREPARE")
+  locations      String[]  @default([])
+  remoteOnly     Boolean   @default(false)
+  salaryMin      Int?
+  salaryTarget   Int?
+  salaryCurrency String?
+  salaryPeriod   String?
+  candidate      Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidateEducation {
+  id          String    @id @default(cuid())
+  candidateId String
+  institution String
+  degree      String?
+  field       String?
+  startDate   DateTime?
+  endDate     DateTime?
+  source      String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model CandidateCertification {
+  id            String    @id @default(cuid())
+  candidateId   String
+  name          String
+  issuer        String?
+  issuedAt      DateTime?
+  credentialUrl String?
+  source        String
+  candidate     Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model JobVacancy {
+  id                 String              @id @default(cuid())
+  organizationId     String
+  source             String
+  sourceUrl          String
+  applicationUrl     String
+  externalId         String?
+  companyName        String
+  companyDomain      String?
+  companyDescription String?
+  title              String
+  location           String?
+  country            String?
+  remoteType         String?
+  employmentType     String?
+  salaryMin          Int?
+  salaryMax          Int?
+  salaryCurrency     String?
+  description        String
+  seniority          String?
+  industry           String?
+  postedAt           DateTime?
+  deadline           DateTime?
+  discoveredAt       DateTime            @default(now())
+  status             JobVacancyStatus    @default(DISCOVERED)
+  duplicateOf        String?
+  rawData            Json?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  lastCheckedAt      DateTime            @default(now())
+  normalizedCompany  String              @default("")
+  normalizedLocation String              @default("")
+  normalizedTitle    String              @default("")
+  documents          GeneratedDocument[]
+  applications       JobApplication[]
+  fit                JobFitSnapshot?
+  requirements       JobRequirement[]
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, applicationUrl])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, externalId])
+  @@index([organizationId, normalizedCompany, normalizedTitle])
+  @@index([organizationId, lastCheckedAt])
+  @@index([companyDomain])
+}
+
+model JobDiscoveryRun {
+  id                      String                @id @default(cuid())
+  organizationId          String
+  candidateId             String
+  status                  JobDiscoveryRunStatus @default(STARTED)
+  startedAt               DateTime              @default(now())
+  completedAt             DateTime?
+  queries                 Int                   @default(0)
+  providers               Int                   @default(0)
+  rawResults              Int                   @default(0)
+  validVacancies          Int                   @default(0)
+  duplicates              Int                   @default(0)
+  newVacancies            Int                   @default(0)
+  updatedVacancies        Int                   @default(0)
+  rejectedVacancies       Int                   @default(0)
+  providerErrors          Int                   @default(0)
+  rateLimits              Int                   @default(0)
+  qualificationJobsQueued Int                   @default(0)
+  error                   String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  candidate               Candidate             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  organization            Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@index([candidateId, startedAt])
+}
+
+model JobRequirement {
+  id        String          @id @default(cuid())
+  vacancyId String
+  kind      RequirementKind
+  text      String
+  years     Int?
+  required  Boolean         @default(false)
+  vacancy   JobVacancy      @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@index([vacancyId, kind])
+}
+
+model JobFitSnapshot {
+  id                 String            @id @default(cuid())
+  vacancyId          String            @unique
+  candidateId        String
+  profile            CareerProfileKind
+  overallMatch       Int
+  profileMatch       Int
+  missing            Json
+  evidence           Json
+  gaps               Json
+  advantages         Json
+  recommendation     String
+  selectedProjectIds String[]          @default([])
+  selectedFactIds    String[]          @default([])
+  createdAt          DateTime          @default(now())
+  analysis           Json?
+  vacancy            JobVacancy        @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+}
+
+model GeneratedDocument {
+  id             String                @id @default(cuid())
+  organizationId String
+  candidateId    String
+  vacancyId      String?
+  profile        CareerProfileKind?
+  kind           GeneratedDocumentKind
+  version        Int                   @default(1)
+  fileName       String
+  fileType       String
+  checksum       String
+  text           String
+  content        Bytes
+  archived       Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  candidate      Candidate             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  vacancy        JobVacancy?           @relation(fields: [vacancyId], references: [id])
+
+  @@index([organizationId, candidateId, kind, createdAt])
+  @@index([vacancyId])
+}
+
+model ApplicationPackage {
+  id             String                     @id @default(cuid())
+  applicationId  String                     @unique
+  profile        CareerProfileKind
+  fitSummary     String
+  strategy       String
+  status         ApplicationPackageStatus   @default(PREPARED)
+  warnings       String[]                   @default([])
+  timings        Json?
+  version        Int                        @default(1)
+  automationRuns ApplicationAutomationRun[]
+  application    JobApplication             @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model CandidateDocument {
+  id             String                @id @default(cuid())
+  organizationId String
+  candidateId    String
+  kind           CandidateDocumentKind
+  fileName       String
+  fileType       String
+  checksum       String
+  content        Bytes
+  createdAt      DateTime              @default(now())
+  candidate      Candidate             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, candidateId, kind])
+}
+
+model JobApplication {
+  id               String                       @id @default(cuid())
+  organizationId   String
+  candidateId      String
+  vacancyId        String
+  profile          CareerProfileKind
+  status           ApplicationPackageStatus     @default(PREPARED)
+  source           String
+  applicationUrl   String
+  cvId             String?
+  coverLetterId    String?
+  submittedAt      DateTime?
+  verifiedAt       DateTime?
+  failureReason    String?
+  blockedReason    String?
+  retryCount       Int                          @default(0)
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+  answers          ApplicationAnswer[]
+  automationRuns   ApplicationAutomationRun[]
+  browserSessions  ApplicationBrowserSession[]
+  events           ApplicationEvent[]
+  fieldResolutions ApplicationFieldResolution[]
+  followUps        ApplicationFollowUp[]
+  manualAction     ApplicationManualAction?
+  notes            ApplicationNote[]
+  package          ApplicationPackage?
+  employerReplies  EmployerReply[]
+  candidate        Candidate                    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  organization     Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  vacancy          JobVacancy                   @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, vacancyId, candidateId])
+  @@index([organizationId, status, createdAt])
+  @@index([applicationUrl])
+}
+
+model ApplicationEvent {
+  id            String               @id @default(cuid())
+  applicationId String
+  type          ApplicationEventType
+  detail        String?
+  createdAt     DateTime             @default(now())
+  application   JobApplication       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+}
+
+model ApplicationNote {
+  id            String         @id @default(cuid())
+  applicationId String
+  userId        String?
+  author        String?
+  body          String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  application   JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user          User?          @relation(fields: [userId], references: [id])
+
+  @@index([applicationId, createdAt])
+}
+
+model ApplicationAnswer {
+  id            String                  @id @default(cuid())
+  applicationId String
+  question      String
+  kind          ApplicationQuestionKind
+  answer        String?
+  status        String
+  application   JobApplication          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model ApplicationFollowUp {
+  id            String         @id @default(cuid())
+  applicationId String
+  runAt         DateTime
+  channel       String
+  status        String         @default("DRAFT")
+  draft         String
+  application   JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, runAt])
+}
+
+model ApplicationAutomationRun {
+  id             String                       @id @default(cuid())
+  applicationId  String
+  packageId      String
+  packageVersion Int
+  status         AutomationRunStatus          @default(QUEUED)
+  attempt        Int                          @default(1)
+  currentStep    String                       @default("BROWSER_STARTED")
+  currentUrl     String?
+  idempotencyKey String                       @unique
+  heartbeatAt    DateTime                     @default(now())
+  startedAt      DateTime                     @default(now())
+  completedAt    DateTime?
+  nextRetryAt    DateTime?
+  errorCode      String?
+  errorMessage   String?
+  blocker        String?
+  cvUpload       DocumentUploadStatus         @default(NOT_STARTED)
+  coverUpload    DocumentUploadStatus         @default(NOT_STARTED)
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+  application    JobApplication               @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  package        ApplicationPackage           @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  sessions       ApplicationBrowserSession[]
+  fields         ApplicationFieldResolution[]
+
+  @@index([applicationId, status])
+  @@index([packageId])
+}
+
+model ApplicationBrowserSession {
+  id              String                   @id @default(cuid())
+  automationRunId String
+  applicationId   String
+  platform        String
+  adapter         String
+  status          BrowserSessionStatus     @default(RUNNING)
+  currentUrl      String?
+  pageTitle       String?
+  attempt         Int                      @default(1)
+  startedAt       DateTime                 @default(now())
+  heartbeatAt     DateTime                 @default(now())
+  endedAt         DateTime?
+  errorCode       String?
+  errorMessage    String?
+  application     JobApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  automationRun   ApplicationAutomationRun @relation(fields: [automationRunId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, startedAt])
+  @@index([automationRunId])
+}
+
+model ApplicationFieldResolution {
+  id              String                   @id @default(cuid())
+  applicationId   String
+  automationRunId String
+  packageId       String
+  fieldKey        String
+  label           String
+  name            String
+  elementId       String
+  fieldType       String
+  required        Boolean                  @default(false)
+  classification  String
+  confidence      Float                    @default(0)
+  answer          String?
+  answerSource    String?
+  resolution      FieldResolutionStatus    @default(DETECTED)
+  filled          Boolean                  @default(false)
+  validated       Boolean                  @default(false)
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  application     JobApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  automationRun   ApplicationAutomationRun @relation(fields: [automationRunId], references: [id], onDelete: Cascade)
+
+  @@unique([automationRunId, fieldKey])
+  @@index([applicationId])
+}
+
+model ApplicationManualAction {
+  id             String         @id @default(cuid())
+  applicationId  String         @unique
+  organizationId String
+  vacancyId      String
+  companyName    String
+  applicationUrl String
+  blockerType    String
+  blockerMessage String?
+  currentStep    String
+  browserStatus  String?
+  retryCount     Int            @default(0)
+  resumeToken    String?
+  resolved       Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  application    JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, resolved])
+}
+
+model EmployerReply {
+  id             String         @id @default(cuid())
+  organizationId String
+  applicationId  String
+  messageId      String         @unique
+  threadId       String
+  fromEmail      String
+  fromName       String?
+  subject        String?
+  body           String
+  receivedAt     DateTime       @default(now())
+  classification String         @default("UNKNOWN")
+  suggestedDraft String?
+  draftStatus    String         @default("PENDING")
+  createdAt      DateTime       @default(now())
+  application    JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, receivedAt])
+}
+
 enum MembershipRole {
   OWNER
   ADMIN
@@ -66,7 +1142,6 @@ enum OutreachState {
   DRAFT
   PENDING_APPROVAL
   APPROVED
-  SCHEDULED
   QUEUED
   SENDING
   SENT
@@ -74,8 +1149,9 @@ enum OutreachState {
   OPENED
   FAILED
   REPLIED
-  CANCELLED
   SUPPRESSED
+  SCHEDULED
+  CANCELLED
 }
 
 enum ReplyClass {
@@ -139,525 +1215,6 @@ enum OpportunityKind {
 enum OpportunityStatus {
   OPEN
   DISMISSED
-}
-
-model User {
-  id               String            @id @default(cuid())
-  email            String            @unique
-  name             String
-  passwordHash     String
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  memberships      Membership[]
-  activity         ActivityLog[]
-  applicationNotes ApplicationNote[]
-}
-
-model Organization {
-  id                 String              @id @default(cuid())
-  name               String
-  slug               String              @unique
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  memberships        Membership[]
-  campaigns          Campaign[]
-  prospects          Prospect[]
-  contacts           Contact[]
-  emailAccounts      EmailAccount[]
-  suppressions       Suppression[]
-  jobs               BackgroundJob[]
-  activity           ActivityLog[]
-  settings           Setting[]
-  aiRequests         AIRequest[]
-  conversations      Conversation[]
-  tags               Tag[]
-  sequences          Sequence[]
-  discoverySources   DiscoverySource[]
-  candidates         Candidate[]
-  jobVacancies       JobVacancy[]
-  jobDiscoveryRuns   JobDiscoveryRun[]
-  jobApplications    JobApplication[]
-  generatedDocuments GeneratedDocument[]
-  candidateDocuments CandidateDocument[]
-}
-
-model Membership {
-  id             String         @id @default(cuid())
-  userId         String
-  organizationId String
-  role           MembershipRole @default(MEMBER)
-  createdAt      DateTime       @default(now())
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, organizationId])
-  @@index([organizationId, role])
-}
-
-model Campaign {
-  id                      String             @id @default(cuid())
-  organizationId          String
-  name                    String
-  description             String?
-  industry                String?
-  country                 String?
-  city                    String?
-  searchTerms             String
-  opportunityFocus        OpportunityFocus   @default(SOFTWARE_AND_ADVERTISING)
-  targetCompanySize       String?
-  dailyDiscoveryLimit     Int                @default(25)
-  dailyResearchLimit      Int                @default(25)
-  dailyQualificationLimit Int                @default(25)
-  dailyOutreachLimit      Int                @default(25)
-  excludedKeywords        String?
-  maxQueries              Int                @default(6)
-  maxPagesPerSite         Int                @default(10)
-  crawlDepth              Int                @default(2)
-  enableDirectory         Boolean            @default(false)
-  enableMap               Boolean            @default(false)
-  enableSocial            Boolean            @default(false)
-  provider                EmailProviderKind?
-  emailAccountId          String?
-  requireApproval         Boolean            @default(true)
-  autoFollowUp            Boolean            @default(false)
-  followUpSteps           Json
-  status                  CampaignStatus     @default(DRAFT)
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
-  organization            Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  emailAccount            EmailAccount?      @relation(fields: [emailAccountId], references: [id])
-  prospects               Prospect[]
-  jobs                    BackgroundJob[]
-  activity                ActivityLog[]
-  messages                OutreachMessage[]
-  followUps               FollowUp[]
-  sequences               Sequence[]
-  discoverySources        DiscoverySource[]
-
-  @@index([organizationId, status])
-  @@index([organizationId, updatedAt])
-}
-
-model Prospect {
-  id                     String                  @id @default(cuid())
-  organizationId         String
-  campaignId             String?
-  companyName            String
-  domain                 String?
-  website                String?
-  industry               String?
-  country                String?
-  city                   String?
-  address                String?
-  phone                  String?
-  linkedinUrl            String?
-  facebookUrl            String?
-  instagramUrl           String?
-  description            String?
-  companySize            String?
-  source                 String
-  sourceUrl              String?
-  discoveryStatus        DiscoveryStatus         @default(NEW)
-  researchStatus         ResearchStatus          @default(PENDING)
-  qualificationStatus    QualificationStatus     @default(UNREVIEWED)
-  outreachState          OutreachState           @default(NONE)
-  softwareOpportunity    Int?
-  advertisingOpportunity Int?
-  automationOpportunity  Int?
-  opportunityScore       Int?
-  opportunityReason      String?
-  researchSummary        String?
-  painPoints             String[]
-  recommendedService     String?
-  personalizationAngle   String?
-  suggestedOpening       String?
-  notes                  String?
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
-  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  campaign               Campaign?               @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  contacts               Contact[]
-  research               ResearchRecord[]
-  opportunities          OpportunityAssessment[]
-  messages               OutreachMessage[]
-  conversations          Conversation[]
-  activity               ActivityLog[]
-  jobs                   BackgroundJob[]
-  aiRequests             AIRequest[]
-  tags                   ProspectTag[]
-  sources                DiscoverySource[]
-
-  @@unique([organizationId, domain])
-  @@index([organizationId, qualificationStatus])
-  @@index([organizationId, outreachState])
-  @@index([organizationId, updatedAt])
-  @@index([campaignId, createdAt])
-}
-
-model DiscoverySource {
-  id             String       @id @default(cuid())
-  organizationId String
-  prospectId     String?
-  campaignId     String?
-  sourceType     String
-  sourceName     String
-  sourceUrl      String
-  query          String?
-  title          String?
-  snippet        String?
-  confidence     Int          @default(50)
-  createdAt      DateTime     @default(now())
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  prospect       Prospect?    @relation(fields: [prospectId], references: [id], onDelete: Cascade)
-  campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-
-  @@index([prospectId, createdAt])
-  @@index([organizationId, sourceType])
-}
-
-model SourceHealth {
-  id            String    @id @default(cuid())
-  name          String    @unique
-  status        String
-  requests      Int       @default(0)
-  successes     Int       @default(0)
-  failures      Int       @default(0)
-  blocked       Int       @default(0)
-  emptyResults  Int       @default(0)
-  lastError     String?
-  lastSuccessAt DateTime?
-  updatedAt     DateTime  @updatedAt
-}
-
-model Contact {
-  id             String            @id @default(cuid())
-  organizationId String
-  prospectId     String
-  firstName      String?
-  lastName       String?
-  fullName       String?
-  jobTitle       String?
-  email          String?
-  phone          String?
-  linkedinUrl    String?
-  source         String
-  sourceUrl      String?
-  confidence     Int               @default(0)
-  isPrimary      Boolean           @default(false)
-  suppressed     Boolean           @default(false)
-  notes          String?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  prospect       Prospect          @relation(fields: [prospectId], references: [id], onDelete: Cascade)
-  messages       OutreachMessage[]
-  replies        Reply[]
-  activity       ActivityLog[]
-
-  @@index([organizationId, email])
-  @@index([prospectId, isPrimary])
-}
-
-model ResearchRecord {
-  id                 String   @id @default(cuid())
-  prospectId         String
-  url                String
-  fetchMethod        String
-  title              String?
-  metaDescription    String?
-  excerpt            String?
-  headings           String[]
-  signals            Json
-  sourceType         String   @default("website")
-  content            String?  @db.Text
-  technologies       String[] @default([])
-  services           String[] @default([])
-  products           String[] @default([])
-  contactSignals     Json?
-  advertisingSignals Json?
-  softwareSignals    Json?
-  socialLinks        Json?
-  bookingSignals     Json?
-  trackingSignals    Json?
-  confidence         Int?
-  createdAt          DateTime @default(now())
-  prospect           Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
-
-  @@index([prospectId, createdAt])
-}
-
-model OpportunityAssessment {
-  id                 String            @id @default(cuid())
-  prospectId         String
-  kind               OpportunityKind
-  evidence           Json
-  interpretation     String
-  recommendedService String?
-  confidence         Int
-  title              String?
-  description        String?
-  potentialValue     String?
-  status             OpportunityStatus @default(OPEN)
-  createdAt          DateTime          @default(now())
-  prospect           Prospect          @relation(fields: [prospectId], references: [id], onDelete: Cascade)
-
-  @@index([prospectId, kind])
-}
-
-model EmailAccount {
-  id                    String            @id @default(cuid())
-  organizationId        String
-  provider              EmailProviderKind
-  fromEmail             String
-  fromName              String?
-  refreshTokenEncrypted String?
-  status                AccountStatus     @default(ACTIVE)
-  lastError             String?
-  lastSyncAt            DateTime?
-  lastSendAt            DateTime?
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
-  organization          Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  campaigns             Campaign[]
-
-  @@index([organizationId, provider])
-}
-
-model Conversation {
-  id             String             @id @default(cuid())
-  organizationId String
-  prospectId     String
-  subject        String
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  prospect       Prospect           @relation(fields: [prospectId], references: [id], onDelete: Cascade)
-  messages       OutreachMessage[]
-  replies        Reply[]
-  notes          ConversationNote[]
-
-  @@index([organizationId, updatedAt])
-}
-
-model ConversationNote {
-  id             String       @id @default(cuid())
-  conversationId String
-  body           String
-  createdAt      DateTime     @default(now())
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-}
-
-model OutreachMessage {
-  id                String             @id @default(cuid())
-  organizationId    String
-  campaignId        String?
-  prospectId        String
-  contactId         String?
-  conversationId    String?
-  subject           String
-  body              String
-  state             OutreachState      @default(DRAFT)
-  provider          EmailProviderKind?
-  providerMessageId String?
-  error             String?
-  sentAt            DateTime?
-  deliveredAt       DateTime?
-  openedAt          DateTime?
-  scheduledAt       DateTime?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  campaign          Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  prospect          Prospect           @relation(fields: [prospectId], references: [id], onDelete: Cascade)
-  contact           Contact?           @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  conversation      Conversation?      @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  followUps         FollowUp[]
-
-  @@index([prospectId, state])
-  @@index([campaignId, state])
-  @@index([providerMessageId])
-}
-
-model Reply {
-  id                 String       @id @default(cuid())
-  organizationId     String
-  conversationId     String
-  prospectId         String
-  contactId          String?
-  fromEmail          String?
-  subject            String?
-  body               String
-  receivedAt         DateTime     @default(now())
-  classification     ReplyClass   @default(UNCLASSIFIED)
-  classificationNote String?
-  suggestedSubject   String?
-  suggestedBody      String?
-  confidence         Int?
-  createdAt          DateTime     @default(now())
-  conversation       Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  contact            Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
-
-  @@index([conversationId, receivedAt])
-  @@index([prospectId, classification])
-}
-
-model FollowUp {
-  id             String           @id @default(cuid())
-  organizationId String
-  campaignId     String
-  prospectId     String
-  messageId      String?
-  dayOffset      Int
-  subject        String
-  body           String
-  state          FollowUpState    @default(PENDING_APPROVAL)
-  runAt          DateTime?
-  error          String?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  campaign       Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  message        OutreachMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
-
-  @@index([state, runAt])
-  @@index([campaignId, state])
-  @@index([prospectId])
-}
-
-model Suppression {
-  id             String       @id @default(cuid())
-  organizationId String
-  email          String
-  reason         String
-  source         String
-  notes          String?
-  createdAt      DateTime     @default(now())
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@unique([organizationId, email])
-  @@index([organizationId, email])
-}
-
-model BackgroundJob {
-  id             String       @id @default(cuid())
-  organizationId String
-  campaignId     String?
-  prospectId     String?
-  queue          String
-  name           String
-  state          JobState     @default(QUEUED)
-  attempts       Int          @default(0)
-  maxAttempts    Int          @default(3)
-  error          String?
-  payload        Json?
-  startedAt      DateTime?
-  finishedAt     DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  prospect       Prospect?    @relation(fields: [prospectId], references: [id], onDelete: SetNull)
-
-  @@index([organizationId, state])
-  @@index([queue, state])
-  @@index([campaignId])
-}
-
-model ActivityLog {
-  id             String       @id @default(cuid())
-  organizationId String
-  campaignId     String?
-  prospectId     String?
-  action         String
-  detail         String?
-  userId         String?
-  contactId      String?
-  createdAt      DateTime     @default(now())
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  prospect       Prospect?    @relation(fields: [prospectId], references: [id], onDelete: SetNull)
-  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
-  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
-
-  @@index([organizationId, createdAt])
-  @@index([userId])
-  @@index([prospectId, createdAt])
-  @@index([campaignId, createdAt])
-}
-
-model AIRequest {
-  id             String       @id @default(cuid())
-  organizationId String
-  prospectId     String?
-  purpose        String
-  promptVersion  String
-  model          String
-  inputHash      String
-  status         String
-  error          String?
-  durationMs     Int?
-  createdAt      DateTime     @default(now())
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  prospect       Prospect?    @relation(fields: [prospectId], references: [id], onDelete: SetNull)
-
-  @@index([organizationId, purpose, inputHash])
-  @@index([prospectId, createdAt])
-}
-
-model Setting {
-  id             String       @id @default(cuid())
-  organizationId String
-  key            String
-  value          String
-  updatedAt      DateTime     @updatedAt
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@unique([organizationId, key])
-}
-
-model Tag {
-  id             String        @id @default(cuid())
-  organizationId String
-  name           String
-  createdAt      DateTime      @default(now())
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  prospects      ProspectTag[]
-
-  @@unique([organizationId, name])
-}
-
-model ProspectTag {
-  prospectId String
-  tagId      String
-  prospect   Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
-  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
-
-  @@id([prospectId, tagId])
-  @@index([tagId])
-}
-
-model Sequence {
-  id             String         @id @default(cuid())
-  organizationId String
-  campaignId     String
-  name           String
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  campaign       Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  steps          SequenceStep[]
-
-  @@index([organizationId, campaignId])
-}
-
-model SequenceStep {
-  id         String   @id @default(cuid())
-  sequenceId String
-  position   Int
-  dayOffset  Int
-  subject    String
-  body       String
-  sequence   Sequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
-
-  @@unique([sequenceId, position])
 }
 
 enum CareerProfileKind {
@@ -861,564 +1418,4 @@ enum ApplicationQuestionKind {
   PORTFOLIO
   EDUCATION
   OTHER
-}
-
-model Candidate {
-  id                   String                   @id @default(cuid())
-  organizationId       String
-  fullName             String
-  firstName            String
-  lastName             String
-  email                String
-  phone                String?
-  location             String?
-  headline             String?
-  linkedinUrl          String?
-  portfolioUrl         String?
-  githubUrl            String?
-  yearsExperience      Int?
-  currentRole          String?
-  targetRoles          String[]                 @default([])
-  workAuthorization    String?
-  sponsorship          String?
-  availability         String?
-  noticePeriod         String?
-  employmentPreference String?
-  remotePreference     String?
-  relocationPreference String?
-  createdAt            DateTime                 @default(now())
-  updatedAt            DateTime                 @updatedAt
-  organization         Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  profiles             CandidateCareerProfile[]
-  experiences          CandidateExperience[]
-  projects             CandidateProject[]
-  facts                CandidateFact[]
-  factEvents           CandidateFactEvent[]
-  education            CandidateEducation[]
-  certifications       CandidateCertification[]
-  writing              CandidateWritingProfile?
-  preference           CandidatePreference?
-  documents            GeneratedDocument[]
-  baseDocuments        CandidateDocument[]
-  applications         JobApplication[]
-  discoveryRuns        JobDiscoveryRun[]
-
-  @@unique([organizationId, email])
-  @@index([organizationId])
-}
-
-model CandidateCareerProfile {
-  id          String            @id @default(cuid())
-  candidateId String
-  kind        CareerProfileKind
-  title       String
-  summary     String
-  candidate   Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  @@unique([candidateId, kind])
-}
-
-model CandidateExperience {
-  id               String              @id @default(cuid())
-  candidateId      String
-  title            String
-  organizationName String
-  summary          String
-  startDate        DateTime?
-  endDate          DateTime?
-  current          Boolean             @default(false)
-  verified         Boolean             @default(false)
-  source           String
-  profiles         CareerProfileKind[]
-  candidate        Candidate           @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  @@index([candidateId])
-}
-
-model CandidateProject {
-  id               String              @id @default(cuid())
-  candidateId      String
-  name             String
-  description      String
-  role             String
-  industry         String?
-  projectType      String?
-  technologies     String[]            @default([])
-  features         String[]            @default([])
-  responsibilities String[]            @default([])
-  outcomes         String[]            @default([])
-  metrics          String[]            @default([])
-  url              String?
-  githubUrl        String?
-  demoUrl          String?
-  videoUrl         String?
-  verified         Boolean             @default(false)
-  source           String
-  profiles         CareerProfileKind[]
-  candidate        Candidate           @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  @@unique([candidateId, name])
-  @@index([candidateId])
-}
-
-model CandidateFact {
-  id               String               @id @default(cuid())
-  candidateId      String
-  category         FactCategory
-  subcategory      String?
-  fact             String
-  source           String
-  sourceType       FactSourceType       @default(CANDIDATE_ENTERED)
-  sourceDocumentId String?
-  verified         Boolean              @default(false)
-  verification     EvidenceVerification @default(UNVERIFIED)
-  duration         String?
-  confidence       Int                  @default(0)
-  startDate        DateTime?
-  endDate          DateTime?
-  profiles         CareerProfileKind[]
-  industries       String[]             @default([])
-  roles            String[]             @default([])
-  skills           String[]             @default([])
-  technologies     String[]             @default([])
-  keywords         String[]             @default([])
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
-  candidate        Candidate            @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  @@unique([candidateId, category, fact])
-  @@index([candidateId, category])
-}
-
-model CandidateFactEvent {
-  id          String         @id @default(cuid())
-  candidateId String
-  factId      String?
-  action      EvidenceChange
-  detail      String
-  createdAt   DateTime       @default(now())
-  candidate   Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  @@index([candidateId, createdAt])
-}
-
-model CandidateWritingProfile {
-  id          String    @id @default(cuid())
-  candidateId String    @unique
-  tone        String
-  formality   String
-  verbosity   String
-  voice       String
-  samples     String[]  @default([])
-  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-}
-
-model CandidatePreference {
-  id             String    @id @default(cuid())
-  candidateId    String    @unique
-  discoverJobs   Boolean   @default(false)
-  dailyTarget    Int       @default(500)
-  mode           String    @default("AUTO_PREPARE")
-  locations      String[]  @default([])
-  remoteOnly     Boolean   @default(false)
-  salaryMin      Int?
-  salaryTarget   Int?
-  salaryCurrency String?
-  salaryPeriod   String?
-  candidate      Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-}
-
-model CandidateEducation {
-  id          String    @id @default(cuid())
-  candidateId String
-  institution String
-  degree      String?
-  field       String?
-  startDate   DateTime?
-  endDate     DateTime?
-  source      String
-  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  @@index([candidateId])
-}
-
-model CandidateCertification {
-  id            String    @id @default(cuid())
-  candidateId   String
-  name          String
-  issuer        String?
-  issuedAt      DateTime?
-  credentialUrl String?
-  source        String
-  candidate     Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  @@index([candidateId])
-}
-
-model JobVacancy {
-  id                 String              @id @default(cuid())
-  organizationId     String
-  source             String
-  sourceUrl          String
-  applicationUrl     String
-  externalId         String?
-  companyName        String
-  companyDomain      String?
-  companyDescription String?
-  title              String
-  normalizedTitle    String              @default("")
-  normalizedCompany  String              @default("")
-  normalizedLocation String              @default("")
-  location           String?
-  country            String?
-  remoteType         String?
-  employmentType     String?
-  salaryMin          Int?
-  salaryMax          Int?
-  salaryCurrency     String?
-  description        String              @db.Text
-  seniority          String?
-  industry           String?
-  postedAt           DateTime?
-  deadline           DateTime?
-  discoveredAt       DateTime            @default(now())
-  lastCheckedAt      DateTime            @default(now())
-  status             JobVacancyStatus    @default(DISCOVERED)
-  duplicateOf        String?
-  rawData            Json?
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  requirements       JobRequirement[]
-  fit                JobFitSnapshot?
-  applications       JobApplication[]
-  documents          GeneratedDocument[]
-
-  @@unique([organizationId, applicationUrl])
-  @@index([organizationId, status, createdAt])
-  @@index([organizationId, externalId])
-  @@index([organizationId, normalizedCompany, normalizedTitle])
-  @@index([organizationId, lastCheckedAt])
-  @@index([companyDomain])
-}
-
-model JobDiscoveryRun {
-  id             String                @id @default(cuid())
-  organizationId String
-  candidateId    String
-  status         JobDiscoveryRunStatus @default(STARTED)
-  startedAt      DateTime              @default(now())
-  completedAt    DateTime?
-
-  queries                 Int @default(0)
-  providers               Int @default(0)
-  rawResults              Int @default(0)
-  validVacancies          Int @default(0)
-  duplicates              Int @default(0)
-  newVacancies            Int @default(0)
-  updatedVacancies        Int @default(0)
-  rejectedVacancies       Int @default(0)
-  providerErrors          Int @default(0)
-  rateLimits              Int @default(0)
-  qualificationJobsQueued Int @default(0)
-
-  error     String?  @db.Text
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  candidate    Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId, status])
-  @@index([candidateId, startedAt])
-}
-
-model JobRequirement {
-  id        String          @id @default(cuid())
-  vacancyId String
-  kind      RequirementKind
-  text      String
-  years     Int?
-  required  Boolean         @default(false)
-  vacancy   JobVacancy      @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
-
-  @@index([vacancyId, kind])
-}
-
-model JobFitSnapshot {
-  id                 String            @id @default(cuid())
-  vacancyId          String            @unique
-  candidateId        String
-  profile            CareerProfileKind
-  overallMatch       Int
-  profileMatch       Int
-  missing            Json
-  evidence           Json
-  gaps               Json
-  advantages         Json
-  recommendation     String
-  analysis           Json?
-  selectedProjectIds String[]          @default([])
-  selectedFactIds    String[]          @default([])
-  createdAt          DateTime          @default(now())
-  vacancy            JobVacancy        @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
-}
-
-model GeneratedDocument {
-  id             String                @id @default(cuid())
-  organizationId String
-  candidateId    String
-  vacancyId      String?
-  profile        CareerProfileKind?
-  kind           GeneratedDocumentKind
-  version        Int                   @default(1)
-  fileName       String
-  fileType       String
-  checksum       String
-  text           String                @db.Text
-  content        Bytes
-  archived       Boolean               @default(false)
-  createdAt      DateTime              @default(now())
-  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  candidate      Candidate             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  vacancy        JobVacancy?           @relation(fields: [vacancyId], references: [id], onDelete: SetNull)
-
-  @@index([organizationId, candidateId, kind, createdAt])
-  @@index([vacancyId])
-}
-
-model ApplicationPackage {
-  id             String                     @id @default(cuid())
-  applicationId  String                     @unique
-  profile        CareerProfileKind
-  fitSummary     String
-  strategy       String
-  status         ApplicationPackageStatus   @default(PREPARED)
-  version        Int                        @default(1)
-  warnings       String[]                   @default([])
-  timings        Json?
-  application    JobApplication             @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  automationRuns ApplicationAutomationRun[]
-}
-
-model CandidateDocument {
-  id             String                @id @default(cuid())
-  organizationId String
-  candidateId    String
-  kind           CandidateDocumentKind
-  fileName       String
-  fileType       String
-  checksum       String
-  content        Bytes
-  createdAt      DateTime              @default(now())
-  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  candidate      Candidate             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId, candidateId, kind])
-}
-
-model JobApplication {
-  id               String                       @id @default(cuid())
-  organizationId   String
-  candidateId      String
-  vacancyId        String
-  profile          CareerProfileKind
-  status           ApplicationPackageStatus     @default(PREPARED)
-  source           String
-  applicationUrl   String
-  cvId             String?
-  coverLetterId    String?
-  submittedAt      DateTime?
-  verifiedAt       DateTime?
-  failureReason    String?
-  blockedReason    String?
-  retryCount       Int                          @default(0)
-  createdAt        DateTime                     @default(now())
-  updatedAt        DateTime                     @updatedAt
-  organization     Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  candidate        Candidate                    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  vacancy          JobVacancy                   @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
-  package          ApplicationPackage?
-  events           ApplicationEvent[]
-  notes            ApplicationNote[]
-  answers          ApplicationAnswer[]
-  followUps        ApplicationFollowUp[]
-  automationRuns   ApplicationAutomationRun[]
-  browserSessions  ApplicationBrowserSession[]
-  fieldResolutions ApplicationFieldResolution[]
-  manualAction     ApplicationManualAction?
-  employerReplies  EmployerReply[]
-
-  @@unique([organizationId, vacancyId, candidateId])
-  @@index([organizationId, status, createdAt])
-  @@index([applicationUrl])
-}
-
-model ApplicationEvent {
-  id            String               @id @default(cuid())
-  applicationId String
-  type          ApplicationEventType
-  detail        String?
-  createdAt     DateTime             @default(now())
-  application   JobApplication       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  @@index([applicationId, createdAt])
-}
-
-model ApplicationNote {
-  id            String         @id @default(cuid())
-  applicationId String
-  userId        String?
-  author        String?
-  body          String         @db.Text
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  application   JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-
-  @@index([applicationId, createdAt])
-}
-
-model ApplicationAnswer {
-  id            String                  @id @default(cuid())
-  applicationId String
-  question      String
-  kind          ApplicationQuestionKind
-  answer        String?
-  status        String
-  application   JobApplication          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  @@index([applicationId])
-}
-
-model ApplicationFollowUp {
-  id            String         @id @default(cuid())
-  applicationId String
-  runAt         DateTime
-  channel       String
-  status        String         @default("DRAFT")
-  draft         String
-  application   JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  @@index([applicationId, runAt])
-}
-
-model ApplicationAutomationRun {
-  id             String                       @id @default(cuid())
-  applicationId  String
-  packageId      String
-  packageVersion Int
-  status         AutomationRunStatus          @default(QUEUED)
-  attempt        Int                          @default(1)
-  currentStep    String                       @default("BROWSER_STARTED")
-  currentUrl     String?
-  idempotencyKey String                       @unique
-  heartbeatAt    DateTime                     @default(now())
-  startedAt      DateTime                     @default(now())
-  completedAt    DateTime?
-  nextRetryAt    DateTime?
-  errorCode      String?
-  errorMessage   String?
-  blocker        String?
-  cvUpload       DocumentUploadStatus         @default(NOT_STARTED)
-  coverUpload    DocumentUploadStatus         @default(NOT_STARTED)
-  createdAt      DateTime                     @default(now())
-  updatedAt      DateTime                     @updatedAt
-  application    JobApplication               @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  package        ApplicationPackage           @relation(fields: [packageId], references: [id], onDelete: Cascade)
-  sessions       ApplicationBrowserSession[]
-  fields         ApplicationFieldResolution[]
-
-  @@index([applicationId, status])
-  @@index([packageId])
-}
-
-model ApplicationBrowserSession {
-  id              String                   @id @default(cuid())
-  automationRunId String
-  applicationId   String
-  platform        String
-  adapter         String
-  status          BrowserSessionStatus     @default(RUNNING)
-  currentUrl      String?
-  pageTitle       String?
-  attempt         Int                      @default(1)
-  startedAt       DateTime                 @default(now())
-  heartbeatAt     DateTime                 @default(now())
-  endedAt         DateTime?
-  errorCode       String?
-  errorMessage    String?
-  automationRun   ApplicationAutomationRun @relation(fields: [automationRunId], references: [id], onDelete: Cascade)
-  application     JobApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  @@index([applicationId, startedAt])
-  @@index([automationRunId])
-}
-
-model ApplicationFieldResolution {
-  id              String                   @id @default(cuid())
-  applicationId   String
-  automationRunId String
-  packageId       String
-  fieldKey        String
-  label           String
-  name            String
-  elementId       String
-  fieldType       String
-  required        Boolean                  @default(false)
-  classification  String
-  confidence      Float                    @default(0)
-  answer          String?
-  answerSource    String?
-  resolution      FieldResolutionStatus    @default(DETECTED)
-  filled          Boolean                  @default(false)
-  validated       Boolean                  @default(false)
-  createdAt       DateTime                 @default(now())
-  updatedAt       DateTime                 @updatedAt
-  application     JobApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  automationRun   ApplicationAutomationRun @relation(fields: [automationRunId], references: [id], onDelete: Cascade)
-
-  @@unique([automationRunId, fieldKey])
-  @@index([applicationId])
-}
-
-model ApplicationManualAction {
-  id             String         @id @default(cuid())
-  applicationId  String         @unique
-  organizationId String
-  vacancyId      String
-  companyName    String
-  applicationUrl String
-  blockerType    String
-  blockerMessage String?
-  currentStep    String
-  browserStatus  String?
-  retryCount     Int            @default(0)
-  resumeToken    String?        @db.Text
-  resolved       Boolean        @default(false)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  application    JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId, resolved])
-}
-
-model EmployerReply {
-  id             String         @id @default(cuid())
-  organizationId String
-  applicationId  String
-  messageId      String         @unique
-  threadId       String
-  fromEmail      String
-  fromName       String?
-  subject        String?
-  body           String         @db.Text
-  receivedAt     DateTime       @default(now())
-  classification String         @default("UNKNOWN")
-  suggestedDraft String?        @db.Text
-  draftStatus    String         @default("PENDING")
-  createdAt      DateTime       @default(now())
-  application    JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId, receivedAt])
 }

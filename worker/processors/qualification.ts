@@ -3,7 +3,7 @@ import { AppError } from "@/lib/errors";
 import { completeJson, hashInput } from "@/lib/ai/client";
 import { companyAnalysisPrompt, emailPrompt, PROMPTS } from "@/lib/ai/prompts";
 import { companyAnalysisSchema, emailDraftSchema, extractJsonObject } from "@/lib/ai/schemas";
-import { recordActivity } from "@/lib/jobs";
+import { queueJob, recordActivity } from "@/lib/jobs";
 import { logInfo } from "@/lib/logger";
 import { analysisRetryDecision, qualificationEvidence, qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
 import { QUOTA_LEASE_MS } from "@/lib/campaign-quota";
@@ -114,10 +114,10 @@ export async function processQualification(prospectId: string) {
       angle: analysis.personalizationAngle,
       recommendedService: analysis.recommendedService,
     });
-    await prisma.$transaction(async (tx) => {
+    const wroteMessage = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${prospect.id}))`;
       const messages = await tx.outreachMessage.findMany({ where: { prospectId: prospect.id }, select: { state: true } });
-      if (!shouldStoreQualificationDraft(messages.map((item) => item.state))) return;
+      if (!shouldStoreQualificationDraft(messages.map((item) => item.state))) return null;
       const conversation = await tx.conversation.create({
         data: {
           organizationId: prospect.organizationId,
@@ -125,7 +125,8 @@ export async function processQualification(prospectId: string) {
           subject: draft.subject,
         },
       });
-      await tx.outreachMessage.create({
+      const targetState = contact?.email ? (campaign.requireApproval ? "PENDING_APPROVAL" : "APPROVED") : "DRAFT";
+      const message = await tx.outreachMessage.create({
         data: {
           organizationId: prospect.organizationId,
           campaignId: campaign.id,
@@ -134,15 +135,26 @@ export async function processQualification(prospectId: string) {
           conversationId: conversation.id,
           subject: draft.subject,
           body: draft.body,
-          state: contact?.email ? "PENDING_APPROVAL" : "DRAFT",
+          state: targetState,
           provider: campaign.provider,
         },
       });
       await tx.prospect.update({
         where: { id: prospect.id },
-        data: { outreachState: contact?.email ? "PENDING_APPROVAL" : "DRAFT" },
+        data: { outreachState: targetState },
       });
+      return { messageId: message.id, state: targetState };
     });
+    
+    if (wroteMessage && wroteMessage.state === "APPROVED") {
+      await queueJob({
+        id: `outreach:${wroteMessage.messageId}`,
+        organizationId: prospect.organizationId,
+        queue: "outreach",
+        name: "outreach.send",
+        payload: { messageId: wroteMessage.messageId },
+      });
+    }
   }
   if (slotId) {
     await prisma.activityLog.updateMany({

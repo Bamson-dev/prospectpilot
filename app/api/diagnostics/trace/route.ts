@@ -67,6 +67,10 @@ export async function GET(request: Request) {
       orderBy: { createdAt: "desc" }
     }) : null;
 
+    const candidate = await prisma.candidate.findUnique({
+      where: { id: application?.candidateId || vacancy.candidateId || auth.organization.id }
+    });
+
     return NextResponse.json({
       run,
       vacancy,
@@ -74,7 +78,8 @@ export async function GET(request: Request) {
       application,
       cv,
       coverLetter,
-      automationRun
+      automationRun,
+      candidateEmail: candidate?.email
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal Server Error";

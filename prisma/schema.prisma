@@ -1056,6 +1056,8 @@ model ApplicationManualAction {
   retryCount     Int            @default(0)
   resumeToken    String?
   resolved       Boolean        @default(false)
+  recoveryData   Json?
+  recommendedAction String?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   application    JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
@@ -1300,6 +1302,7 @@ enum ApplicationPackageStatus {
   SUBMITTED
   FAILED
   REQUIRES_MANUAL_ACTION
+  RECOVERABLE_MANUAL_ACTION
   WITHDRAWN
   APPROVED
   REJECTED

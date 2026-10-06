@@ -76,7 +76,7 @@ export async function processJobDiscovery(organizationId: string, runId: string,
   });
 
   const pref = run.candidate.preference;
-  const locations = pref?.remoteOnly ? ["remote"] : (pref?.locations?.length ? pref.locations : ["remote"]);
+  const locations = pref?.remoteOnly ? ["remote"] : (pref?.locations?.length ? pref.locations : ["remote", "hybrid", "New York", "London", "international", "global"]);
   const dailyTarget = pref?.dailyTarget ?? 500;
   
   const expandedQueries = new Set<string>();
@@ -93,27 +93,35 @@ export async function processJobDiscovery(organizationId: string, runId: string,
         queries.add("software engineer");
         queries.add("backend engineer");
         queries.add("full stack engineer");
+        queries.add("product engineer");
+        queries.add("frontend engineer");
       }
       if (baseTitle.includes("product manager")) {
         queries.add("product manager");
         queries.add("senior product manager");
+        queries.add("technical product manager");
       }
       if (baseTitle.includes("marketing")) {
         queries.add("growth marketing manager");
         queries.add("performance marketing manager");
         queries.add("product marketing manager");
+        queries.add("demand generation");
       }
       if (baseTitle.includes("founder")) {
         queries.add("founder");
         queries.add("technical product");
+        queries.add("strategy and operations");
       }
     }
     for (const query of queries) {
       expandedQueries.add(`${query} site:ashbyhq.com`);
       expandedQueries.add(`${query} site:jobs.workable.com`);
       expandedQueries.add(`${query} site:jobs.smartrecruiters.com`);
-      expandedQueries.add(`${query} site:greenhouse.io`);
-      expandedQueries.add(`${query} site:lever.co`);
+      expandedQueries.add(`${query} site:boards.greenhouse.io`);
+      expandedQueries.add(`${query} site:jobs.lever.co`);
+      expandedQueries.add(`${query} site:breezy.hr`);
+      expandedQueries.add(`${query} site:apply.workable.com`);
+      expandedQueries.add(`${query} careers`);
       expandedQueries.add(query); // direct employer career pages
     }
   }
@@ -281,6 +289,22 @@ export async function processApplicationSubmit(organizationId: string, applicati
   }
   
   await attachBrowserInspection(applicationId, { allowSubmit: true });
+  
+  const updated = await prisma.jobApplication.findUnique({ where: { id: applicationId } });
+  if (updated?.status === "RECOVERABLE_MANUAL_ACTION" && updated?.blockedReason?.includes("CAPTCHA")) {
+    try {
+      await queueJob({
+        id: `captcha-solve:${applicationId}`,
+        organizationId,
+        queue: "captcha-solver",
+        name: "solve",
+        payload: { applicationId },
+      });
+      logInfo("application.queued_for_captcha_solver", { applicationId });
+    } catch {
+      // Ignore if already queued
+    }
+  }
 }
 
 export async function processApplicationFollowUp(organizationId: string) {

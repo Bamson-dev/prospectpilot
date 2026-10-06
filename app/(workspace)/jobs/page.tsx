@@ -14,7 +14,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   const query = await searchParams;
   const [stats, jobs, applications] = await Promise.all([
     applicationStats(organization.id),
-    prisma.jobVacancy.findMany({ where: { organizationId: organization.id, status: { notIn: ["ARCHIVED", "DUPLICATE"] } }, orderBy: { createdAt: "desc" }, take: 8, include: { fit: true } }),
+    prisma.jobVacancy.findMany({ where: { organizationId: organization.id, status: { notIn: ["ARCHIVED", "DUPLICATE"] } }, orderBy: { createdAt: "desc" }, take: 8, include: { fit: true, applications: { select: { id: true, status: true } } } }),
     prisma.jobApplication.findMany({ where: { organizationId: organization.id }, orderBy: { createdAt: "desc" }, take: 8, include: { vacancy: true } }),
   ]);
   const target = applicationDailyTarget();
@@ -43,10 +43,14 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
           <p className="text-sm text-muted">{job.companyName} · {job.status} {job.fit ? `· match ${job.fit.overallMatch}` : ""}</p>
           <div className="mt-2 flex gap-2">
             <Pill>{job.source}</Pill>
-            <form action={enqueueApplicationPreparation}>
-              <input type="hidden" name="vacancyId" value={job.id} />
-              <SubmitButton pendingLabel="Queuing">Prepare application</SubmitButton>
-            </form>
+            {job.applications && job.applications.length > 0 ? (
+              <span className="text-sm font-medium text-muted bg-muted/20 px-2 py-1 rounded">Application: {job.applications[0].status}</span>
+            ) : (
+              <form action={enqueueApplicationPreparation}>
+                <input type="hidden" name="vacancyId" value={job.id} />
+                <SubmitButton pendingLabel="Queuing">Prepare application</SubmitButton>
+              </form>
+            )}
           </div>
         </Panel>
       ))}

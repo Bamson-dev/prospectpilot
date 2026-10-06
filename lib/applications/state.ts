@@ -50,6 +50,7 @@ const NEXT: Record<ApplicationStatus, ApplicationStatus[]> = {
   VERIFIED: ["REJECTED_BY_EMPLOYER", "OFFER"],
   FAILED: ["PREPARED"],
   REQUIRES_MANUAL_ACTION: ["READY_FOR_REVIEW", "READY_FOR_SUBMISSION", "SUBMITTING", "WITHDRAWN", "FAILED", "REJECTED"],
+  RECOVERABLE_MANUAL_ACTION: ["READY_FOR_REVIEW", "READY_FOR_SUBMISSION", "SUBMITTING", "WITHDRAWN", "FAILED", "REJECTED"],
   REQUIRES_REVIEW: ["READY_FOR_REVIEW", "APPROVED", "REJECTED", "WITHDRAWN", "REQUIRES_MANUAL_ACTION", ...PRECISE_BLOCKERS],
   REJECTED: [],
   WITHDRAWN: [],
@@ -86,7 +87,7 @@ export function pipelineState(status: ApplicationStatus): PipelineState {
   if (PRECISE_DISPLAY.includes(status)) return status;
   if (status === "PREPARING") return "GENERATING";
   if (status === "REQUIRES_REVIEW" || status === "FAILED") return "REVIEW_REQUIRED";
-  if (status === "REQUIRES_MANUAL_ACTION") return "REQUIRES_MANUAL_ACTION";
+  if (status === "REQUIRES_MANUAL_ACTION" || status === "RECOVERABLE_MANUAL_ACTION") return "REQUIRES_MANUAL_ACTION";
   if (status === "APPROVED") return "APPROVED";
   if (status === "REJECTED" || status === "WITHDRAWN") return "REJECTED";
   if (status === "READY_FOR_REVIEW" || status === "READY_TO_SUBMIT" || status === "READY_FOR_SUBMISSION" || status === "FIT_EVALUATED") return "READY";

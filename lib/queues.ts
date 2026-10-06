@@ -22,6 +22,7 @@ export const QUEUE_NAMES = [
   "application-verification",
   "application-followup",
   "employer-reply",
+  "captcha-solver",
 ] as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[number];

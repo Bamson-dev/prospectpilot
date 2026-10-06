@@ -12,10 +12,18 @@ export type SourceCollection = {
 
 const BOARDS = [
   { source: "greenhouse", board: "gitlab" },
+  { source: "greenhouse", board: "stripe" },
+  { source: "greenhouse", board: "airbnb" },
   { source: "lever", board: "spotify" },
+  { source: "lever", board: "netflix" },
+  { source: "lever", board: "figma" },
   { source: "ashby", board: "reddit" },
+  { source: "ashby", board: "notion" },
+  { source: "ashby", board: "linear" },
   { source: "workable", board: "revolut" },
+  { source: "workable", board: "eurostar" },
   { source: "smartrecruiters", board: "square" },
+  { source: "smartrecruiters", board: "ubisoft" },
 ] as const;
 
 export async function collectPublicVacancies(input: { query: string; limit: number; fetchImpl?: typeof fetch }): Promise<SourceCollection> {
@@ -259,7 +267,7 @@ async function searxngVacancies(query: string, limit: number, fetchImpl: typeof 
     const jobs: RawDiscoveredVacancy[] = [];
     const failures: SourceFailure[] = [];
 
-    const perDomain = Math.ceil(limit / atsDomains.length);
+    const perDomain = Math.ceil(limit / (atsDomains.length + 1));
 
     for (const domain of atsDomains) {
       if (jobs.length >= limit) break;
@@ -275,6 +283,34 @@ async function searxngVacancies(query: string, limit: number, fetchImpl: typeof 
           failures.push(resolved.failure);
         }
         await delay(200);
+      }
+    }
+    
+    // Add a broader non-ATS constrained search to capture regular company sites and other accessible forms
+    if (jobs.length < limit) {
+      const payload = await searxngSearch({ query, limit: perDomain, language: "en" });
+      const hits = parseSearxngResults(payload, query, limit);
+      for (const hit of hits) {
+        if (jobs.length >= limit) break;
+        const resolved = await resolveAtsUrl(fetchImpl, hit.url);
+        if (resolved.job) {
+          jobs.push(resolved.job);
+        } else {
+          // If not an ATS, we just push it as a generic web job
+          jobs.push({
+            source: "web",
+            sourceUrl: hit.url,
+            applicationUrl: hit.url,
+            externalId: null,
+            companyName: "Web Discovery",
+            title: hit.title,
+            location: null,
+            employmentType: null,
+            description: hit.snippet,
+            originalDescription: hit.snippet,
+            postedAt: null,
+          });
+        }
       }
     }
     

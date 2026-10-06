@@ -17,8 +17,9 @@ export async function processCampaignDiscoveryScheduler() {
   });
   
   for (const campaign of campaigns) {
+    const window = Math.floor(new Date().getHours() / 3);
     await queueJob({
-      id: `discovery-campaign-${campaign.id}-${new Date().toISOString().split('T')[0]}`,
+      id: `discovery-campaign-${campaign.id}-${new Date().toISOString().split('T')[0]}-${window}`,
       organizationId: campaign.organizationId,
       campaignId: campaign.id,
       queue: "discovery",

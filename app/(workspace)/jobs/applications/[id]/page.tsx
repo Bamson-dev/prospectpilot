@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { decideApplication, recordManualReview, recordSubmissionConfirmation, requestRegeneration, withdrawApplication, addApplicationNote, scheduleApplicationFollowUp } from "@/actions/job-applications";
+import { decideApplication, recordManualReview, recordSubmissionConfirmation, requestRegeneration, withdrawApplication, addApplicationNote, scheduleApplicationFollowUp, resumeBlockedApplication } from "@/actions/job-applications";
 import { JobsNav } from "@/components/jobs-nav";
 import { Flash, PageHeader, Panel } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -156,6 +156,12 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <p className="text-sm text-muted">ProspectPilot does not bypass CAPTCHA, Cloudflare, login, or rate limits. Manual completion is not a system-confirmed submission.</p>
         <p className="mt-2 text-sm">Manual review {manualMarker ?? "MANUAL_ACTION_NOT_COMPLETED"}.</p>
         <div className="mt-3 flex flex-wrap gap-2">
+          {application.status === "RECOVERABLE_MANUAL_ACTION" && (
+            <form action={resumeBlockedApplication}>
+              <input type="hidden" name="id" value={application.id} />
+              <SubmitButton pendingLabel="Resuming" variant="primary">Continue & Submit</SubmitButton>
+            </form>
+          )}
           <form action={recordManualReview}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="marker" value="MANUAL_REVIEW_STARTED" /><SubmitButton pendingLabel="Saving" variant="secondary">Start manual review</SubmitButton></form>
           <form action={recordManualReview}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="marker" value="MANUAL_REVIEW_COMPLETED" /><SubmitButton pendingLabel="Saving" variant="secondary">Mark manually completed</SubmitButton></form>
           <form action={recordManualReview}><input type="hidden" name="id" value={application.id} /><input type="hidden" name="marker" value="MANUAL_ACTION_NOT_COMPLETED" /><SubmitButton pendingLabel="Saving" variant="secondary">Mark not completed</SubmitButton></form>

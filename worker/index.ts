@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { logInfo } from "@/lib/logger";
 import { ipv4Get } from "@/lib/search/ipv4";
 import { jobRetryDelayMs } from "@/lib/research/failure";
-import { applicationWorkerConcurrency } from "@/lib/applications/config";
+import { applicationWorkerConcurrency, applicationBrowserConcurrency } from "@/lib/applications/config";
 import { getQueue, getRedis } from "@/lib/queues";
 import { analyzeVacancy } from "@/lib/applications/service";
 import { recoverStaleAutomationRuns, runApplicationAutomation } from "@/lib/applications/automation-service";
@@ -19,6 +19,9 @@ import { runJob } from "@/worker/runtime";
 const connection = getRedis();
 
 function concurrency(name: string) {
+  if (name === "application-browser") {
+    return applicationBrowserConcurrency();
+  }
   if (name.startsWith("job-") || name.startsWith("application-") || name === "cv-generation" || name === "cover-letter") {
     return applicationWorkerConcurrency();
   }
@@ -29,8 +32,8 @@ function concurrency(name: string) {
           : name === "qualification" || name === "ai" ? process.env.QUALIFICATION_CONCURRENCY
             : 2,
   );
-  const fallback = name === "playwright-research" ? 1 : 2;
-  const cap = name === "playwright-research" ? 3 : name === "research" ? 4 : 5;
+  const fallback = name === "playwright-research" ? 1 : 4;
+  const cap = name === "playwright-research" ? 3 : name === "discovery" ? 10 : name === "qualification" ? 20 : 10;
   if (!Number.isFinite(configured) || configured < 1) return fallback;
   return Math.min(Math.floor(configured), cap);
 }

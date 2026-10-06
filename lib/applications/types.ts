@@ -140,6 +140,7 @@ export type ApplicationStatus =
   | "FAILED"
   | "REQUIRES_REVIEW"
   | "REQUIRES_MANUAL_ACTION"
+  | "RECOVERABLE_MANUAL_ACTION"
   | "WITHDRAWN"
   | "APPROVED"
   | "REJECTED"

@@ -648,3 +648,46 @@ export async function archiveGeneratedDocument(formData: FormData) {
   if (updated.count !== 1) throw new AppError("Document not found.");
   redirect("/jobs/cv-library?notice=Document+archived.");
 }
+
+export async function resumeBlockedApplication(formData: FormData) {
+  const { organization } = await requireOrganization("MEMBER");
+  const id = String(formData.get("id") ?? "");
+  
+  const application = await prisma.jobApplication.findFirst({
+    where: { id, organizationId: organization.id },
+    include: { manualAction: true }
+  });
+  
+  if (!application) redirect("/jobs/applications?error=Application+not+found.");
+  if (application.status !== "RECOVERABLE_MANUAL_ACTION") {
+    redirect(`/jobs/applications/${id}?error=Only+recoverable+applications+can+be+resumed.`);
+  }
+
+  // Set the manual action to resolved so the worker knows to run in manualResume mode
+  if (application.manualAction) {
+    await prisma.applicationManualAction.update({
+      where: { id: application.manualAction.id },
+      data: { resolved: true }
+    });
+  }
+
+  // Update status to SUBMITTING and clear the submittedAt flag
+  await prisma.jobApplication.update({
+    where: { id },
+    data: { status: "SUBMITTING", submittedAt: null }
+  });
+
+  await prisma.applicationEvent.create({
+    data: { applicationId: id, type: "MANUAL_ACTION_REQUIRED", detail: "User initiated Continue & Submit recovery." }
+  });
+
+  await queueJob({
+    id: `resume-${id}-${Date.now()}`,
+    organizationId: organization.id,
+    queue: "application-browser",
+    name: "run",
+    payload: { applicationId: id }
+  });
+
+  redirect(`/jobs/applications/${id}?notice=Application+recovery+started.+Check+the+browser+window.`);
+}

@@ -150,6 +150,54 @@ export class BraveSearchProvider implements DiscoveryProvider {
   }
 }
 
+export class DuckDuckGoLiteProvider implements DiscoveryProvider {
+  getName() {
+    return "duckduckgo-lite";
+  }
+
+  isEnabled() {
+    return true; // We want this always available as a fallback
+  }
+
+  async discover(input: DiscoveryInput): Promise<DiscoveryHit[]> {
+    if (!this.isEnabled()) return [];
+    try {
+      const response = await fetch("https://lite.duckduckgo.com/lite/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `q=${encodeURIComponent(input.query)}`,
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new AppError(`DuckDuckGo returned ${response.status}`);
+      const html = await response.text();
+      if (html.includes("If you are not redirected automatically")) {
+        throw new AppError("DuckDuckGo blocked the request.");
+      }
+      
+      const hits: DiscoveryHit[] = [];
+      const pattern = /<a[^>]+href="([^"]+)"[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>[\s\S]*?<td class=['"]result-snippet['"]>([\s\S]*?)<\/td>/gi;
+      let match;
+      while ((match = pattern.exec(html))) {
+        const url = match[1];
+        if (url.startsWith("/")) continue; // Skip relative URLs
+        const title = match[2].replace(/<[^>]+>/g, "").trim();
+        const snippet = match[3].replace(/<[^>]+>/g, "").trim();
+        if (title && url) {
+          hits.push({ title, url, snippet, sourceType: "search", sourceName: "duckduckgo", query: input.query });
+        }
+        if (hits.length >= input.limit) break;
+      }
+      return hits;
+    } catch (e) {
+      throw new AppError("DuckDuckGo search failed: " + (e instanceof Error ? e.message : "Unknown error"));
+    }
+  }
+
+  async healthCheck(): Promise<ProviderHealth> {
+    return { ok: true, detail: "Enabled as fallback" };
+  }
+}
+
 export function browserSearchBlocked(html: string) {
   return /captcha|unusual traffic|verify you are human|are you a robot/i.test(html);
 }
@@ -198,5 +246,9 @@ export function discoveryProviders(flags: { directory: boolean; map: boolean; so
   if (browser.isEnabled()) providers.push(browser);
   const google = new GoogleCseProvider();
   if (google.isEnabled()) providers.push(google);
+  
+  const ddg = new DuckDuckGoLiteProvider();
+  if (ddg.isEnabled()) providers.push(ddg);
+  
   return providers;
 }

@@ -232,6 +232,20 @@ function qualitativeValue(score: number) {
 }
 
 async function analyze(organizationId: string, prospectId: string, evidence: string, inputHash: string) {
+  if (!process.env.DEEPSEEK_API_KEY?.trim()) {
+    return {
+      summary: "AI qualification is disabled. Add DEEPSEEK_API_KEY to enable.",
+      painPoints: [],
+      opportunityScore: 50,
+      opportunityReason: "AI qualification is disabled.",
+      recommendedService: "General Consulting",
+      personalizationAngle: null,
+      suggestedOpening: null,
+      software: { score: 50, evidence: [], interpretation: "AI qualification is disabled.", confidence: 50 },
+      advertising: { score: 50, evidence: [], interpretation: "AI qualification is disabled.", confidence: 50 },
+      automation: { score: 50, evidence: [], interpretation: "AI qualification is disabled.", confidence: 50 },
+    };
+  }
   const messages = companyAnalysisPrompt(evidence);
   let lastError = "DeepSeek returned malformed JSON.";
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -281,6 +295,12 @@ async function draftEmail(
   prospectId: string,
   input: { companyName: string; contactName: string | null; evidence: string; angle: string | null; recommendedService: string | null },
 ) {
+  if (!process.env.DEEPSEEK_API_KEY?.trim()) {
+    return {
+      subject: `Introduction to ${input.companyName}`,
+      body: `Hi ${input.contactName || "there"},\n\nI noticed your work at ${input.companyName} and wanted to reach out. We specialize in helping companies like yours.\n\nBest,\nProspectPilot`,
+    };
+  }
   const messages = emailPrompt(input);
   const inputHash = hashInput(JSON.stringify(input));
   let lastError = "DeepSeek could not draft the email.";

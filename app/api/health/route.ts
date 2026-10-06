@@ -23,5 +23,11 @@ export async function GET(request: Request) {
     }
   }
   const decision = healthDecision(database, redis, ready);
-  return NextResponse.json(decision.body, { status: decision.status, headers: { "Cache-Control": "no-store" } });
+  
+  const diagnostics = {
+    gitSha: process.env.COOLIFY_GIT_COMMIT_SHA || process.env.NEXT_PUBLIC_GIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || "unknown",
+    hasDeepSeek: !!process.env.DEEPSEEK_API_KEY,
+  };
+  
+  return NextResponse.json({ ...decision.body, diagnostics }, { status: decision.status, headers: { "Cache-Control": "no-store" } });
 }

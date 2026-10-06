@@ -75,6 +75,11 @@ export async function GET(request: Request) {
       candidateEmail = candidate?.email;
     }
 
+    const diagnostics = {
+      gitSha: process.env.COOLIFY_GIT_COMMIT_SHA || process.env.NEXT_PUBLIC_GIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || "unknown",
+      hasDeepSeek: !!process.env.DEEPSEEK_API_KEY,
+    };
+
     return NextResponse.json({
       run,
       vacancy,
@@ -83,7 +88,8 @@ export async function GET(request: Request) {
       cv,
       coverLetter,
       automationRun,
-      candidateEmail
+      candidateEmail,
+      diagnostics
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal Server Error";

@@ -74,9 +74,9 @@ export async function queueJob(input: {
     logError("queue.enqueue_failed", { jobId: job.id, queue: input.queue, message });
     await prisma.backgroundJob.update({
       where: { id: job.id },
-      data: { state: "FAILED", error: "Redis queue is unavailable.", finishedAt: new Date() },
+      data: { state: "FAILED", error: `Redis queue is unavailable: ${message}`, finishedAt: new Date() },
     });
-    throw new AppError("The background queue is unavailable. Check Redis and try again.");
+    throw new AppError(`The background queue is unavailable: ${message}`);
   }
   return job;
 }

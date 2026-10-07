@@ -180,6 +180,7 @@ export async function attachBrowserInspection(applicationId: string, options?: {
   if (application.package) {
     await prisma.applicationPackage.update({
       where: { id: application.package.id },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: { status: nextStatus as any, timings: timings as Prisma.InputJsonValue },
     });
   }

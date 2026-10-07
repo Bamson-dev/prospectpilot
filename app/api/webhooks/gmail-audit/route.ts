@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    const report: Record<string, any> = {
+    const report: Record<string, string | number | boolean> = {
        "CLIENT OUTREACH PROVIDER": "RESEND",
        "GMAIL ACCOUNT": "NOT CONNECTED",
        "GMAIL SEND PERMISSION": "MISSING",

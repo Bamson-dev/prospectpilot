@@ -44,7 +44,7 @@ export async function GET(request: Request) {
 
     // Phase 3: Change Provider
     const campaign = await prisma.campaign.findFirst({
-      where: { status: "ACTIVE" }
+      where: { status: { notIn: ["PAUSED", "ARCHIVED", "COMPLETED"] } }
     });
 
     if (campaign) {

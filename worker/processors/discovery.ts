@@ -12,8 +12,11 @@ import { buildDiscoveryQueries } from "@/lib/search/queries";
 const AGGREGATORS = ["google.", "bing.com", "duckduckgo.com", "yahoo.com", "wikipedia.org"];
 
 export async function processCampaignDiscoveryScheduler() {
+  // Automatically process autonomous campaigns without requiring manual ACTIVE status
   const campaigns = await prisma.campaign.findMany({
-    where: { status: "ACTIVE" },
+    where: { 
+      status: { notIn: ["PAUSED", "ARCHIVED", "COMPLETED"] },
+    },
   });
   
   for (const campaign of campaigns) {
@@ -72,9 +75,10 @@ export async function processDiscovery(campaignId: string) {
     if (stored < remaining) await delay(1200);
   }
 
+  // Removed status change to RESEARCHING so the campaign stays ACTIVE
   await prisma.campaign.update({
     where: { id: campaign.id },
-    data: { status: stored > 0 ? "RESEARCHING" : campaign.status },
+    data: { updatedAt: new Date() },
   });
   await recordActivity({
     organizationId: campaign.organizationId,

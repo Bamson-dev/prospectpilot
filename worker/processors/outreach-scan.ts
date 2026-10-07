@@ -7,7 +7,7 @@ export async function processOutreachScan() {
     where: {
       state: { in: ["DRAFT", "PENDING_APPROVAL"] },
       campaign: {
-        status: "ACTIVE",
+        status: { notIn: ["PAUSED", "ARCHIVED", "COMPLETED"] },
         requireApproval: false,
         emailAccountId: { not: null },
       },

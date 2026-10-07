@@ -150,7 +150,7 @@ export async function GET(request: Request) {
         "API called": finalState !== "unknown" ? "YES" : "NO",
         "Accepted": outAfter === "SENT" ? "YES" : "NO",
         "Message ID": msgId,
-        "Thread ID": completedMessage?.providerThreadId || "N/A",
+        "Thread ID": "N/A",
       },
       "OUTREACH": {
         "Initial state": outBefore,

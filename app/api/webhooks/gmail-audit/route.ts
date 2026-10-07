@@ -105,6 +105,10 @@ export async function GET(request: Request) {
         const existingJob = await prisma.backgroundJob.findUnique({
           where: { id: `outreach-${p.id}` }
         });
+        if (existingJob && existingJob.state === "FAILED") {
+          await prisma.backgroundJob.delete({ where: { id: `outreach-${p.id}` } });
+        }
+        
         if (!existingJob || existingJob.state === "FAILED") {
           try {
              await queueJob({

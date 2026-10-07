@@ -12,6 +12,7 @@ import { processCampaignDiscoveryScheduler, processDiscovery } from "@/worker/pr
 import { processDueFollowUps, processReply } from "@/worker/processors/follow-up";
 import { processInboxSync, processEmployerReply } from "@/worker/processors/inbox";
 import { processOutreach } from "@/worker/processors/outreach";
+import { processOutreachScan } from "@/worker/processors/outreach-scan";
 import { processQualification } from "@/worker/processors/qualification";
 import { processResearch } from "@/worker/processors/research";
 import { runJob } from "@/worker/runtime";
@@ -87,10 +88,24 @@ start("ai", async (data) => {
   await processQualification(data.prospectId);
 });
 
-start("outreach", async (data) => {
-  const messageId = typeof data.messageId === "string" && data.messageId ? data.messageId : readPayload(data, "messageId");
-  if (!messageId) throw new Error("Outreach job is missing a message.");
-  await processOutreach(messageId);
+const outreachWorker = new Worker(
+  "outreach",
+  async (job) => {
+    if (job.name === "scan") {
+      await processOutreachScan();
+      return;
+    }
+    const data = job.data as Record<string, string>;
+    await runJob(data.jobId, async () => {
+      const messageId = typeof data.messageId === "string" && data.messageId ? data.messageId : readPayload(data, "messageId");
+      if (!messageId) throw new Error("Outreach job is missing a message.");
+      await processOutreach(messageId);
+    });
+  },
+  { connection, concurrency: concurrency("outreach"), settings: { backoffStrategy: retryBackoff } }
+);
+outreachWorker.on("failed", (job, error) => {
+  logInfo("worker.job_failed", { queue: "outreach", jobId: job?.id, message: error.message });
 });
 
 start("inbox-sync", async (data) => {
@@ -238,6 +253,14 @@ void getQueue("follow-up")
   .add("scan", {}, { repeat: { every: 15 * 60 * 1000 }, jobId: "follow-up-scan" })
   .catch((error: unknown) => {
     logInfo("worker.follow_up_schedule_failed", {
+      message: error instanceof Error ? error.message : "unknown",
+    });
+  });
+
+void getQueue("outreach")
+  .add("scan", {}, { repeat: { every: 15 * 60 * 1000 }, jobId: "outreach-scan" })
+  .catch((error: unknown) => {
+    logInfo("worker.outreach_schedule_failed", {
       message: error instanceof Error ? error.message : "unknown",
     });
   });

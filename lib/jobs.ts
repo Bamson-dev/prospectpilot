@@ -51,9 +51,18 @@ export async function queueJob(input: {
   } catch (error) {
     if (input.id && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const existing = await prisma.backgroundJob.findUnique({ where: { id: input.id } });
-      if (existing) return existing;
+      if (existing) {
+        if (existing.state === "QUEUED" || existing.state === "FAILED") {
+          job = existing;
+        } else {
+          return existing;
+        }
+      } else {
+        throw error;
+      }
+    } else {
+      throw error;
     }
-    throw error;
   }
   const extra: Record<string, string> = {};
   if (input.payload && typeof input.payload === "object" && !Array.isArray(input.payload)) {

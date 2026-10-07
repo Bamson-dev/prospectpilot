@@ -51,7 +51,24 @@ export function getQueue(name: QueueName) {
 }
 
 export async function enqueue(name: QueueName, jobId: string, data: Record<string, string>) {
-  await getQueue(name).add(name, data, {
+  const queue = getQueue(name);
+  const existingJob = await queue.getJob(jobId);
+  
+  if (existingJob) {
+    const state = await existingJob.getState();
+    if (state === "failed") {
+      await existingJob.retry("failed");
+      return;
+    }
+    if (state === "waiting" || state === "active" || state === "delayed" || state === "prioritized") {
+      return;
+    }
+    if (state === "completed") {
+      await existingJob.remove();
+    }
+  }
+
+  await queue.add(name, data, {
     jobId,
     attempts: 3,
     backoff: { type: "exponential", delay: 15000 },

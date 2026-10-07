@@ -19,7 +19,6 @@ export async function processOutreach(messageId: string) {
   const decision = outreachSendDecision(message.state);
   if (decision === "already-sent" || decision === "do-not-resend") return;
   if (decision === "refuse") throw new AppError("This message is not approved to send.");
-  if (!outreachSendingEnabled()) throw new AppError("Outreach sending is turned off. No email was sent.");
   if (!message.contact?.email) throw new AppError("The contact does not have an email address.");
   if (message.contact.suppressed) throw new AppError("This contact is suppressed.");
   const suppressed = await prisma.suppression.findUnique({

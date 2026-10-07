@@ -7,9 +7,6 @@ import { classifyProviderFailure, isPermanentProviderFailure } from "@/lib/provi
 import { queueJob } from "@/lib/jobs";
 
 export async function processInboxSync(organizationId: string) {
-  if (process.env.GMAIL_INBOX_SYNC_ENABLED !== "true") {
-    return;
-  }
   const accounts = await prisma.emailAccount.findMany({
     where: { organizationId, provider: "GMAIL", status: "ACTIVE", refreshTokenEncrypted: { not: null } },
   });

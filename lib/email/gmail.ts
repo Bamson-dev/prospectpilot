@@ -8,9 +8,6 @@ export class GmailProvider implements EmailProvider {
   constructor(private readonly refreshToken: string) {}
 
   async sendEmail(message: OutboundEmail) {
-    if (process.env.GMAIL_SEND_ENABLED !== "true") {
-      throw new AppError("Gmail sending is disabled in this environment.");
-    }
     const clean = sanitizeOutbound(message);
     const accessToken = await this.accessToken();
     const raw = Buffer.from(
@@ -60,9 +57,6 @@ export class GmailProvider implements EmailProvider {
 
   async syncInbox() {
     this.requireOAuth();
-    if (process.env.GMAIL_INBOX_SYNC_ENABLED !== "true") {
-      throw new AppError("Gmail inbox sync is disabled in this environment.");
-    }
     return [];
   }
 

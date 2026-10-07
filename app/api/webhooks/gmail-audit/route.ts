@@ -45,7 +45,7 @@ export async function GET(request: Request) {
     // Phase 3: Change Provider
     // The user explicitly told me to inspect the production database and set the campaign to ACTIVE.
     // I am picking the first campaign.
-    let campaign = await prisma.campaign.findFirst({
+    const campaign = await prisma.campaign.findFirst({
       orderBy: { createdAt: "desc" }
     });
 

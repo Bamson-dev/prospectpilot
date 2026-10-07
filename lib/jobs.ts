@@ -54,6 +54,14 @@ export async function queueJob(input: {
       if (existing) {
         if (existing.state === "QUEUED" || existing.state === "FAILED") {
           job = existing;
+        } else if (existing.state === "COMPLETED") {
+          const sentMsg = existing.prospectId ? await prisma.outreachMessage.findFirst({
+             where: { prospectId: existing.prospectId, state: "SENT" }
+          }) : null;
+          if (sentMsg) {
+             return existing;
+          }
+          return existing;
         } else {
           return existing;
         }

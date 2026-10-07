@@ -1,5 +1,6 @@
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
+import { prisma } from "@/lib/db";
 
 export const QUEUE_NAMES = [
   "discovery",
@@ -56,7 +57,14 @@ export async function enqueue(name: QueueName, jobId: string, data: Record<strin
   
   if (existingJob) {
     const state = await existingJob.getState();
+    const bgJob = await prisma.backgroundJob.findUnique({ where: { id: jobId } });
+    
+    const sentMsg = bgJob && bgJob.prospectId ? await prisma.outreachMessage.findFirst({
+      where: { prospectId: bgJob.prospectId, state: "SENT" }
+    }) : null;
+
     if (state === "failed") {
+      if (sentMsg) return;
       await existingJob.retry("failed");
       return;
     }
@@ -64,7 +72,12 @@ export async function enqueue(name: QueueName, jobId: string, data: Record<strin
       return;
     }
     if (state === "completed") {
-      await existingJob.remove();
+      if (sentMsg) return;
+      if (bgJob && (bgJob.state === "QUEUED" || bgJob.state === "FAILED")) {
+        await existingJob.remove();
+      } else {
+        return;
+      }
     }
   }
 

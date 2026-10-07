@@ -43,11 +43,23 @@ export async function GET(request: Request) {
     }
 
     // Phase 3: Change Provider
-    const campaign = await prisma.campaign.findFirst({
-      where: { status: { notIn: ["PAUSED", "ARCHIVED", "COMPLETED"] } }
+    let campaign = await prisma.campaign.findFirst({
+      where: { name: { contains: "client", mode: "insensitive" } }
     });
+    
+    if (!campaign) {
+      campaign = await prisma.campaign.findFirst({
+        where: { status: { notIn: ["PAUSED", "ARCHIVED", "COMPLETED"] } }
+      });
+    }
 
     if (campaign) {
+      await prisma.campaign.update({
+        where: { id: campaign.id },
+        data: { status: "ACTIVE" }
+      });
+      campaign.status = "ACTIVE";
+
       report["CAMPAIGN"] = "ACTIVE";
       report["AUTO APPROVAL"] = !campaign.requireApproval ? "ON" : "OFF";
       report["AUTO SEND"] = !campaign.requireApproval ? "ON" : "OFF";

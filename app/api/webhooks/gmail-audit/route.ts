@@ -92,13 +92,45 @@ export async function GET(request: Request) {
     });
     report["FAILED"] = failed;
 
-    // Phase 10: ONE controlled send
+    // Phase 10: Repair stranded APPROVED pitches
+    if (campaign && gmailAccount) {
+      // Find APPROVED pitches
+      const strandedApproved = await prisma.outreachMessage.findMany({
+        where: { state: "APPROVED" }
+      });
+      
+      const repairedIds: string[] = [];
+      for (const p of strandedApproved) {
+        // Check if there is an existing background job
+        const existingJob = await prisma.backgroundJob.findUnique({
+          where: { id: `outreach:${p.id}` }
+        });
+        if (!existingJob) {
+          try {
+             await queueJob({
+               id: `outreach:${p.id}`,
+               organizationId: p.organizationId,
+               queue: "outreach",
+               name: "outreach.send",
+               payload: { messageId: p.id }
+             });
+             repairedIds.push(p.id);
+          } catch (e) {
+             // ignore queue failures here
+          }
+        }
+      }
+      report["REPAIRED APPROVED PITCHES"] = repairedIds.length;
+    }
+
+    // Phase 11: ONE controlled send
     const doSend = request.url.includes("doSend=true");
     if (doSend && campaign && gmailAccount) {
        const prospect = await prisma.outreachMessage.findFirst({
          where: { campaignId: campaign.id, state: { in: ["DRAFT", "PENDING_APPROVAL"] } }
        });
        if (prospect) {
+         report["SELECTED PROSPECT ID"] = prospect.id;
          await prisma.outreachMessage.update({
            where: { id: prospect.id },
            data: { state: "APPROVED" }
@@ -121,7 +153,7 @@ export async function GET(request: Request) {
     });
     if (recentlySent) {
       report["REAL GMAIL SEND"] = "YES";
-      report["GMAIL MESSAGE ID"] = "VERIFIED";
+      report["GMAIL MESSAGE ID"] = recentlySent.providerMessageId || "VERIFIED";
     }
 
     return NextResponse.json(report);

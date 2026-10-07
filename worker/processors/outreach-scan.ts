@@ -36,7 +36,7 @@ export async function processOutreachScan() {
       });
 
       await queueJob({
-        id: `outreach:${message.id}`,
+        id: `outreach-${message.id}`,
         organizationId: message.organizationId,
         queue: "outreach",
         name: "outreach.send",

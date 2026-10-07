@@ -103,12 +103,12 @@ export async function GET(request: Request) {
       for (const p of strandedApproved) {
         // Check if there is an existing background job
         const existingJob = await prisma.backgroundJob.findUnique({
-          where: { id: `outreach:${p.id}` }
+          where: { id: `outreach-${p.id}` }
         });
         if (!existingJob) {
           try {
              await queueJob({
-               id: `outreach:${p.id}`,
+               id: `outreach-${p.id}`,
                organizationId: p.organizationId,
                queue: "outreach",
                name: "outreach.send",
@@ -136,7 +136,7 @@ export async function GET(request: Request) {
            data: { state: "APPROVED" }
          });
          await queueJob({
-           id: `outreach:${prospect.id}`,
+           id: `outreach-${prospect.id}`,
            organizationId: prospect.organizationId,
            queue: "outreach",
            name: "outreach.send",

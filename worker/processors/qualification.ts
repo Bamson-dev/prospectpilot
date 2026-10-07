@@ -148,7 +148,7 @@ export async function processQualification(prospectId: string) {
     
     if (wroteMessage && wroteMessage.state === "APPROVED") {
       await queueJob({
-        id: `outreach:${wroteMessage.messageId}`,
+        id: `outreach-${wroteMessage.messageId}`,
         organizationId: prospect.organizationId,
         queue: "outreach",
         name: "outreach.send",

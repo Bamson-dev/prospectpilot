@@ -90,7 +90,7 @@ export async function GET(request: Request) {
     const failed = await prisma.outreachMessage.count({
       where: { state: "FAILED" }
     });
-    report["FAILED"] = failed;
+    report["FAILED"] = failed; const sending = await prisma.outreachMessage.count({ where: { state: "SENDING" } }); report["SENDING"] = sending;
 
     // Phase 10: Repair stranded APPROVED pitches
     if (campaign && gmailAccount) {

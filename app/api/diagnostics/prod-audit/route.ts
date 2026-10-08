@@ -1,35 +1,77 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getQueue } from "@/lib/queues";
+import { authorizeAdmin } from "../discovery/route";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await authorizeAdmin(request);
+  if (!auth) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
+
   try {
     const campaigns = await prisma.campaign.findMany({
-      include: { emailAccount: true }
+      where: { organizationId: auth.organization.id },
+      include: {
+        emailAccount: {
+          select: {
+            id: true,
+            provider: true,
+            fromEmail: true,
+            fromName: true,
+            status: true,
+            lastError: true,
+            lastSendAt: true,
+            lastSyncAt: true,
+          },
+        },
+      },
     });
 
     const pitches = await prisma.outreachMessage.findMany({
-      where: { state: { in: ["DRAFT", "PENDING_APPROVAL"] } },
+      where: {
+        organizationId: auth.organization.id,
+        state: { in: ["DRAFT", "PENDING_APPROVAL"] },
+      },
       select: { id: true, state: true, campaignId: true, prospectId: true, contact: { select: { email: true, suppressed: true } } },
       take: 50
     });
 
     const backgroundJobs = await prisma.backgroundJob.findMany({
-      where: { queue: "outreach" },
+      where: { organizationId: auth.organization.id, queue: "outreach" },
       orderBy: { createdAt: "desc" },
       take: 20
     });
 
     const queue = getQueue("outreach");
-    const active = await queue.getActive();
-    const waiting = await queue.getWaiting();
-    const failed = await queue.getFailed();
-    const delayed = await queue.getDelayed();
+    const belongsToOrganization = (job: { data: unknown }) =>
+      typeof job.data === "object" && job.data !== null &&
+      "organizationId" in job.data && job.data.organizationId === auth.organization.id;
+    const [activeJobs, waitingJobs, failedJobs, delayedJobs] = await Promise.all([
+      queue.getActive(),
+      queue.getWaiting(),
+      queue.getFailed(),
+      queue.getDelayed(),
+    ]);
+    const active = activeJobs.filter(belongsToOrganization);
+    const waiting = waitingJobs.filter(belongsToOrganization);
+    const failed = failedJobs.filter(belongsToOrganization);
+    const delayed = delayedJobs.filter(belongsToOrganization);
 
     const gmailAccount = await prisma.emailAccount.findFirst({
-      where: { provider: "GMAIL" }
+      where: { organizationId: auth.organization.id, provider: "GMAIL" },
+      select: {
+        id: true,
+        provider: true,
+        fromEmail: true,
+        fromName: true,
+        status: true,
+        lastError: true,
+        lastSendAt: true,
+        lastSyncAt: true,
+      },
     });
 
     return NextResponse.json({
@@ -48,8 +90,9 @@ export async function GET() {
         REDIS_URL: !!process.env.REDIS_URL,
         DATABASE_URL: !!process.env.DATABASE_URL
       }
-    });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }

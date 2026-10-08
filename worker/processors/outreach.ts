@@ -64,7 +64,7 @@ export async function processOutreach(messageId: string) {
   const text = `${message.body.trim()}\n\nIf you'd rather not receive emails from me, unsubscribe here: ${appUrl}/unsubscribe?token=${unsubscribe}`;
   const html = `${message.body.trim().replace(/\n/g, "<br/>")}<br/><br/>If you'd rather not receive emails from me, <a href="${appUrl}/unsubscribe?token=${unsubscribe}">unsubscribe here</a>.`;
   const claim = await prisma.outreachMessage.updateMany({
-    where: { id: message.id, state: { in: ["APPROVED", "QUEUED"] } },
+    where: { id: message.id, state: { in: ["APPROVED", "QUEUED", "FAILED"] } },
     data: { state: "SENDING", error: null },
   });
   if (claim.count !== 1) return;

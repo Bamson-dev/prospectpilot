@@ -12,11 +12,8 @@ import { buildDiscoveryQueries } from "@/lib/search/queries";
 const AGGREGATORS = ["google.", "bing.com", "duckduckgo.com", "yahoo.com", "wikipedia.org"];
 
 export async function processCampaignDiscoveryScheduler() {
-  // Automatically process autonomous campaigns without requiring manual ACTIVE status
   const campaigns = await prisma.campaign.findMany({
-    where: { 
-      status: { notIn: ["PAUSED", "ARCHIVED", "COMPLETED"] },
-    },
+    where: { status: { in: ["DISCOVERY", "ACTIVE"] } },
   });
   
   for (const campaign of campaigns) {
@@ -35,7 +32,7 @@ export async function processCampaignDiscoveryScheduler() {
 export async function processDiscovery(campaignId: string) {
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign) throw new AppError("Campaign was not found.");
-  if (campaign.status === "PAUSED" || campaign.status === "ARCHIVED" || campaign.status === "COMPLETED") {
+  if (campaign.status !== "DISCOVERY" && campaign.status !== "ACTIVE") {
     throw new AppError("Campaign is not accepting discovery.");
   }
   const start = new Date();

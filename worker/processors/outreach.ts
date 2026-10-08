@@ -4,6 +4,7 @@ import { AppError } from "@/lib/errors";
 import { GmailProvider } from "@/lib/email/gmail";
 import { ResendProvider } from "@/lib/email/resend";
 import { outreachSendDecision } from "@/lib/email/message-policy";
+import { outreachSendingEnabled } from "@/lib/email/send-gate";
 
 import type { EmailProvider } from "@/lib/email/types";
 import { parseFollowUpSteps } from "@/lib/follow-ups";
@@ -13,6 +14,8 @@ import { assertSafeOutboundCopy } from "@/lib/sales/intelligence";
 import { buildFollowUpCopy } from "@/lib/sales/follow-up-copy";
 
 export async function processOutreach(messageId: string) {
+  if (!outreachSendingEnabled()) throw new AppError("Outbound sending is turned off.");
+
   const message = await prisma.outreachMessage.findUnique({
     where: { id: messageId },
     include: { prospect: true, contact: true, campaign: { include: { emailAccount: true } } },

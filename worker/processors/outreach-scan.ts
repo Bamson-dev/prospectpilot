@@ -1,8 +1,11 @@
 import { prisma } from "@/lib/db";
 import { queueJob } from "@/lib/jobs";
+import { outreachSendingEnabled } from "@/lib/email/send-gate";
 import { logInfo } from "@/lib/logger";
 
 export async function processOutreachScan() {
+  if (!outreachSendingEnabled()) return;
+
   const messages = await prisma.outreachMessage.findMany({
     where: {
       state: { in: ["DRAFT", "PENDING_APPROVAL"] },

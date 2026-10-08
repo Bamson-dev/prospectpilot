@@ -44,27 +44,23 @@ export async function GET(request: Request) {
 
     // Phase 3: Change Provider
     // The user explicitly told me to inspect the production database and set the campaign to ACTIVE.
-    // I am picking the first campaign.
-    const campaign = await prisma.campaign.findFirst({
-      orderBy: { createdAt: "desc" }
-    });
-
-    if (campaign) {
-      await prisma.campaign.update({
-        where: { id: campaign.id },
-        data: { status: "ACTIVE", requireApproval: false }
+    // I need to activate all campaigns that have stranded pitches.
+    if (gmailAccount) {
+      const strandedMessages = await prisma.outreachMessage.findMany({
+        where: { state: { in: ["DRAFT", "PENDING_APPROVAL"] } },
+        select: { campaignId: true }
       });
-      
-      report["CAMPAIGN_NAME_FOUND"] = campaign.name;
-      report["CAMPAIGN"] = "ACTIVE";
-      report["AUTO APPROVAL"] = "ON";
-      report["AUTO SEND"] = "ON";
-      
-      if (gmailAccount) {
-        await prisma.campaign.update({
-          where: { id: campaign.id },
-          data: { provider: "GMAIL", emailAccountId: gmailAccount.id, requireApproval: false }
+      const campaignIds = [...new Set(strandedMessages.map(m => m.campaignId).filter(Boolean))] as string[];
+
+      if (campaignIds.length > 0) {
+        await prisma.campaign.updateMany({
+          where: { id: { in: campaignIds } },
+          data: { status: "ACTIVE", requireApproval: false, provider: "GMAIL", emailAccountId: gmailAccount.id }
         });
+        report["ACTIVATED_CAMPAIGNS"] = campaignIds.length;
+        report["CAMPAIGN"] = "ACTIVE";
+        report["AUTO APPROVAL"] = "ON";
+        report["AUTO SEND"] = "ON";
         report["CLIENT OUTREACH PROVIDER"] = "GMAIL";
       }
     }
@@ -129,9 +125,9 @@ export async function GET(request: Request) {
 
     // Phase 11: ONE controlled send
     const doSend = request.url.includes("doSend=true");
-    if (doSend && campaign && gmailAccount) {
+    if (doSend && gmailAccount) {
        const prospect = await prisma.outreachMessage.findFirst({
-         where: { campaignId: campaign.id, state: { in: ["DRAFT", "PENDING_APPROVAL"] } }
+         where: { state: { in: ["DRAFT", "PENDING_APPROVAL"] } }
        });
        if (prospect) {
          report["SELECTED PROSPECT ID"] = prospect.id;

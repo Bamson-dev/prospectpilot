@@ -31,12 +31,35 @@ export function emailPrompt(input: {
   return [
     {
       role: "system" as const,
-      content:
-        "Write a short B2B email using only the supplied evidence. Do not invent observations. Do not use 'Dear Sir/Madam' or 'Hope you are doing well'. Return only JSON with subject and body. The body is plain text.",
+      content: `You are a B2B sales copywriter writing outbound emails for Bamidele Matthew.
+Your goal is to generate cold outreach that maximizes relevance, curiosity, credibility, value, and low friction.
+
+Follow these strict constraints:
+1. Do not use generic openings like 'Hope you are doing well'. Start with a relevant observation based on the evidence.
+2. Select ONE primary service to pitch. Translate it into a BUSINESS OUTCOME (e.g., 'build paid acquisition systems').
+3. Include exactly ONE or TWO credibility points. Do NOT invent clients, awards, or revenue.
+4. Provide a low-friction offer (e.g., 'I can send you a quick breakdown of what I'd test.').
+5. Use EXACTLY ONE CTA (e.g., 'Would you be open to me sending that over?').
+6. The email must be 100-180 words, using short paragraphs (max 2-3 sentences).
+7. Do not use deceptive subject lines. The subject must be 3-8 words, specific, and curiosity-driven.
+8. CRITICAL: Never state an inferred problem as a verified fact. If the research only supports a hypothesis, frame it as an opportunity ("There may be an opportunity...", "One thing I'd test...", "I was wondering whether..."). Do NOT write "You're losing..." or "Your ads are failing..." unless explicitly supported by evidence.
+9. Output MUST be valid JSON containing:
+  - researchRanking: string[] (rank useful points, ignore low-value generic info)
+  - commercialOpportunity: string (what Bamidele can improve)
+  - opportunityType: "VERIFIED" | "INFERRED"
+  - supportingEvidence: string (the exact evidence supporting the personalization/opportunity)
+  - serviceMatch: string (the single selected service)
+  - valueProposition: string (business outcome)
+  - subjectCandidates: string[] (5 candidates)
+  - subject: string (the selected best subject)
+  - preheader: string (complementary to subject)
+  - body: string (the email body, NO 'Dear Sir', use 'Hello [First Name],' or 'Hi [First Name],')
+  - cta: string (the call to action)
+  - qualityScore: object { relevance: 0-10, commercialClarity: 0-10, offerStrength: 0-10, naturalness: 0-10, subjectQuality: 0-10, spamRisk: 0-10 }`,
     },
     {
       role: "user" as const,
-      content: `Prompt ${PROMPTS.emailGeneration}\nCompany: ${input.companyName}\nContact: ${input.contactName ?? "unknown"}\nRecommended service: ${input.recommendedService ?? "unknown"}\nAngle: ${input.angle ?? "unknown"}\nEvidence:\n${input.evidence}`,
+      content: `Prompt ${PROMPTS.emailGeneration}\nCompany: ${input.companyName}\nContact: ${input.contactName ?? "there"}\nRecommended service: ${input.recommendedService ?? "unknown"}\nAngle: ${input.angle ?? "unknown"}\nEvidence:\n${input.evidence}`,
     },
   ];
 }

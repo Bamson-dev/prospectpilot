@@ -22,6 +22,7 @@ export class ResendProvider implements EmailProvider {
         to: [clean.to],
         subject: clean.subject,
         text: clean.text,
+        ...(clean.html ? { html: clean.html } : {}),
       }),
     });
     const body = await response.text();

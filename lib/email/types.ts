@@ -4,6 +4,7 @@ export type OutboundEmail = {
   fromName?: string | null;
   subject: string;
   text: string;
+  html?: string;
   replyTo?: string | null;
 };
 
@@ -36,5 +37,7 @@ export function sanitizeOutbound(message: OutboundEmail): OutboundEmail {
   if (!from || !subject || !text) throw new Error("The email is missing a sender, subject, or body.");
   if (subject.length > 200) throw new Error("The subject line is too long.");
   if (text.length > 8000) throw new Error("The email body is too long.");
-  return { ...message, to, from, subject, text };
+  const html = message.html ? message.html.trim() : undefined;
+  if (html && html.length > 16000) throw new Error("The email HTML body is too long.");
+  return { ...message, to, from, subject, text, html };
 }

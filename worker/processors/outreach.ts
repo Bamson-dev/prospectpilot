@@ -45,7 +45,8 @@ export async function processOutreach(messageId: string) {
   const provider = providerFor(account.provider, account.refreshTokenEncrypted);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://leadpilot.live";
   const unsubscribe = await signUnsubscribeToken(message.contact.id);
-  const text = `${message.body.trim()}\n\nIf you would rather not hear from us, use this link: ${appUrl}/unsubscribe?token=${unsubscribe}`;
+  const text = `${message.body.trim()}\n\nIf you'd rather not receive emails from me, unsubscribe here: ${appUrl}/unsubscribe?token=${unsubscribe}`;
+  const html = `${message.body.trim().replace(/\n/g, "<br/>")}<br/><br/>If you'd rather not receive emails from me, <a href="${appUrl}/unsubscribe?token=${unsubscribe}">unsubscribe here</a>.`;
   const claim = await prisma.outreachMessage.updateMany({
     where: { id: message.id, state: { in: ["APPROVED", "QUEUED"] } },
     data: { state: "SENDING", error: null },
@@ -58,6 +59,7 @@ export async function processOutreach(messageId: string) {
       fromName: account.fromName,
       subject: message.subject,
       text,
+      html,
     });
     const sent = await prisma.outreachMessage.updateMany({
       where: { id: message.id, state: "SENDING" },

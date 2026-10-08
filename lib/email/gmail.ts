@@ -10,17 +10,36 @@ export class GmailProvider implements EmailProvider {
   async sendEmail(message: OutboundEmail) {
     const clean = sanitizeOutbound(message);
     const accessToken = await this.accessToken();
-    const raw = Buffer.from(
-      [
-        `From: ${clean.fromName ? `${clean.fromName} <${clean.from}>` : clean.from}`,
-        `To: ${clean.to}`,
-        `Subject: ${clean.subject}`,
-        "MIME-Version: 1.0",
+    const boundary = "boundary_" + Math.random().toString(36).substring(2);
+    let mime = [
+      `From: ${clean.fromName ? `${clean.fromName} <${clean.from}>` : clean.from}`,
+      `To: ${clean.to}`,
+      `Subject: ${clean.subject}`,
+      "MIME-Version: 1.0",
+    ];
+    
+    if (clean.html) {
+      mime.push(
+        `Content-Type: multipart/alternative; boundary="${boundary}"`,
+        "",
+        `--${boundary}`,
         "Content-Type: text/plain; charset=utf-8",
         "",
         clean.text,
-      ].join("\r\n"),
-    ).toString("base64url");
+        `--${boundary}`,
+        "Content-Type: text/html; charset=utf-8",
+        "",
+        clean.html,
+        `--${boundary}--`
+      );
+    } else {
+      mime.push(
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        clean.text
+      );
+    }
+    const raw = Buffer.from(mime.join("\r\n")).toString("base64url");
     const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
       method: "POST",
       signal: AbortSignal.timeout(20000),

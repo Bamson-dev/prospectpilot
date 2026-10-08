@@ -21,8 +21,25 @@ export const companyAnalysisSchema = z.object({
 });
 
 export const emailDraftSchema = z.object({
+  researchRanking: z.array(z.string()).max(10),
+  commercialOpportunity: z.string().max(800),
+  opportunityType: z.enum(["VERIFIED", "INFERRED"]),
+  supportingEvidence: z.string().max(800),
+  serviceMatch: z.string().max(200),
+  valueProposition: z.string().max(400),
+  subjectCandidates: z.array(z.string()).max(10),
   subject: z.string().min(1).max(160),
+  preheader: z.string().max(200).optional().default(""),
   body: z.string().min(1).max(4000),
+  cta: z.string().max(200),
+  qualityScore: z.object({
+    relevance: z.number().min(0).max(10),
+    commercialClarity: z.number().min(0).max(10),
+    offerStrength: z.number().min(0).max(10),
+    naturalness: z.number().min(0).max(10),
+    subjectQuality: z.number().min(0).max(10),
+    spamRisk: z.number().min(0).max(10),
+  }),
 });
 
 export const replyAnalysisSchema = z.object({

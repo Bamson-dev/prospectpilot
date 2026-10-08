@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { completeJson, hashInput } from "@/lib/ai/client";
 import { companyAnalysisPrompt, emailPrompt, PROMPTS } from "@/lib/ai/prompts";
-import { companyAnalysisSchema, emailDraftSchema, extractJsonObject } from "@/lib/ai/schemas";
+import { companyAnalysisSchema, emailDraftSchema, extractJsonObject, type EmailDraft } from "@/lib/ai/schemas";
 import { queueJob, recordActivity } from "@/lib/jobs";
 import { logInfo } from "@/lib/logger";
 import { analysisRetryDecision, qualificationEvidence, qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
@@ -125,7 +125,10 @@ export async function processQualification(prospectId: string) {
           subject: draft.subject,
         },
       });
-      const targetState = contact?.email ? (campaign.requireApproval ? "PENDING_APPROVAL" : "APPROVED") : "DRAFT";
+      const targetState = draft.failedQualityControl
+        ? "PENDING_APPROVAL"
+        : (contact?.email ? (campaign.requireApproval ? "PENDING_APPROVAL" : "APPROVED") : "DRAFT");
+      
       const message = await tx.outreachMessage.create({
         data: {
           organizationId: prospect.organizationId,
@@ -297,6 +300,7 @@ async function draftEmail(
 ) {
   if (!process.env.DEEPSEEK_API_KEY?.trim()) {
     return {
+      failedQualityControl: false,
       subject: `Introduction to ${input.companyName}`,
       body: `Hi ${input.contactName || "there"},\n\nI noticed your work at ${input.companyName} and wanted to reach out. We specialize in helping companies like yours.\n\nBest,\nProspectPilot`,
     };
@@ -304,7 +308,10 @@ async function draftEmail(
   const messages = emailPrompt(input);
   const inputHash = hashInput(JSON.stringify(input));
   let lastError = "DeepSeek could not draft the email.";
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  let bestDraft: EmailDraft | null = null;
+  let highestScore = -1;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const result = await completeJson(messages);
       const parsed = emailDraftSchema.parse(extractJsonObject(result.content));
@@ -320,11 +327,44 @@ async function draftEmail(
           durationMs: result.durationMs,
         },
       });
-      return parsed;
+
+      const {
+        relevance,
+        commercialClarity,
+        offerStrength,
+        naturalness,
+        subjectQuality,
+        spamRisk,
+      } = parsed.qualityScore;
+
+      const totalScore =
+        relevance + commercialClarity + offerStrength + naturalness + subjectQuality - spamRisk;
+      
+      if (!bestDraft || totalScore > highestScore) {
+        bestDraft = parsed;
+        highestScore = totalScore;
+      }
+
+      if (
+        relevance >= 7 &&
+        commercialClarity >= 7 &&
+        offerStrength >= 6 &&
+        naturalness >= 7 &&
+        subjectQuality >= 7 &&
+        spamRisk <= 3
+      ) {
+        return { ...parsed, failedQualityControl: false };
+      }
+      
+      lastError = `Draft failed quality control (relevance: ${relevance}, clarity: ${commercialClarity}, offer: ${offerStrength}, naturalness: ${naturalness}, subject: ${subjectQuality}, spam: ${spamRisk}).`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : lastError;
       if (error instanceof AppError && /not configured/.test(error.message)) throw error;
     }
+  }
+
+  if (bestDraft) {
+    return { ...bestDraft, failedQualityControl: true };
   }
   throw new AppError(lastError);
 }

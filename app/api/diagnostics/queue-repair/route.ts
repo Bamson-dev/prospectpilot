@@ -34,18 +34,31 @@ export async function GET(request: Request) {
       let rejectionReason = "none";
       if (bullMQJob) {
         const state = await bullMQJob.getState();
-        if ((state === "failed" || !bullMQJob) && !targetJob && job.prospectId) {
-          const message = await prisma.outreachMessage.findFirst({
-            where: { prospectId: job.prospectId, state: { not: "SENT" } },
-            orderBy: { createdAt: "asc" }
-          });
+        let prospectId = job.prospectId;
+        let messageId = null;
+        if (!prospectId && job.payload && typeof job.payload === 'object' && 'messageId' in job.payload) {
+            messageId = (job.payload as any).messageId;
+        }
+
+        if ((state === "failed" || !bullMQJob) && !targetJob && (prospectId || messageId)) {
+          const message = messageId 
+            ? await prisma.outreachMessage.findUnique({ where: { id: messageId } })
+            : await prisma.outreachMessage.findFirst({
+                where: { prospectId: prospectId, state: { not: "SENT" } },
+                orderBy: { createdAt: "asc" }
+              });
           
-          const sentMessage = await prisma.outreachMessage.findFirst({
-            where: { prospectId: job.prospectId, state: "SENT" }
-          });
+          if (message) {
+            prospectId = message.prospectId;
+          }
+
+          const sentMessage = prospectId ? await prisma.outreachMessage.findFirst({
+            where: { prospectId: prospectId, state: "SENT" }
+          }) : null;
 
           if (message && !sentMessage) {
             targetJob = job;
+            targetJob.prospectId = prospectId; // for later use
             targetBullMQJob = bullMQJob;
             targetMessage = message;
             initialBullMQState = state;
@@ -53,19 +66,31 @@ export async function GET(request: Request) {
             rejectionReason = `message=${!!message}, sentMessage=${!!sentMessage}`;
           }
         } else {
-            rejectionReason = `state=${state}, hasProspectId=${!!job.prospectId}`;
+            rejectionReason = `state=${state}, hasProspectId=${!!prospectId || !!messageId}`;
         }
-      } else if (!targetJob && job.prospectId) {
-          const message = await prisma.outreachMessage.findFirst({
-            where: { prospectId: job.prospectId, state: { not: "SENT" } },
-            orderBy: { createdAt: "asc" }
-          });
-          const sentMessage = await prisma.outreachMessage.findFirst({
-            where: { prospectId: job.prospectId, state: "SENT" }
-          });
+      } else {
+        let prospectId = job.prospectId;
+        let messageId = null;
+        if (!prospectId && job.payload && typeof job.payload === 'object' && 'messageId' in job.payload) {
+            messageId = (job.payload as any).messageId;
+        }
+        if (!targetJob && (prospectId || messageId)) {
+          const message = messageId 
+            ? await prisma.outreachMessage.findUnique({ where: { id: messageId } })
+            : await prisma.outreachMessage.findFirst({
+                where: { prospectId: prospectId, state: { not: "SENT" } },
+                orderBy: { createdAt: "asc" }
+              });
+              
+          if (message) prospectId = message.prospectId;
+          
+          const sentMessage = prospectId ? await prisma.outreachMessage.findFirst({
+            where: { prospectId: prospectId, state: "SENT" }
+          }) : null;
 
           if (message && !sentMessage) {
             targetJob = job;
+            targetJob.prospectId = prospectId; // for later use
             targetBullMQJob = null;
             targetMessage = message;
             initialBullMQState = "missing";

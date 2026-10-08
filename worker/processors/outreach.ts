@@ -4,7 +4,7 @@ import { AppError } from "@/lib/errors";
 import { GmailProvider } from "@/lib/email/gmail";
 import { ResendProvider } from "@/lib/email/resend";
 import { outreachSendDecision } from "@/lib/email/message-policy";
-import { outreachSendingEnabled } from "@/lib/email/send-gate";
+
 import type { EmailProvider } from "@/lib/email/types";
 import { parseFollowUpSteps } from "@/lib/follow-ups";
 import { recordActivity } from "@/lib/jobs";
@@ -38,10 +38,26 @@ export async function processOutreach(messageId: string) {
     where: { campaignId: message.campaignId, sentAt: { gte: start } },
   });
   if (sentToday >= message.campaign.dailyOutreachLimit) {
-    throw new AppError("The daily outreach limit has been reached.");
+    throw new AppError("The daily outreach limit has been reached for this campaign.");
   }
+
   const account = message.campaign.emailAccount;
   if (!account || account.status === "RESTRICTED") throw new AppError("The campaign sender is not available.");
+
+  const accountSentToday = await prisma.outreachMessage.count({
+    where: { campaign: { emailAccountId: account.id }, sentAt: { gte: start } },
+  });
+  if (accountSentToday >= 40) {
+    throw new AppError("The safety limit for this sender account has been reached today.");
+  }
+
+  const systemSentToday = await prisma.outreachMessage.count({
+    where: { sentAt: { gte: start } },
+  });
+  if (systemSentToday >= 200) {
+    throw new AppError("The global system outreach limit has been reached today.");
+  }
+
   const provider = providerFor(account.provider, account.refreshTokenEncrypted);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://leadpilot.live";
   const unsubscribe = await signUnsubscribeToken(message.contact.id);

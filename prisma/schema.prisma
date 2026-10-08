@@ -137,6 +137,7 @@ model Prospect {
   recommendedService     String?
   personalizationAngle   String?
   suggestedOpening       String?
+  salesIntelligence      Json?
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   notes                  String?

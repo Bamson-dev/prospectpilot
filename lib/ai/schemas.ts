@@ -1,4 +1,10 @@
 import { z } from "zod";
+import { SERVICE_CATALOGUE } from "@/lib/sales/service-catalog";
+
+const serviceName = z.string().min(1).max(160).refine(
+  (value) => SERVICE_CATALOGUE.some((service) => service.name === value),
+  "Choose one exact service from the service catalogue.",
+);
 
 const assessment = z.object({
   score: z.number().min(0).max(100),
@@ -7,30 +13,59 @@ const assessment = z.object({
   evidence: z.array(z.string().min(1).max(400)).max(6),
 });
 
+const opportunity = z.object({
+  type: z.enum(["CUSTOM_SOFTWARE", "SOFTWARE_REPLACEMENT", "AUTOMATION", "ADVERTISING_MANAGEMENT", "ADVERTISING_OPTIMIZATION", "OTHER"]),
+  title: z.string().min(1).max(160),
+  evidence: z.array(z.string().min(1).max(400)).min(1).max(5),
+  reasoning: z.string().min(1).max(800),
+  likelyPain: z.string().min(1).max(400),
+  businessImpact: z.string().min(1).max(400),
+  serviceMatch: serviceName,
+  confidence: z.number().min(0).max(100),
+  urgency: z.number().min(0).max(100),
+  estimatedValue: z.string().min(1).max(120),
+  recommendedAngle: z.string().min(1).max(400),
+  commercialOpportunityScore: z.number().min(0).max(100),
+  serviceFitScore: z.number().min(0).max(100),
+  urgencyScore: z.number().min(0).max(100),
+  evidenceScore: z.number().min(0).max(100),
+  replyProbability: z.number().min(0).max(100),
+  revenuePotential: z.number().min(0).max(100),
+  easeOfDemonstratingValue: z.number().min(0).max(100),
+});
+
 export const companyAnalysisSchema = z.object({
   summary: z.string().min(1).max(1200),
   painPoints: z.array(z.string().min(1).max(240)).max(4),
   opportunityScore: z.number().min(0).max(100),
   opportunityReason: z.string().min(1).max(800),
-  recommendedService: z.string().min(1).max(240),
+  recommendedService: serviceName,
   personalizationAngle: z.string().min(1).max(400),
   suggestedOpening: z.string().min(1).max(300),
   software: assessment,
   advertising: assessment,
   automation: assessment,
+  companyProfile: z.object({
+    businessModel: z.string().max(300),
+    customerTypes: z.array(z.string().max(120)).max(8),
+    locations: z.array(z.string().max(120)).max(12),
+    growthSignals: z.array(z.string().max(300)).max(8),
+    digitalSignals: z.array(z.string().max(300)).max(12),
+  }),
+  opportunities: z.array(opportunity).max(5),
 });
 
 export const emailDraftSchema = z.object({
   researchRanking: z.array(z.string()).max(10),
-  commercialOpportunity: z.string().max(800),
+  commercialOpportunity: z.string().min(1).max(800),
   opportunityType: z.enum(["VERIFIED", "INFERRED"]),
-  supportingEvidence: z.string().max(800),
-  serviceMatch: z.string().max(400),
-  valueProposition: z.string().max(800),
+  supportingEvidence: z.string().min(15).max(800),
+  serviceMatch: serviceName,
+  valueProposition: z.string().min(1).max(800),
   versions: z.array(
     z.object({
       approach: z.enum(["OPPORTUNITY", "PROBLEM", "CURIOSITY"]),
-      subjectCandidates: z.array(z.string()).max(5),
+      subjectCandidates: z.array(z.string().min(1).max(120)).min(1).max(5),
       body: z.string().min(1).max(4000),
       scores: z.object({
         relevance: z.number().min(0).max(10),
@@ -46,7 +81,7 @@ export const emailDraftSchema = z.object({
   subject: z.string().min(1).max(160),
   preheader: z.string().max(200).optional().default(""),
   body: z.string().min(1).max(4000),
-  cta: z.string().max(200),
+  cta: z.string().min(1).max(200),
   qualityScore: z.object({
     relevance: z.number().min(0).max(10),
     commercialClarity: z.number().min(0).max(10),

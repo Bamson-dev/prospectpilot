@@ -9,6 +9,8 @@ import type { EmailProvider } from "@/lib/email/types";
 import { parseFollowUpSteps } from "@/lib/follow-ups";
 import { recordActivity } from "@/lib/jobs";
 import { signUnsubscribeToken } from "@/lib/session";
+import { assertSafeOutboundCopy } from "@/lib/sales/intelligence";
+import { buildFollowUpCopy } from "@/lib/sales/follow-up-copy";
 
 export async function processOutreach(messageId: string) {
   const message = await prisma.outreachMessage.findUnique({
@@ -20,6 +22,17 @@ export async function processOutreach(messageId: string) {
   if (decision === "already-sent" || decision === "do-not-resend") return;
   if (decision === "refuse") throw new AppError("This message is not approved to send.");
   if (!message.contact?.email) throw new AppError("The contact does not have an email address.");
+  try {
+    assertSafeOutboundCopy(message.subject, message.body);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Message failed outbound content safety.";
+    await prisma.outreachMessage.updateMany({
+      where: { id: message.id, state: { in: ["APPROVED", "QUEUED", "FAILED"] } },
+      data: { state: "FAILED", error: reason.slice(0, 300) },
+    });
+    await prisma.prospect.update({ where: { id: message.prospectId }, data: { outreachState: "FAILED" } });
+    throw new AppError(reason);
+  }
   if (message.contact.suppressed) throw new AppError("This contact is suppressed.");
   const suppressed = await prisma.suppression.findUnique({
     where: { organizationId_email: { organizationId: message.organizationId, email: message.contact.email.toLowerCase() } },
@@ -130,9 +143,20 @@ async function createFollowUps(
 ) {
   const message = await prisma.outreachMessage.findUnique({ where: { id: messageId } });
   if (!message) return;
+  const prospect = await prisma.prospect.findUnique({ where: { id: prospectId }, select: { companyName: true, salesIntelligence: true, contacts: { where: { isPrimary: true }, take: 1, select: { fullName: true } } } });
+  const sales = prospect?.salesIntelligence;
+  const alternateAngles = sales && typeof sales === "object" && !Array.isArray(sales)
+    ? (sales as { alternateAngles?: unknown }).alternateAngles
+    : null;
+  if (!prospect || !Array.isArray(alternateAngles) || alternateAngles.length === 0) return;
   const steps = parseFollowUpSteps(stepsValue);
   const now = Date.now();
-  for (const step of steps) {
+  const usableAngles = alternateAngles
+    .map((angle) => buildFollowUpCopy(prospect.companyName, prospect.contacts[0]?.fullName ?? null, angle as Parameters<typeof buildFollowUpCopy>[2]))
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+  for (const [index, step] of steps.slice(0, usableAngles.length).entries()) {
+    const copy = usableAngles[index];
+    if (!copy) continue;
     const runAt = new Date(now + step.dayOffset * 24 * 60 * 60 * 1000);
     await prisma.followUp.create({
       data: {
@@ -141,8 +165,8 @@ async function createFollowUps(
         prospectId,
         messageId,
         dayOffset: step.dayOffset,
-        subject: `Re: ${message.subject}`,
-        body: message.body,
+        subject: copy.subject,
+        body: copy.body,
         state: autoFollowUp ? "SCHEDULED" : "PENDING_APPROVAL",
         runAt: autoFollowUp ? runAt : null,
       },

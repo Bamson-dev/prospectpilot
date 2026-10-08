@@ -137,6 +137,7 @@ function Opportunity({ prospect, ai }: { prospect: ProspectView; ai: boolean }) 
         <p className="mt-2 text-sm">Software {prospect.softwareOpportunity ?? "unknown"} · Advertising {prospect.advertisingOpportunity ?? "unknown"} · Automation {prospect.automationOpportunity ?? "unknown"}</p>
         <p className="mt-2 text-sm">Recommended service: {prospect.recommendedService || "unknown"}</p>
       </Panel>
+      <SalesIntelligence value={prospect.salesIntelligence} />
       {prospect.opportunities.map((item) => (
         <Panel key={item.id}>
           <p className="text-sm text-muted">{item.kind} · {item.status} · confidence {item.confidence} · value {item.potentialValue || "unknown"}</p>
@@ -164,6 +165,52 @@ function Opportunity({ prospect, ai }: { prospect: ProspectView; ai: boolean }) 
       </Panel>
     </div>
   );
+}
+
+function SalesIntelligence({ value }: { value: unknown }) {
+  const intelligence = readSalesIntelligence(value);
+  if (!intelligence || intelligence.opportunities.length === 0) {
+    return <Panel><h2 className="font-display text-2xl">Ranked sales angles</h2><p className="mt-2 text-sm text-muted">No evidence-backed alternate sales angles are stored yet.</p></Panel>;
+  }
+  return (
+    <Panel>
+      <h2 className="font-display text-2xl">Ranked sales angles</h2>
+      <p className="mt-1 text-sm text-muted">Commercial interpretations are kept separate from observed evidence.</p>
+      {intelligence.opportunities.map((item, index) => (
+        <div key={`${item.title}-${index}`} className="mt-4 border-t border-line pt-3">
+          <p className="text-xs text-muted">#{index + 1} · fit {item.rankScore ?? "—"}/100 · confidence {item.confidence ?? "—"}/100</p>
+          <h3 className="mt-1 font-semibold">{item.title}</h3>
+          <p className="mt-1 text-sm">{item.reasoning}</p>
+          <p className="mt-1 text-sm">Service: {item.serviceMatch || "Not matched"}</p>
+          <p className="mt-1 text-sm text-muted">Evidence: {item.evidence.join(" · ")}</p>
+          <p className="mt-1 text-sm text-muted">Alternative angle: {item.recommendedAngle}</p>
+        </div>
+      ))}
+    </Panel>
+  );
+}
+
+function readSalesIntelligence(value: unknown): { opportunities: Array<{ title: string; reasoning: string; serviceMatch: string; evidence: string[]; recommendedAngle: string; rankScore?: number; confidence?: number }> } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const opportunities = (value as { rankedOpportunities?: unknown }).rankedOpportunities;
+  if (!Array.isArray(opportunities)) return null;
+  return {
+    opportunities: opportunities.flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const row = item as Record<string, unknown>;
+      const evidence = Array.isArray(row.evidence) ? row.evidence.filter((entry): entry is string => typeof entry === "string") : [];
+      if (typeof row.title !== "string" || typeof row.reasoning !== "string" || typeof row.recommendedAngle !== "string") return [];
+      return [{
+        title: row.title,
+        reasoning: row.reasoning,
+        serviceMatch: typeof row.serviceMatch === "string" ? row.serviceMatch : "",
+        evidence,
+        recommendedAngle: row.recommendedAngle,
+        rankScore: typeof row.rankScore === "number" ? row.rankScore : undefined,
+        confidence: typeof row.confidence === "number" ? row.confidence : undefined,
+      }];
+    }),
+  };
 }
 
 function Contacts({ prospect }: { prospect: ProspectView }) {
@@ -286,6 +333,7 @@ type ProspectView = {
   softwareOpportunity: number | null;
   advertisingOpportunity: number | null;
   automationOpportunity: number | null;
+  salesIntelligence: unknown;
   tags: Array<{ tagId: string; tag: { name: string } }>;
   research: Array<{ id: string; url: string; fetchMethod: string; sourceType: string; title: string | null; metaDescription: string | null; excerpt: string | null; content: string | null; technologies: string[]; services: string[]; confidence: number | null; createdAt: Date }>;
   opportunities: Array<{ id: string; kind: string; status: string; title: string | null; description: string | null; interpretation: string; evidence: unknown; potentialValue: string | null; confidence: number; recommendedService: string | null }>;

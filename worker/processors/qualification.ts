@@ -8,6 +8,7 @@ import { logInfo } from "@/lib/logger";
 import { analysisRetryDecision, qualificationEvidence, qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
 import { QUOTA_LEASE_MS } from "@/lib/campaign-quota";
 import { watchLease } from "@/lib/independent-heartbeat";
+import { rankOpportunities, assessSalesDraft, unsupportedEvidenceClaims } from "@/lib/sales/intelligence";
 
 export async function processQualification(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({
@@ -55,6 +56,20 @@ export async function processQualification(prospectId: string) {
   // A completed AIRequest stores only an input hash, not the model JSON.
   // Replaying prospect columns would replace cited evidence with empty arrays.
   const analysis = await analyze(prospect.organizationId, prospect.id, evidence, inputHash);
+  const rankedOpportunities = rankOpportunities(analysis.opportunities);
+  const primaryOpportunity = rankedOpportunities[0] ?? null;
+  const recommendedService = primaryOpportunity?.serviceMatch || analysis.recommendedService;
+  const personalizationAngle = primaryOpportunity?.recommendedAngle || analysis.personalizationAngle;
+  const salesIntelligence = {
+    companyProfile: analysis.companyProfile,
+    rankedOpportunities,
+    alternateAngles: rankedOpportunities.slice(1).map((item) => ({
+      title: item.title,
+      angle: item.recommendedAngle,
+      service: item.serviceMatch,
+      evidence: item.evidence,
+    })),
+  };
   const rows = (["software", "advertising", "automation"] as const).map((kind) => ({
     kind: kind === "software" ? "SOFTWARE" as const : kind === "advertising" ? "ADVERTISING" as const : "AUTOMATION" as const,
     title: kind === "software" ? "Software opportunity" : kind === "advertising" ? "Advertising opportunity" : "Automation opportunity",
@@ -62,7 +77,7 @@ export async function processQualification(prospectId: string) {
     potentialValue: qualitativeValue(analysis[kind].score),
     evidence: analysis[kind].evidence,
     interpretation: analysis[kind].interpretation,
-    recommendedService: kind === "software" ? analysis.recommendedService : null,
+    recommendedService: primaryOpportunity && opportunityCategory(primaryOpportunity.type) === rowCategory(kind) ? recommendedService : null,
     confidence: Math.round(analysis[kind].confidence),
   }));
   const contact = prospect.contacts.find((item) => item.email && !item.suppressed);
@@ -89,15 +104,16 @@ export async function processQualification(prospectId: string) {
         painPoints: analysis.painPoints,
         opportunityScore: Math.round(analysis.opportunityScore),
         opportunityReason: analysis.opportunityReason,
-        recommendedService: analysis.recommendedService,
-        personalizationAngle: analysis.personalizationAngle,
+        recommendedService,
+        personalizationAngle,
         suggestedOpening: analysis.suggestedOpening,
+        salesIntelligence,
         softwareOpportunity: Math.round(analysis.software.score),
         advertisingOpportunity: Math.round(analysis.advertising.score),
         automationOpportunity: Math.round(analysis.automation.score),
       },
     });
-    storeDraft = Boolean(prospect.campaign) && shouldStoreQualificationDraft(states);
+    storeDraft = Boolean(prospect.campaign) && Boolean(primaryOpportunity) && shouldStoreQualificationDraft(states);
     return true;
   });
   if (!wrote) {
@@ -107,13 +123,28 @@ export async function processQualification(prospectId: string) {
   }
   const campaign = prospect.campaign;
   if (storeDraft && campaign) {
-    const draft = await draftEmail(prospect.organizationId, prospect.id, {
-      companyName: prospect.companyName,
-      contactName: contact?.fullName ?? null,
-      evidence: evidence.slice(0, 4000),
-      angle: analysis.personalizationAngle,
-      recommendedService: analysis.recommendedService,
-    });
+    let draft: EmailDraft | null = null;
+    try {
+      draft = await draftEmail(prospect.organizationId, prospect.id, {
+        companyName: prospect.companyName,
+        contactName: contact?.fullName ?? null,
+        evidence: evidence.slice(0, 6000),
+        angle: personalizationAngle,
+        recommendedService,
+        opportunities: rankedOpportunities.slice(0, 5).map(({ title, evidence: items, recommendedAngle, serviceMatch }) => ({
+          title,
+          evidence: items,
+          recommendedAngle,
+          serviceMatch,
+        })),
+      });
+    } catch (error) {
+      logInfo("qualification.draft_skipped", {
+        prospectId: prospect.id,
+        reason: error instanceof Error ? error.message.slice(0, 160) : "draft_generation_failed",
+      });
+    }
+    if (draft) {
     const wroteMessage = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${prospect.id}))`;
       const messages = await tx.outreachMessage.findMany({ where: { prospectId: prospect.id }, select: { state: true } });
@@ -125,9 +156,7 @@ export async function processQualification(prospectId: string) {
           subject: draft.subject,
         },
       });
-      const targetState = draft.failedQualityControl
-        ? "PENDING_APPROVAL"
-        : (contact?.email ? (campaign.requireApproval ? "PENDING_APPROVAL" : "APPROVED") : "DRAFT");
+      const targetState = contact?.email ? (campaign.requireApproval ? "PENDING_APPROVAL" : "APPROVED") : "DRAFT";
       
       const message = await tx.outreachMessage.create({
         data: {
@@ -158,11 +187,12 @@ export async function processQualification(prospectId: string) {
         payload: { messageId: wroteMessage.messageId },
       });
     }
+    }
   }
   if (slotId) {
     await prisma.activityLog.updateMany({
       where: { id: slotId, action: "qualification.slot" },
-      data: { action: "prospect.qualified", detail: analysis.recommendedService },
+      data: { action: "prospect.qualified", detail: recommendedService },
     });
   } else {
     await recordActivity({
@@ -170,7 +200,7 @@ export async function processQualification(prospectId: string) {
       campaignId: prospect.campaignId,
       prospectId: prospect.id,
       action: "prospect.qualified",
-      detail: analysis.recommendedService,
+      detail: recommendedService,
     });
   }
   logInfo("qualification.completed", { prospectId: prospect.id });
@@ -234,20 +264,20 @@ function qualitativeValue(score: number) {
   return "unknown";
 }
 
+function opportunityCategory(type: string) {
+  if (type === "OTHER") return "OTHER";
+  if (type === "AUTOMATION") return "AUTOMATION";
+  if (type === "ADVERTISING_MANAGEMENT" || type === "ADVERTISING_OPTIMIZATION") return "ADVERTISING";
+  return "SOFTWARE";
+}
+
+function rowCategory(kind: "software" | "advertising" | "automation") {
+  return kind === "software" ? "SOFTWARE" : kind === "advertising" ? "ADVERTISING" : "AUTOMATION";
+}
+
 async function analyze(organizationId: string, prospectId: string, evidence: string, inputHash: string) {
   if (!process.env.DEEPSEEK_API_KEY?.trim()) {
-    return {
-      summary: "AI qualification is disabled. Add DEEPSEEK_API_KEY to enable.",
-      painPoints: [],
-      opportunityScore: 50,
-      opportunityReason: "AI qualification is disabled.",
-      recommendedService: "General Consulting",
-      personalizationAngle: null,
-      suggestedOpening: null,
-      software: { score: 50, evidence: [], interpretation: "AI qualification is disabled.", confidence: 50 },
-      advertising: { score: 50, evidence: [], interpretation: "AI qualification is disabled.", confidence: 50 },
-      automation: { score: 50, evidence: [], interpretation: "AI qualification is disabled.", confidence: 50 },
-    };
+    throw new AppError("AI integration not configured. Qualification was not fabricated.");
   }
   const messages = companyAnalysisPrompt(evidence);
   let lastError = "DeepSeek returned malformed JSON.";
@@ -256,6 +286,8 @@ async function analyze(organizationId: string, prospectId: string, evidence: str
     try {
       const result = await completeJson(messages);
       const parsed = companyAnalysisSchema.parse(extractJsonObject(result.content));
+      const unsupported = unsupportedEvidenceClaims(parsed, evidence);
+      if (unsupported.length > 0) throw new Error(`AI evidence provenance failed for ${unsupported.length} claim(s).`);
       await prisma.aIRequest.create({
         data: {
           organizationId,
@@ -296,25 +328,44 @@ async function analyze(organizationId: string, prospectId: string, evidence: str
 async function draftEmail(
   organizationId: string,
   prospectId: string,
-  input: { companyName: string; contactName: string | null; evidence: string; angle: string | null; recommendedService: string | null },
-) {
-  if (!process.env.DEEPSEEK_API_KEY?.trim()) {
-    return {
-      failedQualityControl: false,
-      subject: `Introduction to ${input.companyName}`,
-      body: `Hi ${input.contactName || "there"},\n\nI noticed your work at ${input.companyName} and wanted to reach out. We specialize in helping companies like yours.\n\nBest,\nProspectPilot`,
-    };
-  }
-  const messages = emailPrompt(input);
+  input: {
+    companyName: string;
+    contactName: string | null;
+    evidence: string;
+    angle: string | null;
+    recommendedService: string | null;
+    opportunities: Array<{ title: string; evidence: string[]; recommendedAngle: string; serviceMatch: string }>;
+  },
+): Promise<EmailDraft> {
+  if (!process.env.DEEPSEEK_API_KEY?.trim()) throw new AppError("AI integration not configured.");
   const inputHash = hashInput(JSON.stringify(input));
-  let lastError = "DeepSeek could not draft the email.";
-  let bestDraft: EmailDraft | null = null;
-  let highestScore = -1;
+  let lastError = "DeepSeek could not draft a message that passed quality control.";
+  const approaches = ["OPPORTUNITY", "PROBLEM", "CURIOSITY"] as const;
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < approaches.length; attempt += 1) {
+    const started = Date.now();
     try {
-      const result = await completeJson(messages);
+      const result = await completeJson(emailPrompt({ ...input, retryApproach: approaches[attempt] }));
       const parsed = emailDraftSchema.parse(extractJsonObject(result.content));
+      const quality = assessSalesDraft(parsed, input.evidence);
+      if (!quality.accepted) {
+        lastError = `Draft failed quality control: ${quality.reasons.join(",")}`;
+        await prisma.aIRequest.create({
+          data: {
+            organizationId,
+            prospectId,
+            purpose: PROMPTS.emailGeneration,
+            promptVersion: PROMPTS.emailGeneration,
+            model: result.model,
+            inputHash,
+            status: "failed",
+            error: lastError.slice(0, 300),
+            durationMs: result.durationMs,
+          },
+        });
+        logInfo("outreach.draft_quality_rejected", { prospectId, attempt, reasons: quality.reasons });
+        continue;
+      }
       await prisma.aIRequest.create({
         data: {
           organizationId,
@@ -327,44 +378,24 @@ async function draftEmail(
           durationMs: result.durationMs,
         },
       });
-
-      const {
-        relevance,
-        commercialClarity,
-        offerStrength,
-        naturalness,
-        subjectQuality,
-        spamRisk,
-      } = parsed.qualityScore;
-
-      const totalScore =
-        relevance + commercialClarity + offerStrength + naturalness + subjectQuality - spamRisk;
-      
-      if (!bestDraft || totalScore > highestScore) {
-        bestDraft = parsed;
-        highestScore = totalScore;
-      }
-
-      if (
-        relevance >= 7 &&
-        commercialClarity >= 7 &&
-        offerStrength >= 6 &&
-        naturalness >= 7 &&
-        subjectQuality >= 7 &&
-        spamRisk <= 3
-      ) {
-        return { ...parsed, failedQualityControl: false };
-      }
-      
-      lastError = `Draft failed quality control (relevance: ${relevance}, clarity: ${commercialClarity}, offer: ${offerStrength}, naturalness: ${naturalness}, subject: ${subjectQuality}, spam: ${spamRisk}).`;
+      return parsed;
     } catch (error) {
       lastError = error instanceof Error ? error.message : lastError;
-      if (error instanceof AppError && /not configured/.test(error.message)) throw error;
+      await prisma.aIRequest.create({
+        data: {
+          organizationId,
+          prospectId,
+          purpose: PROMPTS.emailGeneration,
+          promptVersion: PROMPTS.emailGeneration,
+          model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+          inputHash,
+          status: "failed",
+          error: lastError.slice(0, 300),
+          durationMs: Date.now() - started,
+        },
+      });
+      logInfo("outreach.draft_validation_failed", { prospectId, attempt });
     }
-  }
-
-  if (bestDraft) {
-    return { ...bestDraft, failedQualityControl: true };
   }
   throw new AppError(lastError);
 }

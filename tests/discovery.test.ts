@@ -181,11 +181,13 @@ function analysis(override: { personalizationAngle: string }) {
     painPoints: ["No online booking was observed."],
     opportunityScore: 20,
     opportunityReason: "The public page describes property services.",
-    recommendedService: "Website enquiry form",
+    recommendedService: "Booking or enquiry conversion system",
     suggestedOpening: "I read the public services page.",
     software: assessment,
     advertising: assessment,
     automation: assessment,
+    companyProfile: { businessModel: "Estate agency", customerTypes: ["buyers"], locations: ["Johannesburg"], growthSignals: [], digitalSignals: ["website inquiry form"] },
+    opportunities: [],
     ...override,
   };
 }

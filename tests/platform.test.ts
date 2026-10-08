@@ -119,7 +119,7 @@ describe("research and ai parsing", () => {
   it("parses fenced model json", () => {
     const parsed = companyAnalysisSchema.parse(
       extractJsonObject(`\`\`\`json
-      {"summary":"Public site offers viewings.","painPoints":["Booking is a form"],"opportunityScore":61,"opportunityReason":"A form is the only path.","recommendedService":"Booking workflow","personalizationAngle":"The viewing form","suggestedOpening":"The viewing form is the only next step.","software":{"score":60,"interpretation":"Manual form","confidence":55,"evidence":["form"]},"advertising":{"score":20,"interpretation":"No ad pixel observed","confidence":40,"evidence":["no pixel"]},"automation":{"score":50,"interpretation":"Manual enquiry","confidence":45,"evidence":["form"]}}
+      {"summary":"Public site offers viewings.","painPoints":["Booking is a form"],"opportunityScore":61,"opportunityReason":"A form is the only path.","recommendedService":"Booking or enquiry conversion system","personalizationAngle":"The viewing form","suggestedOpening":"The viewing form is the only next step.","software":{"score":60,"interpretation":"Manual form","confidence":55,"evidence":["form"]},"advertising":{"score":20,"interpretation":"No ad pixel observed","confidence":40,"evidence":["no pixel"]},"automation":{"score":50,"interpretation":"Manual enquiry","confidence":45,"evidence":["form"]},"companyProfile":{"businessModel":"Estate agency","customerTypes":["buyers"],"locations":["Johannesburg"],"growthSignals":[],"digitalSignals":["viewing form"]},"opportunities":[]}
       \`\`\``),
     );
     expect(parsed.opportunityScore).toBe(61);

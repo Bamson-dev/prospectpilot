@@ -35,27 +35,38 @@ export function emailPrompt(input: {
 Your goal is to generate cold outreach that maximizes relevance, curiosity, credibility, value, and low friction.
 
 Follow these strict constraints:
-1. Do not use generic openings like 'Hope you are doing well'. Start with a relevant observation based on the evidence.
-2. Select ONE primary service to pitch. Translate it into a BUSINESS OUTCOME (e.g., 'build paid acquisition systems').
-3. Include exactly ONE or TWO credibility points. Do NOT invent clients, awards, or revenue.
-4. Provide a low-friction offer (e.g., 'I can send you a quick breakdown of what I'd test.').
-5. Use EXACTLY ONE CTA (e.g., 'Would you be open to me sending that over?').
-6. The email must be 100-180 words, using short paragraphs (max 2-3 sentences).
-7. Do not use deceptive subject lines. The subject must be 3-8 words, specific, and curiosity-driven.
-8. CRITICAL: Never state an inferred problem as a verified fact. If the research only supports a hypothesis, frame it as an opportunity ("There may be an opportunity...", "One thing I'd test...", "I was wondering whether..."). Do NOT write "You're losing..." or "Your ads are failing..." unless explicitly supported by evidence.
-9. Output MUST be valid JSON containing:
-  - researchRanking: string[] (rank useful points, ignore low-value generic info)
-  - commercialOpportunity: string (what Bamidele can improve)
+1. SALES STRUCTURE: Every email MUST follow this exact flow:
+   - HOOK: One strong observation that immediately connects to a commercial implication. (e.g. "Johannesburg has 868 agencies listed on Property24, which makes standing out for seller enquiries competitive.")
+   - WHY IT MATTERS: Why they should care.
+   - WHAT I WOULD DO: Introduce an opportunity without explaining every detail (create a curiosity gap).
+   - WHY ME: One strong, non-invented credibility point.
+   - SPECIFIC VALUE OFFER: Tell them exactly what they will receive (e.g. "I can send you the three campaigns I'd test first, including the targeting and funnel.").
+   - ONE CTA: A low-friction question ("Want me to send it over?", "Should I send you the breakdown?").
+2. TONE: The email must sound like a human expert. Do NOT use generic AI phrases like "I wanted to reach out", "Hope this finds you well", "Unlock", "Transform", "Take your business to the next level". Stop saying "There may be an opportunity". Use confident language: "One thing I'd test is...", "I'd look at...", "The approach I'd test is...".
+3. SUBJECT LINES: Do NOT default to raw statistics. Create legitimate curiosity (e.g., "A lead-gen idea for Johannesburg", "Standing out in Johannesburg"). Keep subjects 3-8 words. No clickbait, ALL CAPS, or "URGENT".
+4. LENGTH & FORMAT: 90-150 words total. Short paragraphs (max 2-3 sentences each).
+5. SERVICE POSITIONING: Translate service descriptions into business results (e.g. "I help estate agencies build predictable seller pipelines" instead of "I build lead gen systems").
+6. CRITICAL RULE: Never state an inferred problem as a verified fact. If the research only supports a hypothesis, frame it as an opportunity. Do NOT write "You're losing..." unless explicitly supported by evidence.
+7. MULTI-VERSION GENERATION: For each prospect, generate 3 internal email approaches in the 'versions' array:
+   - VERSION A (OPPORTUNITY): Opportunity-led
+   - VERSION B (PROBLEM): Problem/solution-led
+   - VERSION C (CURIOSITY): Curiosity-led
+   Score each version internally (0-10) for relevance, curiosity, commercialClarity, credibility, naturalness, replyLikelihood, spamRisk. Select the strongest version and place it in the final 'subject', 'body', 'cta', and 'qualityScore' fields. 
+   'replyLikelihood' measures if there is a compelling reason to respond, tangible offer, easy CTA, and natural conversation. Target >= 7.
+
+8. Output MUST be valid JSON containing EXACTLY these keys:
+  - researchRanking: string[]
+  - commercialOpportunity: string
   - opportunityType: "VERIFIED" | "INFERRED"
-  - supportingEvidence: string (the exact evidence supporting the personalization/opportunity)
-  - serviceMatch: string (the single selected service)
-  - valueProposition: string (business outcome)
-  - subjectCandidates: string[] (5 candidates)
+  - supportingEvidence: string
+  - serviceMatch: string
+  - valueProposition: string
+  - versions: array of exactly 3 objects, each with 'approach' ("OPPORTUNITY"|"PROBLEM"|"CURIOSITY"), 'subjectCandidates' (string[]), 'body' (string), and 'scores' (object with relevance, curiosity, commercialClarity, credibility, naturalness, replyLikelihood, spamRisk)
   - subject: string (the selected best subject)
-  - preheader: string (complementary to subject)
-  - body: string (the email body, NO 'Dear Sir', use 'Hello [First Name],' or 'Hi [First Name],')
-  - cta: string (the call to action)
-  - qualityScore: object { relevance: 0-10, commercialClarity: 0-10, offerStrength: 0-10, naturalness: 0-10, subjectQuality: 0-10, spamRisk: 0-10 }`,
+  - preheader: string
+  - body: string (the final selected email body)
+  - cta: string
+  - qualityScore: object { relevance: 0-10, commercialClarity: 0-10, offerStrength: 0-10, naturalness: 0-10, subjectQuality: 0-10, replyLikelihood: 0-10, spamRisk: 0-10 }`,
     },
     {
       role: "user" as const,

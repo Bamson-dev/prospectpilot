@@ -25,9 +25,24 @@ export const emailDraftSchema = z.object({
   commercialOpportunity: z.string().max(800),
   opportunityType: z.enum(["VERIFIED", "INFERRED"]),
   supportingEvidence: z.string().max(800),
-  serviceMatch: z.string().max(200),
-  valueProposition: z.string().max(400),
-  subjectCandidates: z.array(z.string()).max(10),
+  serviceMatch: z.string().max(400),
+  valueProposition: z.string().max(800),
+  versions: z.array(
+    z.object({
+      approach: z.enum(["OPPORTUNITY", "PROBLEM", "CURIOSITY"]),
+      subjectCandidates: z.array(z.string()).max(5),
+      body: z.string().min(1).max(4000),
+      scores: z.object({
+        relevance: z.number().min(0).max(10),
+        curiosity: z.number().min(0).max(10),
+        commercialClarity: z.number().min(0).max(10),
+        credibility: z.number().min(0).max(10),
+        naturalness: z.number().min(0).max(10),
+        replyLikelihood: z.number().min(0).max(10),
+        spamRisk: z.number().min(0).max(10),
+      }),
+    })
+  ).length(3),
   subject: z.string().min(1).max(160),
   preheader: z.string().max(200).optional().default(""),
   body: z.string().min(1).max(4000),
@@ -38,6 +53,7 @@ export const emailDraftSchema = z.object({
     offerStrength: z.number().min(0).max(10),
     naturalness: z.number().min(0).max(10),
     subjectQuality: z.number().min(0).max(10),
+    replyLikelihood: z.number().min(0).max(10),
     spamRisk: z.number().min(0).max(10),
   }),
 });

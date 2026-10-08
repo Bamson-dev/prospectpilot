@@ -26,9 +26,12 @@ export async function GET(request: Request) {
     let targetBullMQJob = null;
     let targetMessage = null;
     let initialBullMQState = "unknown";
+    
+    let debugInfo = [];
 
     for (const job of queuedJobs) {
       const bullMQJob = await queue.getJob(job.id);
+      let rejectionReason = "none";
       if (bullMQJob) {
         const state = await bullMQJob.getState();
         if ((state === "failed" || !bullMQJob) && !targetJob && job.prospectId) {
@@ -46,7 +49,11 @@ export async function GET(request: Request) {
             targetBullMQJob = bullMQJob;
             targetMessage = message;
             initialBullMQState = state;
+          } else {
+            rejectionReason = `message=${!!message}, sentMessage=${!!sentMessage}`;
           }
+        } else {
+            rejectionReason = `state=${state}, hasProspectId=${!!job.prospectId}`;
         }
       } else if (!targetJob && job.prospectId) {
           const message = await prisma.outreachMessage.findFirst({
@@ -62,12 +69,17 @@ export async function GET(request: Request) {
             targetBullMQJob = null;
             targetMessage = message;
             initialBullMQState = "missing";
+          } else {
+            rejectionReason = `missing_job: message=${!!message}, sentMessage=${!!sentMessage}`;
           }
+      } else {
+         rejectionReason = `no_job_and_no_target_or_prospectId`;
       }
+      debugInfo.push({ jobId: job.id, prospectId: job.prospectId, rejectionReason });
     }
 
     if (!targetJob || (!targetBullMQJob && initialBullMQState !== "missing") || !targetMessage || !targetJob.prospectId) {
-      return NextResponse.json({ error: "No suitable queued jobs found with a failed/missing BullMQ state." }, { status: 400 });
+      return NextResponse.json({ error: "No suitable queued jobs found with a failed/missing BullMQ state.", debugInfo, queuedJobsCount, queuedJobs }, { status: 400 });
     }
 
     let recoveryAction = "none";

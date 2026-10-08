@@ -279,12 +279,11 @@ async function analyze(organizationId: string, prospectId: string, evidence: str
   if (!process.env.DEEPSEEK_API_KEY?.trim()) {
     throw new AppError("AI integration not configured. Qualification was not fabricated.");
   }
-  const messages = companyAnalysisPrompt(evidence);
   let lastError = "DeepSeek returned malformed JSON.";
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const started = Date.now();
     try {
-      const result = await completeJson(messages);
+      const result = await completeJson(companyAnalysisPrompt(evidence, attempt === 1));
       const parsed = companyAnalysisSchema.parse(extractJsonObject(result.content));
       const unsupported = unsupportedEvidenceClaims(parsed, evidence);
       if (unsupported.length > 0) throw new Error(`AI evidence provenance failed for ${unsupported.length} claim(s).`);

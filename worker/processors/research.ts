@@ -11,6 +11,7 @@ import { socialLinks } from "@/lib/domains";
 import { logInfo } from "@/lib/logger";
 import { QUOTA_LEASE_MS } from "@/lib/campaign-quota";
 import { watchLease } from "@/lib/independent-heartbeat";
+import { ACTIVE_QUALIFICATION_JOB_STATES } from "@/lib/research/evidence";
 
 export async function processResearch(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({ where: { id: prospectId }, include: { campaign: true } });
@@ -264,7 +265,7 @@ async function ensureQualificationJob(
       prospectId: prospect.id,
       queue: "qualification",
       name: "qualification.analyze",
-      state: { not: "CANCELLED" },
+      state: { in: [...ACTIVE_QUALIFICATION_JOB_STATES] },
     },
     select: { id: true },
   });

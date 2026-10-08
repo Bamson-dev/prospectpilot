@@ -48,3 +48,5 @@ export function analysisRetryDecision(attempt: number, message: string) {
   if (attempt < 1) return "retry" as const;
   return "fail" as const;
 }
+
+export const ACTIVE_QUALIFICATION_JOB_STATES = ["QUEUED", "ACTIVE", "DELAYED"] as const;

@@ -44,7 +44,7 @@ export async function GET(request: Request) {
           const message = messageId 
             ? await prisma.outreachMessage.findUnique({ where: { id: messageId } })
             : await prisma.outreachMessage.findFirst({
-                where: { prospectId: prospectId, state: { not: "SENT" } },
+                where: { prospectId: prospectId!, state: { not: "SENT" } },
                 orderBy: { createdAt: "asc" }
               });
           
@@ -78,7 +78,7 @@ export async function GET(request: Request) {
           const message = messageId 
             ? await prisma.outreachMessage.findUnique({ where: { id: messageId } })
             : await prisma.outreachMessage.findFirst({
-                where: { prospectId: prospectId, state: { not: "SENT" } },
+                where: { prospectId: prospectId!, state: { not: "SENT" } },
                 orderBy: { createdAt: "asc" }
               });
               
@@ -97,8 +97,9 @@ export async function GET(request: Request) {
           } else {
             rejectionReason = `missing_job: message=${!!message}, sentMessage=${!!sentMessage}`;
           }
-      } else {
-         rejectionReason = `no_job_and_no_target_or_prospectId`;
+        } else {
+          rejectionReason = `no_job_and_no_target_or_prospectId`;
+        }
       }
       debugInfo.push({ jobId: job.id, prospectId: job.prospectId, rejectionReason });
     }

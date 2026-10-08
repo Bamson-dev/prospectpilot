@@ -44,4 +44,29 @@ export async function processOutreachScan() {
       });
     }
   }
+
+  const stranded = await prisma.outreachMessage.findMany({
+    where: { state: "APPROVED", campaign: { status: "ACTIVE" } },
+    select: { id: true, organizationId: true }
+  });
+
+  for (const message of stranded) {
+    const job = await prisma.backgroundJob.findUnique({
+      where: { id: `outreach-${message.id}` }
+    });
+    
+    if (!job || job.state === "FAILED") {
+      if (job && job.state === "FAILED") {
+        await prisma.backgroundJob.delete({ where: { id: job.id } });
+      }
+      await queueJob({
+        id: `outreach-${message.id}`,
+        organizationId: message.organizationId,
+        queue: "outreach",
+        name: "outreach.send",
+        payload: { messageId: message.id },
+      });
+      logInfo("worker.outreach_scan_repaired", { messageId: message.id });
+    }
+  }
 }

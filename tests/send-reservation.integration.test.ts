@@ -91,6 +91,24 @@ describe.skipIf(!url)("recipient reservation on PostgreSQL", () => {
     expect(await reserveRecipientSend(prisma, { messageId: failed.id, organizationId: org, email: "retry@example.com" })).toBe("claimed");
   });
 
+  it("enforces the per-domain daily limit under concurrency and counts stale SENDING rows", async () => {
+    const org = await seedOrg();
+    const messages = await Promise.all(Array.from({ length: 6 }, (_, i) => seedMessage(org, `person${i}@limit.example`)));
+    const results = await Promise.all(messages.map((m, i) => reserveRecipientSend(prisma, { messageId: m.id, organizationId: org, email: `person${i}@limit.example`, domainDailyLimit: 2 })));
+    expect(results.filter((r) => r === "claimed")).toHaveLength(2);
+    expect(results.filter((r) => r === "domain-limit")).toHaveLength(4);
+    expect(await prisma.outreachMessage.count({ where: { organizationId: org, state: "SENDING" } })).toBe(2);
+    // A claim left in SENDING from an earlier day still holds its slot until someone reconciles it.
+    const org2 = await seedOrg();
+    const stale = await seedMessage(org2, "old@stale.example");
+    await prisma.outreachMessage.update({ where: { id: stale.id }, data: { state: "SENDING" } });
+    await prisma.$executeRaw`UPDATE "OutreachMessage" SET "updatedAt" = now() - interval '3 days' WHERE id = ${stale.id}`;
+    const fresh = await seedMessage(org2, "new@stale.example");
+    expect(await reserveRecipientSend(prisma, { messageId: fresh.id, organizationId: org2, email: "new@stale.example", domainDailyLimit: 1 })).toBe("domain-limit");
+    const other = await seedMessage(org2, "new@other.example");
+    expect(await reserveRecipientSend(prisma, { messageId: other.id, organizationId: org2, email: "new@other.example", domainDailyLimit: 1 })).toBe("claimed");
+  });
+
   it("holds the advisory lock until the transaction ends and makes a second transaction wait", async () => {
     const org = await seedOrg();
     const events: string[] = [];

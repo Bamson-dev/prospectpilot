@@ -46,3 +46,19 @@ describe("unsubscribe token lifetime", () => {
     vi.useRealTimers();
   });
 });
+
+describe("unsubscribe token key ring", () => {
+  it("verifies a link signed with a retired secret listed in AUTH_SECRET_PREVIOUS", async () => {
+    vi.resetModules();
+    vi.doUnmock("@/lib/session");
+    const oldSecret = "old-unsubscribe-secret-with-more-than-32-characters";
+    process.env.AUTH_SECRET = oldSecret;
+    delete process.env.AUTH_SECRET_PREVIOUS;
+    const session = await vi.importActual<typeof import("@/lib/session")>("@/lib/session");
+    const token = await session.signUnsubscribeToken("c7");
+    process.env.AUTH_SECRET = "new-unsubscribe-secret-with-more-than-32-characters";
+    expect(await session.verifyUnsubscribeToken(token)).toBeNull();
+    process.env.AUTH_SECRET_PREVIOUS = `short, ${oldSecret}`;
+    expect(await session.verifyUnsubscribeToken(token)).toBe("c7");
+  });
+});

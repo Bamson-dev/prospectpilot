@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { listUnsubscribeHeaders, sanitizeOutbound } from "@/lib/email/types";
-import { applyGmailBounce, gmailDeliveryStatusText, gmailPlainText, isBounceSender, noticeAuthenticationFailed, originalMessageIds, parseGmailBounce, sentMessageMatchesNotice } from "@/lib/email/gmail-bounce";
+import { applyGmailBounce, gmailDeliveryStatusText, gmailPlainText, isBounceSender, noticeAuthenticated, originalMessageIds, parseGmailBounce, sentMessageMatchesNotice } from "@/lib/email/gmail-bounce";
 import { suppressContactForUnsubscribe } from "@/lib/unsubscribe";
 import { defaultDomainDailyLimit, domainLockKey, recipientDomain, reserveRecipientSend } from "@/lib/email/send-reservation";
 import { listStuckSending, reconcileMessage } from "@/lib/email/reconcile";
@@ -47,8 +47,11 @@ describe("Gmail bounce parsing", () => {
   it("reads a permanent failure from delivery-status fields", () => {
     expect(parseGmailBounce({ headers: {}, body: dsn() })).toEqual({ recipient: "bad@example.com", status: "5.1.1", kind: "permanent" });
   });
-  it("reads X-Failed-Recipients", () => {
-    expect(parseGmailBounce({ headers: { "x-failed-recipients": "bad@example.com" }, body: "Status: 5.1.1\nAction: failed" })?.recipient).toBe("bad@example.com");
+  it("accepts X-Failed-Recipients only as a confirmation of the delivery-status recipient", () => {
+    const body = "Final-Recipient: rfc822; bad@example.com\nAction: failed\nStatus: 5.1.1";
+    expect(parseGmailBounce({ headers: { "x-failed-recipients": "Bad@Example.com" }, body })?.recipient).toBe("bad@example.com");
+    expect(parseGmailBounce({ headers: { "x-failed-recipients": "other@example.com" }, body })).toBeNull();
+    expect(parseGmailBounce({ headers: { "x-failed-recipients": "bad@example.com" }, body: "Action: failed\nStatus: 5.1.1" })).toBeNull();
   });
   it("treats 4.x.x and delayed notices as temporary", () => {
     expect(parseGmailBounce({ headers: {}, body: "Final-Recipient: rfc822; a@b.com\nAction: delayed\nStatus: 4.4.1" })?.kind).toBe("temporary");
@@ -145,10 +148,17 @@ describe("Gmail bounce handling", () => {
     expect(sentMessageMatchesNotice({ threadId: "t1", messageId: "<abc123@mail.gmail.com>" }, { threadId: "t1", originalMessageIds: [] })).toBe(false);
     expect(originalMessageIds({ mimeType: "text/plain", headers: [{ name: "Message-ID", value: "<fake@x>" }] })).toEqual([]);
   });
-  it("rejects notices whose authentication results record a failure", () => {
-    expect(noticeAuthenticationFailed({ "authentication-results": "mx.google.com; dkim=fail header.i=@googlemail.com; spf=pass" })).toBe(true);
-    expect(noticeAuthenticationFailed({ "authentication-results": "mx.google.com; dkim=pass; spf=pass; dmarc=pass" })).toBe(false);
-    expect(noticeAuthenticationFailed({})).toBe(false);
+  it("trusts a notice only with a passing Google DKIM result and no failures", () => {
+    expect(noticeAuthenticated({ "authentication-results": "mx.google.com; dkim=pass header.i=@googlemail.com header.s=20230601; spf=pass smtp.mailfrom=x" })).toBe(true);
+    expect(noticeAuthenticated({ "authentication-results": "mx.google.com; dkim=fail header.i=@googlemail.com; spf=pass" })).toBe(false);
+    expect(noticeAuthenticated({ "authentication-results": "mx.google.com; dkim=pass header.i=@evil.example; spf=pass" })).toBe(false);
+    expect(noticeAuthenticated({ "authentication-results": "mx.google.com; dkim=pass header.i=@googlemail.com; dmarc=fail" })).toBe(false);
+    expect(noticeAuthenticated({})).toBe(false);
+  });
+  it("matches the notice marker exactly so gmail id g1 does not match g10", async () => {
+    const db = bounceDb({ sentTo: ["bad@example.com"] });
+    await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g10", bounce: permanent, verifyOrigin: async () => true });
+    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g1", bounce: permanent, verifyOrigin: async () => true })).not.toBe("already-recorded");
   });
   it("treats only Google mailer-daemon addresses as bounce senders", () => {
     expect(isBounceSender("Mail Delivery Subsystem <mailer-daemon@googlemail.com>")).toBe(true);

@@ -5,6 +5,7 @@ import { classifyJobId, gmailReplyId, inboxImportDecision } from "@/lib/email/me
 import { AppError } from "@/lib/errors";
 import { classifyProviderFailure, isPermanentProviderFailure } from "@/lib/provider-errors";
 import { queueJob } from "@/lib/jobs";
+import { applyGmailBounce, gmailPlainText, isBounceSender, parseGmailBounce, type GmailPart } from "@/lib/email/gmail-bounce";
 
 export async function processInboxSync(organizationId: string) {
   const accounts = await prisma.emailAccount.findMany({
@@ -55,6 +56,10 @@ async function importGmailMessage(organizationId: string, accessToken: string, m
   const subject = headers.find((header) => header.name.toLowerCase() === "subject")?.value ?? "";
   const email = from.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.toLowerCase();
   if (!email) return;
+  if (isBounceSender(from)) {
+    await importGmailBounce(organizationId, accessToken, messageId);
+    return;
+  }
   const contact = await prisma.contact.findFirst({
     where: { organizationId, email },
     include: { prospect: true },
@@ -164,6 +169,22 @@ async function importGmailMessage(organizationId: string, accessToken: string, m
     name: "reply.classify",
     payload: { replyId: reply.id },
   });
+}
+
+// Delivery failure notices come from the mail system, not from a prospect. They never become
+// replies. The notice is read in full, tied to one recipient, and recorded once per Gmail message.
+async function importGmailBounce(organizationId: string, accessToken: string, messageId: string) {
+  const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!response.ok) return;
+  const message = (await response.json()) as GmailPart & { payload?: GmailPart };
+  const root = message.payload;
+  const headers: Record<string, string> = {};
+  for (const header of root?.headers ?? []) headers[header.name.toLowerCase()] = header.value;
+  const bounce = parseGmailBounce({ headers, body: gmailPlainText(root) });
+  await applyGmailBounce(prisma, { organizationId, gmailMessageId: messageId, bounce });
 }
 
 async function gmailAccessToken(refreshToken: string) {

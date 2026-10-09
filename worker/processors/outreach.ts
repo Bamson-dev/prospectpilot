@@ -5,7 +5,7 @@ import { GmailProvider } from "@/lib/email/gmail";
 import { ResendProvider } from "@/lib/email/resend";
 import { outreachSendDecision } from "@/lib/email/message-policy";
 import { outreachSendingEnabled } from "@/lib/email/send-gate";
-import { reserveRecipientSend } from "@/lib/email/send-reservation";
+import { defaultDomainDailyLimit, reserveRecipientSend } from "@/lib/email/send-reservation";
 
 import type { EmailProvider } from "@/lib/email/types";
 import { parseFollowUpSteps } from "@/lib/follow-ups";
@@ -84,8 +84,10 @@ export async function processOutreach(messageId: string) {
     messageId: message.id,
     organizationId: message.organizationId,
     email: message.contact.email,
+    domainDailyLimit: defaultDomainDailyLimit(),
   });
   if (reservation === "duplicate-recipient") throw new AppError("This address was already contacted by another message.");
+  if (reservation === "domain-limit") throw new AppError("The daily limit for this recipient domain has been reached.");
   if (reservation !== "claimed") return;
   try {
     const result = await provider.sendEmail({
@@ -95,6 +97,7 @@ export async function processOutreach(messageId: string) {
       subject: message.subject,
       text,
       html,
+      listUnsubscribeUrl: `${appUrl}/unsubscribe/one-click?token=${unsubscribe}`,
     });
     const sent = await prisma.outreachMessage.updateMany({
       where: { id: message.id, state: "SENDING" },

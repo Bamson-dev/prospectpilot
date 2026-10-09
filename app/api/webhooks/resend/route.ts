@@ -4,8 +4,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logInfo } from "@/lib/logger";
 import { queueJob } from "@/lib/jobs";
-import { classifyJobId, inboundReplyId, onlyMatchingContact, providerEventSuppresses, providerEventWrite, webhookTimestampFresh } from "@/lib/email/message-policy";
+import { classifyJobId, inboundReplyId, onlyMatchingContact, providerEventWrite, webhookTimestampFresh } from "@/lib/email/message-policy";
 import { isSuppressionRequest } from "@/lib/suppression";
+import { suppressRecipientForProviderEvent } from "@/lib/email/suppression-events";
 
 export const dynamic = "force-dynamic";
 
@@ -50,22 +51,7 @@ export async function POST(request: Request) {
       }
     }
   }
-  if (event.type && emailId && providerEventSuppresses(event.type)) {
-    const sent = await prisma.outreachMessage.findMany({
-      where: { providerMessageId: emailId },
-      select: { organizationId: true, contact: { select: { id: true, email: true } } },
-    });
-    for (const item of sent) {
-      const email = item.contact?.email?.toLowerCase();
-      if (!email) continue;
-      await prisma.suppression.upsert({
-        where: { organizationId_email: { organizationId: item.organizationId, email } },
-        update: {},
-        create: { organizationId: item.organizationId, email, reason: event.type === "email.bounced" ? "hard_bounce" : "spam_complaint", source: "resend_webhook" },
-      });
-      await prisma.contact.updateMany({ where: { organizationId: item.organizationId, email }, data: { suppressed: true } });
-    }
-  }
+  if (event.type && emailId) await suppressRecipientForProviderEvent(prisma, event.type, emailId);
   if ((event.type === "email.received" || event.type === "email.replied") && event.data?.from) {
     const from = event.data.from.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.toLowerCase();
     if (from) {

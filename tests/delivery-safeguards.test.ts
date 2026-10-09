@@ -75,7 +75,7 @@ function bounceDb(opts: { sentTo?: string[]; org?: string } = {}) {
   return {
     logs, suppressions, contactUpdates, followUps,
     outreachMessage: { async findMany({ where }: { where: { organizationId: string; contact: { email: { equals: string } } } }) {
-      return where.organizationId === (opts.org ?? "org-1") && sentTo.includes(where.contact.email.equals.toLowerCase()) ? [{ prospectId: "p1" }] : [];
+      return where.organizationId === (opts.org ?? "org-1") && sentTo.includes(where.contact.email.equals.toLowerCase()) ? [{ prospectId: "p1", providerMessageId: "gm-sent-1" }] : [];
     } },
     suppression: { async upsert({ where, update, create }: { where: { organizationId_email: { organizationId: string; email: string } }; update: object; create: { organizationId: string; email: string; reason: string; source: string } }) {
       const found = suppressions.find((s) => s.organizationId === where.organizationId_email.organizationId && s.email === where.organizationId_email.email);
@@ -94,36 +94,54 @@ const permanent = { recipient: "bad@example.com", status: "5.1.1", kind: "perman
 describe("Gmail bounce handling", () => {
   it("suppresses a confirmed permanent bounce, case-insensitively, and cancels follow-ups", async () => {
     const db = bounceDb({ sentTo: ["Bad@Example.com"] });
-    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g1", bounce: permanent })).toBe("suppressed");
+    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g1", bounce: permanent, verifyOrigin: async () => true })).toBe("suppressed");
     expect(db.suppressions).toEqual([{ organizationId: "org-1", email: "bad@example.com", reason: "hard_bounce", source: "gmail_dsn" }]);
     expect(db.contactUpdates).toHaveLength(1);
     expect(db.followUps).toHaveLength(1);
   });
   it("is idempotent for the same Gmail message", async () => {
     const db = bounceDb({ sentTo: ["bad@example.com"] });
-    await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g1", bounce: permanent });
-    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g1", bounce: permanent })).toBe("already-recorded");
+    await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g1", bounce: permanent, verifyOrigin: async () => true });
+    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g1", bounce: permanent, verifyOrigin: async () => true })).toBe("already-recorded");
     expect(db.suppressions).toHaveLength(1);
   });
   it("keeps an earlier suppression reason", async () => {
     const db = bounceDb({ sentTo: ["bad@example.com"] });
     db.suppressions.push({ organizationId: "org-1", email: "bad@example.com", reason: "Unsubscribe link", source: "unsubscribe-link" });
-    await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g2", bounce: permanent });
+    await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g2", bounce: permanent, verifyOrigin: async () => true });
     expect(db.suppressions[0].reason).toBe("Unsubscribe link");
   });
   it("does not suppress an address this organization never contacted", async () => {
     const db = bounceDb({ sentTo: ["other@example.com"] });
-    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g3", bounce: permanent })).toBe("unresolved");
+    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g3", bounce: permanent, verifyOrigin: async () => true })).toBe("unresolved");
     expect(db.suppressions).toHaveLength(0);
   });
   it("does not suppress across organizations", async () => {
     const db = bounceDb({ sentTo: ["bad@example.com"], org: "org-2" });
-    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g4", bounce: permanent })).toBe("unresolved");
+    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g4", bounce: permanent, verifyOrigin: async () => true })).toBe("unresolved");
+  });
+  it("rejects a status notice without a single machine-readable Action", () => {
+    expect(parseGmailBounce({ headers: {}, body: "Final-Recipient: rfc822; a@b.com\nStatus: 5.1.1" })).toBeNull();
+    expect(parseGmailBounce({ headers: {}, body: "Final-Recipient: rfc822; a@b.com\nAction: delivered\nStatus: 5.1.1" })).toBeNull();
+  });
+  it("treats only Google mailer-daemon addresses as bounce senders", () => {
+    expect(isBounceSender("Mail Delivery Subsystem <mailer-daemon@googlemail.com>")).toBe(true);
+    expect(isBounceSender("mailer-daemon@evil.example")).toBe(false);
+    expect(isBounceSender("postmaster@example.com")).toBe(false);
+  });
+  it("does not suppress when the notice is not in the thread of a sent message", async () => {
+    const db = bounceDb({ sentTo: ["bad@example.com"] });
+    const seen: string[][] = [];
+    const outcome = await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g7", bounce: permanent, verifyOrigin: async (ids) => { seen.push(ids); return false; } });
+    expect(outcome).toBe("unresolved");
+    expect(seen).toEqual([["gm-sent-1"]]);
+    expect(db.suppressions).toHaveLength(0);
+    expect(db.contactUpdates).toHaveLength(0);
   });
   it("logs but does not suppress temporary failures or unparseable notices", async () => {
     const db = bounceDb({ sentTo: ["bad@example.com"] });
-    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g5", bounce: { ...permanent, status: "4.4.1", kind: "temporary" } })).toBe("temporary-logged");
-    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g6", bounce: null })).toBe("unresolved");
+    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g5", bounce: { ...permanent, status: "4.4.1", kind: "temporary" }, verifyOrigin: async () => true })).toBe("temporary-logged");
+    expect(await applyGmailBounce(db as never, { organizationId: "org-1", gmailMessageId: "g6", bounce: null, verifyOrigin: async () => true })).toBe("unresolved");
     expect(db.suppressions).toHaveLength(0);
     expect(db.logs.map((l) => l.action)).toEqual(["outreach.bounce_temporary", "outreach.bounce_unresolved"]);
   });
@@ -133,14 +151,17 @@ describe("unsubscribe suppression", () => {
   it("suppresses every contact with the address and keeps an earlier reason", async () => {
     const suppressions: Array<{ reason: string }> = [{ reason: "hard_bounce" }];
     const db = {
-      contact: { findUnique: async () => ({ id: "c1", email: "User@Example.com", organizationId: "org-1", prospectId: "p1" }), updateMany: vi.fn(async () => ({ count: 2 })) },
+      contact: { findUnique: async () => ({ id: "c1", email: "User@Example.com", organizationId: "org-1", prospectId: "p1" }), findMany: async () => [{ prospectId: "p1" }, { prospectId: "p2" }], updateMany: vi.fn(async () => ({ count: 2 })) },
       suppression: { upsert: vi.fn(async ({ update }: { update: object }) => { Object.assign(suppressions[0], update); }) },
       followUp: { updateMany: vi.fn(async () => ({ count: 1 })) },
     };
     expect(await suppressContactForUnsubscribe(db as never, "c1")).toBe("user@example.com");
     expect(suppressions[0].reason).toBe("hard_bounce");
     expect(db.contact.updateMany).toHaveBeenCalledWith({ where: { organizationId: "org-1", email: { equals: "user@example.com", mode: "insensitive" } }, data: { suppressed: true } });
-    expect(db.followUp.updateMany).toHaveBeenCalled();
+    expect(db.followUp.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", prospectId: { in: ["p1", "p2"] }, state: { in: ["SCHEDULED", "PENDING_APPROVAL"] } },
+      data: { state: "CANCELLED" },
+    });
   });
   it("returns null when the contact is missing", async () => {
     const db = { contact: { findUnique: async () => null }, suppression: {}, followUp: {} };
@@ -155,6 +176,15 @@ describe("per-domain daily limit", () => {
     expect(defaultDomainDailyLimit(undefined)).toBe(2);
     expect(defaultDomainDailyLimit("5")).toBe(5);
     expect(defaultDomainDailyLimit("0")).toBe(2);
+  });
+  it("counts every unresolved SENDING message, whatever its age", async () => {
+    let where: { OR: unknown[] } | undefined;
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      outreachMessage: { findMany: async () => [], count: vi.fn(async (args: { where: { OR: unknown[] } }) => { where = args.where; return 0; }), updateMany: async () => ({ count: 1 }) },
+    };
+    await reserveRecipientSend({ $transaction: async <T,>(fn: (t: never) => Promise<T>) => fn(tx as never) } as never, { messageId: "m", organizationId: "o", email: "a@b.com", domainDailyLimit: 2 });
+    expect(where?.OR[0]).toEqual({ state: "SENDING" });
   });
   it("refuses to claim when the domain already used its limit, and claims otherwise", async () => {
     const make = (used: number) => {
@@ -187,12 +217,18 @@ describe("reconciliation", () => {
     expect(db.outreachMessage.updateMany).not.toHaveBeenCalled();
   });
   const decide = (state = "SENDING") => {
-    const db = {
-      outreachMessage: { findUnique: vi.fn(async () => ({ id: "m1", state, organizationId: "o", campaignId: "c", prospectId: "p" })), updateMany: vi.fn(async () => ({ count: 1 })), findMany: vi.fn() },
+    const tx = {
+      outreachMessage: { findUnique: vi.fn(async () => ({ id: "m1", state, organizationId: "o", campaignId: "c", prospectId: "p", updatedAt: new Date(Date.now() - 3_600_000) })), updateMany: vi.fn(async () => ({ count: 1 })), findMany: vi.fn() },
       prospect: { update: vi.fn() }, activityLog: { create: vi.fn() },
     };
-    return db;
+    return { ...tx, $transaction: async <T,>(fn: (t: never) => Promise<T>) => fn(tx as never) };
   };
+  it("refuses a message that entered SENDING recently", async () => {
+    const db = decide();
+    db.outreachMessage.findUnique.mockResolvedValueOnce({ id: "m1", state: "SENDING", organizationId: "o", campaignId: "c", prospectId: "p", updatedAt: new Date() });
+    await expect(reconcileMessage(db as never, { messageId: "m1", confirm: "m1", disposition: "not-sent", evidence: "Provider log shows rejection" })).rejects.toThrow(/too recently/);
+    expect(db.outreachMessage.updateMany).not.toHaveBeenCalled();
+  });
   it("requires exact confirmation, evidence and a provider id for sent", async () => {
     const db = decide();
     const input = { messageId: "m1", confirm: "m1", disposition: "sent" as const, evidence: "Found in Gmail Sent folder", providerMessageId: "gm1" };

@@ -18,6 +18,13 @@ export function recipientLockKey(organizationId: string, email: string) {
   return `outreach-recipient:${organizationId}:${normalizeRecipient(email)}`;
 }
 
+// Takes a transaction-scoped PostgreSQL advisory lock for one recipient. The statement is a SELECT
+// that returns void, so it runs through $executeRaw (the same pattern qualification.ts uses in
+// production). The lock is parameterized and is released automatically when the transaction ends.
+export async function acquireRecipientLock(tx: Pick<Prisma.TransactionClient, "$executeRaw">, organizationId: string, email: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${recipientLockKey(organizationId, email)}, 0))`;
+}
+
 // Serializes sends to one address inside one organization. The advisory lock is released when the
 // transaction ends, and the SENDING claim is committed before the caller contacts the provider,
 // so no transaction stays open during the network request.
@@ -27,7 +34,7 @@ export async function reserveRecipientSend(
 ): Promise<SendReservation> {
   const email = normalizeRecipient(input.email);
   return db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${recipientLockKey(input.organizationId, email)}, 0))`;
+    await acquireRecipientLock(tx, input.organizationId, email);
     const others = await tx.outreachMessage.findMany({
       where: {
         organizationId: input.organizationId,

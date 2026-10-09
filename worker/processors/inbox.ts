@@ -179,12 +179,26 @@ async function importGmailBounce(organizationId: string, accessToken: string, me
     signal: AbortSignal.timeout(20000),
   });
   if (!response.ok) return;
-  const message = (await response.json()) as GmailPart & { payload?: GmailPart };
+  const message = (await response.json()) as GmailPart & { payload?: GmailPart; threadId?: string };
   const root = message.payload;
   const headers: Record<string, string> = {};
   for (const header of root?.headers ?? []) headers[header.name.toLowerCase()] = header.value;
   const bounce = parseGmailBounce({ headers, body: gmailPlainText(root) });
-  await applyGmailBounce(prisma, { organizationId, gmailMessageId: messageId, bounce });
+  const noticeThread = message.threadId;
+  const verifyOrigin = async (providerIds: string[]) => {
+    if (!noticeThread) return false;
+    for (const id of providerIds) {
+      const sentResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=minimal`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!sentResponse.ok) continue;
+      const sentMessage = (await sentResponse.json()) as { threadId?: string };
+      if (sentMessage.threadId === noticeThread) return true;
+    }
+    return false;
+  };
+  await applyGmailBounce(prisma, { organizationId, gmailMessageId: messageId, bounce, verifyOrigin });
 }
 
 async function gmailAccessToken(refreshToken: string) {

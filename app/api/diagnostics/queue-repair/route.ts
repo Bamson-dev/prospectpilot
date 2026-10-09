@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     let targetMessage = null;
     let initialBullMQState = "unknown";
     
-    let debugInfo = [];
+    const debugInfo: Array<{ jobId: string; prospectId: string | null; rejectionReason: string }> = [];
 
     for (const job of queuedJobs) {
       const bullMQJob = await queue.getJob(job.id);
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
         let prospectId = job.prospectId;
         let messageId = null;
         if (!prospectId && job.payload && typeof job.payload === 'object' && 'messageId' in job.payload) {
-            messageId = (job.payload as any).messageId;
+            messageId = (job.payload as { messageId: string }).messageId;
         }
 
         if ((state === "failed" || !bullMQJob) && !targetJob && (prospectId || messageId)) {
@@ -72,7 +72,7 @@ export async function GET(request: Request) {
         let prospectId = job.prospectId;
         let messageId = null;
         if (!prospectId && job.payload && typeof job.payload === 'object' && 'messageId' in job.payload) {
-            messageId = (job.payload as any).messageId;
+            messageId = (job.payload as { messageId: string }).messageId;
         }
         if (!targetJob && (prospectId || messageId)) {
           const message = messageId 

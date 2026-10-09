@@ -11,7 +11,7 @@ export class GmailProvider implements EmailProvider {
     const clean = sanitizeOutbound(message);
     const accessToken = await this.accessToken();
     const boundary = "boundary_" + Math.random().toString(36).substring(2);
-    let mime = [
+    const mime = [
       `From: ${clean.fromName ? `${clean.fromName} <${clean.from}>` : clean.from}`,
       `To: ${clean.to}`,
       `Subject: ${clean.subject}`,

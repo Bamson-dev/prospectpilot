@@ -148,12 +148,19 @@ describe("Gmail bounce handling", () => {
     expect(sentMessageMatchesNotice({ threadId: "t1", messageId: "<abc123@mail.gmail.com>" }, { threadId: "t1", originalMessageIds: [] })).toBe(false);
     expect(originalMessageIds({ mimeType: "text/plain", headers: [{ name: "Message-ID", value: "<fake@x>" }] })).toEqual([]);
   });
-  it("trusts a notice only with a passing Google DKIM result and no failures", () => {
-    expect(noticeAuthenticated({ "authentication-results": "mx.google.com; dkim=pass header.i=@googlemail.com header.s=20230601; spf=pass smtp.mailfrom=x" })).toBe(true);
-    expect(noticeAuthenticated({ "authentication-results": "mx.google.com; dkim=fail header.i=@googlemail.com; spf=pass" })).toBe(false);
-    expect(noticeAuthenticated({ "authentication-results": "mx.google.com; dkim=pass header.i=@evil.example; spf=pass" })).toBe(false);
-    expect(noticeAuthenticated({ "authentication-results": "mx.google.com; dkim=pass header.i=@googlemail.com; dmarc=fail" })).toBe(false);
-    expect(noticeAuthenticated({})).toBe(false);
+  it("trusts a notice only when the first Authentication-Results is Gmail's own with a Google DKIM pass", () => {
+    const good = "mx.google.com; dkim=pass header.i=@googlemail.com header.s=20230601; spf=pass smtp.mailfrom=x";
+    expect(noticeAuthenticated([good])).toBe(true);
+    expect(noticeAuthenticated(["mx.google.com; dkim=pass header.d=gmail.com"])).toBe(true);
+    expect(noticeAuthenticated(["mx.google.com; dkim=fail header.i=@googlemail.com; spf=pass"])).toBe(false);
+    expect(noticeAuthenticated(["mx.google.com; dkim=pass header.i=@evil.example; spf=pass"])).toBe(false);
+    expect(noticeAuthenticated(["mx.google.com; dkim=pass header.i=@googlemail.com; dmarc=fail"])).toBe(false);
+    expect(noticeAuthenticated(["mx.google.com; dkim=pass header.d=gmail.com.attacker.example"])).toBe(false);
+    expect(noticeAuthenticated(["mx.google.com; dkim=pass header.d=attackergmail.com"])).toBe(false);
+    expect(noticeAuthenticated(["mail.attacker.example; dkim=pass header.i=@googlemail.com"])).toBe(false);
+    expect(noticeAuthenticated([good, good])).toBe(false);
+    expect(noticeAuthenticated(["mail.attacker.example; dkim=pass header.i=@googlemail.com", good])).toBe(false);
+    expect(noticeAuthenticated([])).toBe(false);
   });
   it("matches the notice marker exactly so gmail id g1 does not match g10", async () => {
     const db = bounceDb({ sentTo: ["bad@example.com"] });

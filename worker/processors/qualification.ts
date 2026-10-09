@@ -8,7 +8,7 @@ import { logInfo } from "@/lib/logger";
 import { analysisRetryDecision, qualificationEvidence, qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
 import { QUOTA_LEASE_MS } from "@/lib/campaign-quota";
 import { watchLease } from "@/lib/independent-heartbeat";
-import { rankOpportunities, assessSalesDraft, unsupportedEvidenceClaims } from "@/lib/sales/intelligence";
+import { rankOpportunities, assessSalesDraft, evidenceProvenanceFindings } from "@/lib/sales/intelligence";
 
 export async function processQualification(prospectId: string) {
   const prospect = await prisma.prospect.findUnique({
@@ -292,8 +292,16 @@ export async function analyze(organizationId: string, prospectId: string, eviden
       ));
       rawResponse = extractJsonObject(result.content);
       const parsed = companyAnalysisSchema.parse(rawResponse);
-      const unsupported = unsupportedEvidenceClaims(parsed, evidence);
-      if (unsupported.length > 0) throw new EvidenceProvenanceError(unsupported);
+      const findings = evidenceProvenanceFindings(parsed, evidence);
+      if (findings.length > 0) {
+        logInfo("qualification.provenance_rejected", {
+          prospectId,
+          attempt,
+          evidenceLength: evidence.length,
+          rejected: findings.slice(0, 12).map((item) => ({ path: item.path, overlap: item.overlap, claim: item.claim.slice(0, 220) })),
+        });
+        throw new EvidenceProvenanceError(findings.map((item) => item.claim));
+      }
       await prisma.aIRequest.create({
         data: {
           organizationId,

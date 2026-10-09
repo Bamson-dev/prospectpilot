@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessSalesDraft, rankOpportunities, assertSafeOutboundCopy, unsupportedEvidenceClaims, type SalesOpportunity } from "@/lib/sales/intelligence";
+import { assessSalesDraft, rankOpportunities, assertSafeOutboundCopy, unsupportedEvidenceClaims, evidenceProvenanceFindings, type SalesOpportunity } from "@/lib/sales/intelligence";
 import { buildFollowUpCopy } from "@/lib/sales/follow-up-copy";
 
 const strong = {
@@ -64,6 +64,27 @@ describe("sales intelligence and outbound quality", () => {
       advertising: { evidence: [] },
       automation: { evidence: [] },
     }, research)).toHaveLength(1);
+  });
+
+  it("accepts short claims quoted verbatim from the research and still rejects invented ones", () => {
+    const research = 'Page text: Our portfolio spans 175+ brands across retail. Signals: {"technologies":["wix"]}';
+    const empty = { software: { evidence: [] }, advertising: { evidence: [] }, automation: { evidence: [] } };
+    expect(unsupportedEvidenceClaims({ opportunities: [{ evidence: ["Page text: '175+ brands'", "Technology: wix"] }], ...empty }, research)).toEqual([]);
+    expect(unsupportedEvidenceClaims({ opportunities: [{ evidence: ["Page text: '500+ brands'", "Technology: shopify", "wix"] }], ...empty }, research)).toEqual(["Page text: '500+ brands'", "Technology: shopify"]);
+    expect(unsupportedEvidenceClaims({ opportunities: [{ evidence: ["Technology: wi"] }], ...empty }, research)).toHaveLength(1);
+  });
+
+  it("reports the field path, claim text and overlap for each rejected claim", () => {
+    const research = "The company lists 316 properties across Johannesburg South and displays viewing enquiry forms.";
+    const findings = evidenceProvenanceFindings({
+      opportunities: [{ evidence: ["316 properties are listed across Johannesburg South."] }, { evidence: ["No automated lead follow-up is visible."] }],
+      software: { evidence: [] },
+      advertising: { evidence: ["The company spends R50,000 monthly on paid ads."] },
+      automation: { evidence: [] },
+    }, research);
+    expect(findings.map((item) => item.path)).toEqual(["opportunities.1.evidence.0", "advertising.evidence.0"]);
+    expect(findings[0]?.claim).toBe("No automated lead follow-up is visible.");
+    expect(findings.every((item) => item.overlap < 2)).toBe(true);
   });
 
   it("accepts a specific opportunity, service, offer and single CTA", () => {

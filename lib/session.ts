@@ -67,14 +67,28 @@ export async function signUnsubscribeToken(contactId: string) {
     .sign(key);
 }
 
+// Keys that may verify an unsubscribe link: the current AUTH_SECRET first, then any retired secrets
+// listed in AUTH_SECRET_PREVIOUS (comma separated). Keep a retired secret listed for as long as
+// emails signed with it may still be opened. New links are always signed with AUTH_SECRET.
+function unsubscribeVerificationKeys() {
+  const current = secretKey();
+  const retired = (process.env.AUTH_SECRET_PREVIOUS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length >= 32)
+    .map((value) => new TextEncoder().encode(value));
+  return [...(current ? [current] : []), ...retired];
+}
+
 export async function verifyUnsubscribeToken(token: string) {
-  const key = secretKey();
-  if (!key) return null;
-  try {
-    const { payload } = await jwtVerify(token, key);
-    if (payload.purpose !== "unsubscribe" || !payload.sub) return null;
-    return payload.sub;
-  } catch {
-    return null;
+  for (const key of unsubscribeVerificationKeys()) {
+    try {
+      const { payload } = await jwtVerify(token, key);
+      if (payload.purpose !== "unsubscribe" || !payload.sub) return null;
+      return payload.sub;
+    } catch {
+      // Try the next key.
+    }
   }
+  return null;
 }

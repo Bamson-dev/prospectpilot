@@ -3,7 +3,7 @@ import { decryptSecret } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
 import { GmailProvider } from "@/lib/email/gmail";
 import { ResendProvider } from "@/lib/email/resend";
-import { outreachSendDecision } from "@/lib/email/message-policy";
+import { alreadyContactedRecipient, outreachSendDecision } from "@/lib/email/message-policy";
 import { outreachSendingEnabled } from "@/lib/email/send-gate";
 
 import type { EmailProvider } from "@/lib/email/types";
@@ -44,6 +44,22 @@ export async function processOutreach(messageId: string) {
     await prisma.outreachMessage.update({ where: { id: message.id }, data: { state: "SUPPRESSED" } });
     await prisma.prospect.update({ where: { id: message.prospectId }, data: { outreachState: "SUPPRESSED" } });
     throw new AppError("This contact is on the suppression list.");
+  }
+  const priorToRecipient = await prisma.outreachMessage.findMany({
+    where: {
+      organizationId: message.organizationId,
+      id: { not: message.id },
+      state: { in: ["SENDING", "SENT", "DELIVERED", "OPENED", "REPLIED"] },
+      contact: { email: { equals: message.contact.email, mode: "insensitive" } },
+    },
+    select: { state: true },
+  });
+  if (alreadyContactedRecipient(priorToRecipient.map((item) => item.state))) {
+    await prisma.outreachMessage.updateMany({
+      where: { id: message.id, state: { in: ["APPROVED", "QUEUED", "FAILED"] } },
+      data: { state: "CANCELLED", error: "This address was already contacted by another message." },
+    });
+    throw new AppError("This address was already contacted by another message.");
   }
   if (!message.campaign || message.campaign.status === "PAUSED" || message.campaign.status === "ARCHIVED") {
     throw new AppError("The campaign is not allowed to send.");

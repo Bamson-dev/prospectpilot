@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 type UnsubscribeDb = {
-  contact: Pick<Prisma.ContactDelegate, "findUnique" | "updateMany">;
+  contact: Pick<Prisma.ContactDelegate, "findUnique" | "findMany" | "updateMany">;
   suppression: Pick<Prisma.SuppressionDelegate, "upsert">;
   followUp: Pick<Prisma.FollowUpDelegate, "updateMany">;
 };
@@ -19,8 +19,13 @@ export async function suppressContactForUnsubscribe(db: UnsubscribeDb, contactId
     create: { organizationId: contact.organizationId, email, reason: "Unsubscribe link", source: "unsubscribe-link" },
   });
   await db.contact.updateMany({ where: { organizationId: contact.organizationId, email: { equals: email, mode: "insensitive" } }, data: { suppressed: true } });
+  const sameAddress = await db.contact.findMany({
+    where: { organizationId: contact.organizationId, email: { equals: email, mode: "insensitive" } },
+    select: { prospectId: true },
+  });
+  const prospectIds = [...new Set([contact.prospectId, ...sameAddress.map((item) => item.prospectId)])];
   await db.followUp.updateMany({
-    where: { organizationId: contact.organizationId, prospectId: contact.prospectId, state: { in: ["SCHEDULED", "PENDING_APPROVAL"] } },
+    where: { organizationId: contact.organizationId, prospectId: { in: prospectIds }, state: { in: ["SCHEDULED", "PENDING_APPROVAL"] } },
     data: { state: "CANCELLED" },
   });
   return email;

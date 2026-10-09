@@ -275,7 +275,7 @@ function rowCategory(kind: "software" | "advertising" | "automation") {
   return kind === "software" ? "SOFTWARE" : kind === "advertising" ? "ADVERTISING" : "AUTOMATION";
 }
 
-async function analyze(organizationId: string, prospectId: string, evidence: string, inputHash: string) {
+export async function analyze(organizationId: string, prospectId: string, evidence: string, inputHash: string) {
   if (!process.env.DEEPSEEK_API_KEY?.trim()) {
     throw new AppError("AI integration not configured. Qualification was not fabricated.");
   }
@@ -283,15 +283,17 @@ async function analyze(organizationId: string, prospectId: string, evidence: str
   let retryFeedback = "Correct schema lengths and cite only evidence directly supported by the supplied research.";
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const started = Date.now();
+    let rawResponse: unknown;
     try {
       const result = await completeJson(companyAnalysisPrompt(
         evidence,
         attempt === 1,
         attempt === 1 ? retryFeedback : undefined,
       ));
-      const parsed = companyAnalysisSchema.parse(extractJsonObject(result.content));
+      rawResponse = extractJsonObject(result.content);
+      const parsed = companyAnalysisSchema.parse(rawResponse);
       const unsupported = unsupportedEvidenceClaims(parsed, evidence);
-      if (unsupported.length > 0) throw new Error(`AI evidence provenance failed for ${unsupported.length} claim(s).`);
+      if (unsupported.length > 0) throw new EvidenceProvenanceError(unsupported);
       await prisma.aIRequest.create({
         data: {
           organizationId,
@@ -307,7 +309,7 @@ async function analyze(organizationId: string, prospectId: string, evidence: str
       return parsed;
     } catch (error) {
       lastError = error instanceof Error ? error.message : lastError;
-      retryFeedback = qualificationRetryFeedback(error);
+      retryFeedback = qualificationRetryFeedback(error, rawResponse);
       logInfo("qualification.validation_failed", { prospectId, attempt, message: lastError.slice(0, 180) });
       await prisma.aIRequest.create({
         data: {
@@ -330,17 +332,46 @@ async function analyze(organizationId: string, prospectId: string, evidence: str
   throw new AppError("DeepSeek returned malformed qualification JSON.");
 }
 
-export function qualificationRetryFeedback(error: unknown) {
+export class EvidenceProvenanceError extends Error {
+  constructor(readonly claims: string[]) {
+    super(`AI evidence provenance failed for ${claims.length} claim(s).`);
+    this.name = "EvidenceProvenanceError";
+  }
+}
+
+function valueAtPath(root: unknown, path: Array<string | number>) {
+  let current: unknown = root;
+  for (const part of path) {
+    if (current === null || typeof current !== "object") return undefined;
+    current = (current as Record<string | number, unknown>)[part];
+  }
+  return current;
+}
+
+export function qualificationRetryFeedback(error: unknown, rawResponse?: unknown) {
+  if (error instanceof EvidenceProvenanceError) {
+    const listed = error.claims.slice(0, 6).map((claim, index) => `${index + 1}. "${claim.replace(/\s+/g, " ").slice(0, 140)}"`).join(" ");
+    return `Evidence provenance validation rejected ${error.claims.length} evidence items because they do not match the supplied research. Rejected items: ${listed}. Remove each rejected item from its evidence array or replace it with a short quotation copied from the supplied research. Lower confidence where evidence is removed. Keep every other field.`;
+  }
   if (error instanceof Error && error.message.startsWith("AI evidence provenance failed")) {
     const match = error.message.match(/(\d+) claim/);
     return `Evidence provenance validation rejected ${match?.[1] ?? "some"} evidence items. Cite only exact phrases or close paraphrases from the supplied research; omit unsupported evidence and lower confidence.`;
   }
   if (error && typeof error === "object" && "issues" in error && Array.isArray(error.issues)) {
-    const paths = error.issues
-      .map((issue: { path?: unknown[] }) => issue.path?.filter((part) => typeof part === "string" || typeof part === "number").join("."))
-      .filter(Boolean)
-      .slice(0, 8);
-    return `Schema validation failed${paths.length ? ` at: ${paths.join(", ")}` : ""}. Return valid complete JSON and obey every field length limit, including 300 characters for businessModel and each growthSignals/digitalSignals item, and 400 characters for personalizationAngle.`;
+    const violations = (error.issues as Array<{ path?: unknown[]; code?: string; maximum?: number | bigint }>)
+      .slice(0, 8)
+      .map((issue) => {
+        const path = (issue.path ?? []).filter((part): part is string | number => typeof part === "string" || typeof part === "number");
+        const label = path.join(".");
+        if (!label) return "";
+        const value = valueAtPath(rawResponse, path);
+        if (issue.code === "too_big" && typeof value === "string") {
+          return `${label} has ${value.length} characters, limit ${String(issue.maximum)}; rewrite it shorter`;
+        }
+        return label;
+      })
+      .filter(Boolean);
+    return `Schema validation failed${violations.length ? `: ${violations.join("; ")}` : ""}. Rewrite only the listed fields so each is within its limit, summarize instead of quoting long text, and return the complete JSON object with all required keys.`;
   }
   if (error instanceof Error && /enum/i.test(error.message)) {
     return "Schema validation rejected an enum value. Use only the exact allowed category codes for opportunity type and exact catalogue names for service fields.";

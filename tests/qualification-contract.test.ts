@@ -84,9 +84,11 @@ describe("company qualification output contract", () => {
     });
     expect(invalid.success).toBe(false);
     if (!invalid.success) {
-      const feedback = qualificationRetryFeedback(invalid.error);
-      expect(feedback).toContain("companyProfile.growthSignals");
-      expect(feedback).toContain("300 characters");
+      const feedback = qualificationRetryFeedback(invalid.error, {
+        ...validAnalysis,
+        companyProfile: { ...validAnalysis.companyProfile, growthSignals: ["a".repeat(301)] },
+      });
+      expect(feedback).toContain("companyProfile.growthSignals.0 has 301 characters, limit 300");
     }
     const provenanceFeedback = qualificationRetryFeedback(new Error("AI evidence provenance failed for 6 claim(s)."));
     expect(provenanceFeedback).toContain("rejected 6 evidence items");

@@ -1,57 +1,44 @@
 import { NextResponse } from "next/server";
-import { processOutreachScan } from "@/worker/processors/outreach-scan";
 import { prisma } from "@/lib/db";
+import { processOutreachScan } from "@/worker/processors/outreach-scan";
+import { authorizeAdmin } from "@/app/api/diagnostics/discovery/route";
 
 export const dynamic = "force-dynamic";
 
+const NO_STORE = { "Cache-Control": "no-store" };
+
+// Runs the existing outreach scan. The scan still returns immediately while OUTREACH_SEND_ENABLED
+// is off, only touches campaigns with requireApproval=false, and skips suppressed contacts. The send
+// worker repeats the suppression, eligibility and limit checks before any message leaves.
 export async function POST(request: Request) {
+  const auth = await authorizeAdmin(request);
+  if (!auth) return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });
   try {
     await processOutreachScan();
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Internal Server Error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ ok: true }, { headers: NO_STORE });
+  } catch {
+    return NextResponse.json({ error: "Outreach scan failed." }, { status: 500, headers: NO_STORE });
   }
 }
 
+// Read-only counts for the caller's organization. No message text, recipients or error details.
 export async function GET(request: Request) {
+  const auth = await authorizeAdmin(request);
+  if (!auth) return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });
   try {
-    const messages = await prisma.outreachMessage.findMany({
-      include: {
-        contact: true
-      }
-    });
-
-    const jobs = await prisma.backgroundJob.findMany({
-      where: { name: "outreach.send" }
-    });
-    
-    // Group states
-    const states = messages.reduce((acc, msg) => {
-      acc[msg.state] = (acc[msg.state] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    // Jobs
-    const jobStates = jobs.reduce((acc, job) => {
-      acc[job.state] = (acc[job.state] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    const sent = messages.filter(m => m.state === 'SENT');
-    const sentDomain = sent.length > 0 && sent[0].contact?.email ? sent[0].contact.email.split('@')[1] : null;
-
-    const failed = messages.filter(m => m.state === 'FAILED');
-    const failedError = failed.length > 0 ? failed[0].error : null;
-
-    return NextResponse.json({
-      states,
-      jobStates,
-      sentDomain,
-      failedError
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Internal Server Error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const organizationId = auth.organization.id;
+    const [messages, jobs] = await Promise.all([
+      prisma.outreachMessage.groupBy({ by: ["state"], where: { organizationId }, _count: { _all: true } }),
+      prisma.backgroundJob.groupBy({ by: ["state"], where: { organizationId, name: "outreach.send" }, _count: { _all: true } }),
+    ]);
+    return NextResponse.json(
+      {
+        states: Object.fromEntries(messages.map((row) => [row.state, row._count._all])),
+        jobStates: Object.fromEntries(jobs.map((row) => [row.state, row._count._all])),
+      },
+      { headers: NO_STORE },
+    );
+  } catch {
+    return NextResponse.json({ error: "Diagnostic failed." }, { status: 500, headers: NO_STORE });
   }
 }

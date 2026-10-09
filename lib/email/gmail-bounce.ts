@@ -28,11 +28,16 @@ export function parseGmailBounce(input: { headers: Record<string, string>; body:
   const statusMatch = body.match(/^Status:\s*([245]\.\d{1,3}\.\d{1,3})/im);
   const actions = [...body.matchAll(/^Action:\s*(\w+)/gim)].map((m) => m[1].toLowerCase());
 
+  // The recipient comes from the machine-readable delivery-status part only. A top-level
+  // X-Failed-Recipients header may confirm it but never replaces it, and a conflict rejects the notice.
   const candidates = new Set<string>();
-  if (failedHeader) for (const part of failedHeader.split(",")) { const m = part.match(EMAIL); if (m) candidates.add(m[0].toLowerCase()); }
   for (const item of finalRecipients) { const m = item.match(EMAIL); if (m) candidates.add(m[0].toLowerCase()); }
   if (candidates.size !== 1) return null;
   const recipient = [...candidates][0];
+  if (failedHeader) {
+    const claimed = new Set(failedHeader.split(",").map((part) => part.match(EMAIL)?.[0]?.toLowerCase()).filter(Boolean));
+    if (claimed.size !== 1 || !claimed.has(recipient)) return null;
+  }
 
   // Gmail also writes "Status: 5.1.1" in the human-readable text for some notices, so the code is
   // taken from the machine-readable delivery-status part first.
@@ -64,7 +69,7 @@ export async function applyGmailBounce(
   db: BounceDb,
   input: { organizationId: string; gmailMessageId: string; bounce: GmailBounce | null; verifyOrigin: (providerMessageIds: string[]) => Promise<boolean> },
 ): Promise<BounceOutcome> {
-  const marker = `gmail-dsn:${input.gmailMessageId}`;
+  const marker = `gmail-dsn:${input.gmailMessageId};`;
   const isSeen = (client: Pick<BounceTx, "activityLog">) =>
     client.activityLog.findFirst({ where: { organizationId: input.organizationId, detail: { contains: marker } }, select: { id: true } });
   if (await isSeen(db)) return "already-recorded";
@@ -156,12 +161,13 @@ export function originalMessageIds(part: GmailPart | undefined, insideOriginal =
   return [...new Set(ids.map(normalizeMessageId).filter(Boolean))];
 }
 
-// Authentication-Results is optional on notices Google generates itself. A recorded failure of
-// DKIM, SPF or DMARC means the notice is not trusted. A missing header does not block, because the
-// original Message-ID and thread checks still apply.
-export function noticeAuthenticationFailed(headers: Record<string, string>) {
+// A notice is trusted only when Gmail recorded a passing DKIM check for a Google domain and no
+// failing DKIM, SPF or DMARC result. A missing or unrecognized header means the notice is logged
+// for review and suppresses nobody.
+export function noticeAuthenticated(headers: Record<string, string>) {
   const value = headers["authentication-results"] ?? "";
-  return /\b(dkim|spf|dmarc)=(fail|softfail|permerror|temperror)\b/i.test(value);
+  if (/\b(dkim|spf|dmarc)=(fail|softfail|permerror|temperror)\b/i.test(value)) return false;
+  return /\bdkim=pass\b[^;]*\bheader\.(i|d)=@?(\S+\.)?(googlemail|gmail)\.com\b/i.test(value);
 }
 
 // Flattens a Gmail API "full" message payload into its plain-text content.

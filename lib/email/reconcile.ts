@@ -56,13 +56,13 @@ export async function reconcileMessage(
   const cutoff = new Date(now.getTime() - (input.thresholdMinutes ?? stuckThresholdMinutes()) * 60_000);
   // One transaction: the guarded update, the prospect state and the audit record commit together or not at all.
   return db.$transaction(async (tx) => {
-    const message = await tx.outreachMessage.findUnique({ where: { id: input.messageId }, select: { id: true, state: true, organizationId: true, campaignId: true, prospectId: true, updatedAt: true } });
+    const message = await tx.outreachMessage.findUnique({ where: { id: input.messageId }, select: { id: true, state: true, organizationId: true, campaignId: true, prospectId: true, updatedAt: true, provider: true, campaign: { select: { emailAccount: { select: { provider: true } } } } } });
     if (!message || message.state !== "SENDING") throw new Error("That message is not in SENDING.");
     // A send that started a moment ago may still be talking to the provider. Only stale claims qualify.
     if (message.updatedAt.getTime() > cutoff.getTime()) throw new Error("That message entered SENDING too recently. Wait for the stale threshold before reconciling.");
     const data: Prisma.OutreachMessageUpdateManyMutationInput =
       input.disposition === "sent"
-        ? { state: "SENT", sentAt: now, providerMessageId: input.providerMessageId!.trim(), error: null }
+        ? { state: "SENT", sentAt: now, providerMessageId: input.providerMessageId!.trim(), error: null, ...(message.provider ? {} : message.campaign?.emailAccount?.provider ? { provider: message.campaign.emailAccount.provider } : {}) }
         : { state: "FAILED", error: "Confirmed not sent during manual reconciliation." };
     const result = await tx.outreachMessage.updateMany({ where: { id: message.id, organizationId: message.organizationId, state: "SENDING", updatedAt: message.updatedAt }, data });
     if (result.count !== 1) throw new Error("The message changed while you were reconciling it.");

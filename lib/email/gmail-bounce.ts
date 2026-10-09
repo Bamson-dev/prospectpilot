@@ -44,68 +44,124 @@ export function parseGmailBounce(input: { headers: Record<string, string>; body:
   return { recipient, status, kind: permanent ? "permanent" : "temporary" };
 }
 
-type BounceDb = {
+type BounceTx = {
   outreachMessage: Pick<Prisma.OutreachMessageDelegate, "findMany">;
   suppression: Pick<Prisma.SuppressionDelegate, "upsert">;
   contact: Pick<Prisma.ContactDelegate, "updateMany">;
   followUp: Pick<Prisma.FollowUpDelegate, "updateMany">;
   activityLog: Pick<Prisma.ActivityLogDelegate, "findFirst" | "create">;
+  $executeRaw: Prisma.TransactionClient["$executeRaw"];
 };
+type BounceDb = BounceTx & { $transaction<T>(fn: (tx: BounceTx) => Promise<T>): Promise<T> };
 
 export type BounceOutcome = "suppressed" | "already-recorded" | "temporary-logged" | "unresolved";
 
 // Applies one parsed bounce inside one organization. The address is suppressed only when this
-// organization sent at least one message to it. Replaying the same Gmail message changes nothing.
-// verifyOrigin receives the provider ids of this organization's messages to the failed address and
-// returns true only when the notice sits in the same Gmail thread as one of them. A forged notice
-// from a spoofed sender cannot join the thread of a message it never saw, so it suppresses nobody.
+// organization sent at least one message to it and verifyOrigin confirms the notice belongs to one
+// of those sent messages. Replaying the same Gmail message changes nothing: the write phase takes an
+// advisory lock on the notice marker and re-checks it, so two concurrent syncs cannot both record it.
 export async function applyGmailBounce(
   db: BounceDb,
   input: { organizationId: string; gmailMessageId: string; bounce: GmailBounce | null; verifyOrigin: (providerMessageIds: string[]) => Promise<boolean> },
 ): Promise<BounceOutcome> {
   const marker = `gmail-dsn:${input.gmailMessageId}`;
-  const seen = await db.activityLog.findFirst({ where: { organizationId: input.organizationId, detail: { contains: marker } }, select: { id: true } });
-  if (seen) return "already-recorded";
-  const log = (action: string, detail: string) =>
-    db.activityLog.create({ data: { organizationId: input.organizationId, action, detail: `${detail} ${marker}`.slice(0, 500) } });
+  const isSeen = (client: Pick<BounceTx, "activityLog">) =>
+    client.activityLog.findFirst({ where: { organizationId: input.organizationId, detail: { contains: marker } }, select: { id: true } });
+  if (await isSeen(db)) return "already-recorded";
 
-  if (!input.bounce) {
-    await log("outreach.bounce_unresolved", "Delivery failure notice could not be tied to one recipient.");
-    return "unresolved";
-  }
-  const email = input.bounce.recipient.trim().toLowerCase();
-  const sent = await db.outreachMessage.findMany({
-    where: {
-      organizationId: input.organizationId,
-      state: { in: ["SENT", "DELIVERED", "OPENED", "REPLIED", "SENDING"] },
-      contact: { email: { equals: email, mode: "insensitive" } },
-    },
-    select: { prospectId: true, providerMessageId: true },
+  // Decide first, with reads and the provider check only. No transaction stays open during the network call.
+  type Plan = { outcome: BounceOutcome; action: string; detail: string; suppress?: { email: string; prospectIds: string[] } };
+  const plan = await (async (): Promise<Plan> => {
+    if (!input.bounce) return { outcome: "unresolved", action: "outreach.bounce_unresolved", detail: "Delivery failure notice could not be tied to one recipient." };
+    const email = input.bounce.recipient.trim().toLowerCase();
+    const sent = await db.outreachMessage.findMany({
+      where: {
+        organizationId: input.organizationId,
+        state: { in: ["SENT", "DELIVERED", "OPENED", "REPLIED", "SENDING"] },
+        contact: { email: { equals: email, mode: "insensitive" } },
+      },
+      select: { prospectId: true, providerMessageId: true },
+    });
+    if (sent.length === 0) return { outcome: "unresolved", action: "outreach.bounce_unresolved", detail: `Bounce for an address this organization has not contacted (${input.bounce.status}).` };
+    const providerIds = sent.map((item) => item.providerMessageId).filter((id): id is string => Boolean(id));
+    if (providerIds.length === 0 || !(await input.verifyOrigin(providerIds))) {
+      return { outcome: "unresolved", action: "outreach.bounce_unresolved", detail: `Failure notice for ${email} could not be tied to a message this organization sent. No suppression.` };
+    }
+    if (input.bounce.kind !== "permanent") {
+      return { outcome: "temporary-logged", action: "outreach.bounce_temporary", detail: `Temporary delivery problem ${input.bounce.status} for ${email}. No suppression.` };
+    }
+    return { outcome: "suppressed", action: "outreach.bounce_suppressed", detail: `Permanent bounce ${input.bounce.status} for ${email}.`, suppress: { email, prospectIds: [...new Set(sent.map((item) => item.prospectId))] } };
+  })();
+
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${input.organizationId}:${marker}`}, 0))`;
+    if (await isSeen(tx)) return "already-recorded" as const;
+    if (plan.suppress) {
+      const { email, prospectIds } = plan.suppress;
+      await tx.suppression.upsert({
+        where: { organizationId_email: { organizationId: input.organizationId, email } },
+        update: {},
+        create: { organizationId: input.organizationId, email, reason: "hard_bounce", source: "gmail_dsn" },
+      });
+      await tx.contact.updateMany({ where: { organizationId: input.organizationId, email: { equals: email, mode: "insensitive" } }, data: { suppressed: true } });
+      for (const prospectId of prospectIds) {
+        await tx.followUp.updateMany({ where: { organizationId: input.organizationId, prospectId, state: { in: ["SCHEDULED", "PENDING_APPROVAL"] } }, data: { state: "CANCELLED" } });
+      }
+    }
+    await tx.activityLog.create({ data: { organizationId: input.organizationId, action: plan.action, detail: `${plan.detail} ${marker}`.slice(0, 500) } });
+    return plan.outcome;
   });
-  if (sent.length === 0) {
-    await log("outreach.bounce_unresolved", `Bounce for an address this organization has not contacted (${input.bounce.status}).`);
-    return "unresolved";
+}
+
+// True when a sent message is the original of a failure notice. Both must hold: the notice sits in
+// the same Gmail thread, and the original Message-ID quoted inside the notice equals the RFC
+// Message-ID of the message we sent. A notice that quotes no original id never matches.
+export function sentMessageMatchesNotice(
+  sent: { threadId?: string; messageId?: string },
+  notice: { threadId?: string; originalMessageIds: string[] },
+) {
+  if (!sent.threadId || !notice.threadId || sent.threadId !== notice.threadId) return false;
+  const wanted = normalizeMessageId(sent.messageId);
+  return Boolean(wanted) && notice.originalMessageIds.map(normalizeMessageId).includes(wanted);
+}
+
+export function normalizeMessageId(value: string | undefined) {
+  return (value ?? "").trim().replace(/^<|>$/g, "").toLowerCase();
+}
+
+// Reads only the machine-readable message/delivery-status part. Plain-text parts are ignored, so a
+// forged body that merely mentions Final-Recipient or Status lines cannot produce a bounce.
+export function gmailDeliveryStatusText(part: GmailPart | undefined, insideStatus = false): string {
+  if (!part) return "";
+  const status = insideStatus || part.mimeType === "message/delivery-status";
+  const own = status && part.body?.data ? Buffer.from(part.body.data, "base64url").toString("utf8") : "";
+  const fields = status ? (part.headers ?? []).map((header) => `${header.name}: ${header.value}`).join("\n") : "";
+  return [own, fields, ...(part.parts ?? []).map((child) => gmailDeliveryStatusText(child, status))].filter(Boolean).join("\n");
+}
+
+// Collects the Message-ID values of the original message quoted inside a delivery notice.
+const ORIGINAL_TYPES = new Set(["message/rfc822", "text/rfc822-headers", "message/rfc822-headers"]);
+export function originalMessageIds(part: GmailPart | undefined, insideOriginal = false): string[] {
+  if (!part) return [];
+  const original = insideOriginal || ORIGINAL_TYPES.has(part.mimeType ?? "");
+  const ids: string[] = [];
+  if (original) {
+    for (const header of part.headers ?? []) if (header.name.toLowerCase() === "message-id") ids.push(header.value);
+    if (part.body?.data && (part.mimeType?.startsWith("text/") || part.mimeType?.startsWith("message/"))) {
+      const text = Buffer.from(part.body.data, "base64url").toString("utf8");
+      for (const match of text.matchAll(/^Message-ID:\s*(<[^>\r\n]+>)/gim)) ids.push(match[1]);
+    }
   }
-  const providerIds = sent.map((item) => item.providerMessageId).filter((id): id is string => Boolean(id));
-  if (providerIds.length === 0 || !(await input.verifyOrigin(providerIds))) {
-    await log("outreach.bounce_unresolved", `Failure notice for ${email} is not in the thread of a message this organization sent. No suppression.`);
-    return "unresolved";
-  }
-  if (input.bounce.kind !== "permanent") {
-    await log("outreach.bounce_temporary", `Temporary delivery problem ${input.bounce.status} for ${email}. No suppression.`);
-    return "temporary-logged";
-  }
-  await db.suppression.upsert({
-    where: { organizationId_email: { organizationId: input.organizationId, email } },
-    update: {},
-    create: { organizationId: input.organizationId, email, reason: "hard_bounce", source: "gmail_dsn" },
-  });
-  await db.contact.updateMany({ where: { organizationId: input.organizationId, email: { equals: email, mode: "insensitive" } }, data: { suppressed: true } });
-  for (const prospectId of new Set(sent.map((item) => item.prospectId))) {
-    await db.followUp.updateMany({ where: { organizationId: input.organizationId, prospectId, state: { in: ["SCHEDULED", "PENDING_APPROVAL"] } }, data: { state: "CANCELLED" } });
-  }
-  await log("outreach.bounce_suppressed", `Permanent bounce ${input.bounce.status} for ${email}.`);
-  return "suppressed";
+  for (const child of part.parts ?? []) ids.push(...originalMessageIds(child, original));
+  return [...new Set(ids.map(normalizeMessageId).filter(Boolean))];
+}
+
+// Authentication-Results is optional on notices Google generates itself. A recorded failure of
+// DKIM, SPF or DMARC means the notice is not trusted. A missing header does not block, because the
+// original Message-ID and thread checks still apply.
+export function noticeAuthenticationFailed(headers: Record<string, string>) {
+  const value = headers["authentication-results"] ?? "";
+  return /\b(dkim|spf|dmarc)=(fail|softfail|permerror|temperror)\b/i.test(value);
 }
 
 // Flattens a Gmail API "full" message payload into its plain-text content.

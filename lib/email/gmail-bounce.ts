@@ -161,13 +161,26 @@ export function originalMessageIds(part: GmailPart | undefined, insideOriginal =
   return [...new Set(ids.map(normalizeMessageId).filter(Boolean))];
 }
 
-// A notice is trusted only when Gmail recorded a passing DKIM check for a Google domain and no
-// failing DKIM, SPF or DMARC result. A missing or unrecognized header means the notice is logged
-// for review and suppresses nobody.
-export function noticeAuthenticated(headers: Record<string, string>) {
-  const value = headers["authentication-results"] ?? "";
-  if (/\b(dkim|spf|dmarc)=(fail|softfail|permerror|temperror)\b/i.test(value)) return false;
-  return /\bdkim=pass\b[^;]*\bheader\.(i|d)=@?(\S+\.)?(googlemail|gmail)\.com\b/i.test(value);
+// A notice is trusted only when Gmail's own receiving result says so. Gmail adds its result above
+// everything else, so the first Authentication-Results value must come from the mx.google.com
+// authserv-id. Any other value that claims mx.google.com makes the notice untrusted, because only
+// Gmail should write that id. The first value must show dkim=pass with the signing identity exactly
+// googlemail.com or gmail.com (compared on the whole domain, not a prefix) and no dkim, spf or
+// dmarc failure. Anything else is logged for review and suppresses nobody.
+export function noticeAuthenticated(authenticationResults: string[]) {
+  const values = authenticationResults.map((value) => value.trim()).filter(Boolean);
+  const [first, ...others] = values;
+  if (!first) return false;
+  const serverId = (value: string) => value.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (serverId(first) !== "mx.google.com") return false;
+  if (others.some((value) => serverId(value) === "mx.google.com")) return false;
+  const results = first.split(";").slice(1).map((part) => part.trim());
+  if (results.some((part) => /^(dkim|spf|dmarc)=(fail|softfail|permerror|temperror)\b/i.test(part))) return false;
+  const passing = results.filter((part) => /^dkim=pass\b/i.test(part));
+  return passing.some((part) => {
+    const identity = part.match(/\bheader\.(?:i|d)=@?([^\s;]+)/i)?.[1]?.toLowerCase();
+    return identity === "googlemail.com" || identity === "gmail.com";
+  });
 }
 
 // Flattens a Gmail API "full" message payload into its plain-text content.

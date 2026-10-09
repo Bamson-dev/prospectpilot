@@ -101,19 +101,42 @@ function meaningfulOverlap(left: string, right: string) {
   return [...tokens(right)].filter((token) => leftTokens.has(token)).length;
 }
 
-export function unsupportedEvidenceClaims(analysis: {
+type EvidenceAnalysis = {
   opportunities: Array<{ evidence: string[] }>;
   software: { evidence: string[] };
   advertising: { evidence: string[] };
   automation: { evidence: string[] };
-}, source: string) {
-  const claims = [
-    ...analysis.opportunities.flatMap((item) => item.evidence),
-    ...analysis.software.evidence,
-    ...analysis.advertising.evidence,
-    ...analysis.automation.evidence,
+};
+
+export type EvidenceProvenanceFinding = { path: string; claim: string; overlap: number };
+
+export function evidenceProvenanceFindings(analysis: EvidenceAnalysis, source: string): EvidenceProvenanceFinding[] {
+  const claims: Array<{ path: string; claim: string }> = [
+    ...analysis.opportunities.flatMap((item, i) => item.evidence.map((claim, j) => ({ path: `opportunities.${i}.evidence.${j}`, claim }))),
+    ...analysis.software.evidence.map((claim, j) => ({ path: `software.evidence.${j}`, claim })),
+    ...analysis.advertising.evidence.map((claim, j) => ({ path: `advertising.evidence.${j}`, claim })),
+    ...analysis.automation.evidence.map((claim, j) => ({ path: `automation.evidence.${j}`, claim })),
   ];
-  return claims.filter((claim) => meaningfulOverlap(claim, source) < 2);
+  return claims
+    .map((item) => ({ ...item, overlap: meaningfulOverlap(item.claim, source) }))
+    .filter((item) => item.overlap < 2 && !quotedInSource(item.claim, source));
+}
+
+// A short claim such as "Technology: wix" or "Page text: '175+ brands'" cannot reach two
+// five-letter overlaps. Accept it only when its quoted content appears verbatim in the research.
+function quotedInSource(claim: string, source: string) {
+  const normalize = (value: string) => value.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, " ").trim();
+  const needle = normalize(claim)
+    .replace(/^(?:page text|technology|technologies|signal|title|description|heading|source)\s*:\s*/, "")
+    .replace(/^["']+|["'.]+$/g, "")
+    .trim();
+  if (needle.length < 3 || !/[a-z0-9]/.test(needle)) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`).test(normalize(source));
+}
+
+export function unsupportedEvidenceClaims(analysis: EvidenceAnalysis, source: string) {
+  return evidenceProvenanceFindings(analysis, source).map((item) => item.claim);
 }
 
 export function assertSafeOutboundCopy(subject: string, body: string) {

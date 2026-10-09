@@ -1,6 +1,6 @@
 import { AppError } from "@/lib/errors";
 import { classifyProviderFailure, isPermanentProviderFailure, providerFailureMessage } from "@/lib/provider-errors";
-import { sanitizeOutbound, type EmailProvider, type OutboundEmail } from "@/lib/email/types";
+import { listUnsubscribeHeaders, sanitizeOutbound, type EmailProvider, type OutboundEmail } from "@/lib/email/types";
 
 export class ResendProvider implements EmailProvider {
   readonly name = "resend" as const;
@@ -23,6 +23,7 @@ export class ResendProvider implements EmailProvider {
         subject: clean.subject,
         text: clean.text,
         ...(clean.html ? { html: clean.html } : {}),
+        ...(clean.listUnsubscribeUrl ? { headers: Object.fromEntries(listUnsubscribeHeaders(clean.listUnsubscribeUrl)) } : {}),
       }),
     });
     const body = await response.text();

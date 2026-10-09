@@ -1,6 +1,6 @@
 import { AppError } from "@/lib/errors";
 import { classifyProviderFailure, isPermanentProviderFailure, providerFailureMessage } from "@/lib/provider-errors";
-import { sanitizeOutbound, type EmailProvider, type OutboundEmail } from "@/lib/email/types";
+import { listUnsubscribeHeaders, sanitizeOutbound, type EmailProvider, type OutboundEmail } from "@/lib/email/types";
 
 export class GmailProvider implements EmailProvider {
   readonly name = "gmail" as const;
@@ -15,6 +15,7 @@ export class GmailProvider implements EmailProvider {
       `From: ${clean.fromName ? `${clean.fromName} <${clean.from}>` : clean.from}`,
       `To: ${clean.to}`,
       `Subject: ${clean.subject}`,
+      ...listUnsubscribeHeaders(clean.listUnsubscribeUrl).map(([name, value]) => `${name}: ${value}`),
       "MIME-Version: 1.0",
     ];
     

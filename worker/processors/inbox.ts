@@ -5,7 +5,16 @@ import { classifyJobId, gmailReplyId, inboxImportDecision } from "@/lib/email/me
 import { AppError } from "@/lib/errors";
 import { classifyProviderFailure, isPermanentProviderFailure } from "@/lib/provider-errors";
 import { queueJob } from "@/lib/jobs";
-import { applyGmailBounce, gmailPlainText, isBounceSender, parseGmailBounce, type GmailPart } from "@/lib/email/gmail-bounce";
+import {
+  applyGmailBounce,
+  gmailDeliveryStatusText,
+  isBounceSender,
+  noticeAuthenticationFailed,
+  originalMessageIds,
+  parseGmailBounce,
+  sentMessageMatchesNotice,
+  type GmailPart,
+} from "@/lib/email/gmail-bounce";
 
 export async function processInboxSync(organizationId: string) {
   const accounts = await prisma.emailAccount.findMany({
@@ -183,18 +192,19 @@ async function importGmailBounce(organizationId: string, accessToken: string, me
   const root = message.payload;
   const headers: Record<string, string> = {};
   for (const header of root?.headers ?? []) headers[header.name.toLowerCase()] = header.value;
-  const bounce = parseGmailBounce({ headers, body: gmailPlainText(root) });
-  const noticeThread = message.threadId;
+  const bounce = noticeAuthenticationFailed(headers) ? null : parseGmailBounce({ headers, body: gmailDeliveryStatusText(root) });
+  const notice = { threadId: message.threadId, originalMessageIds: originalMessageIds(root) };
   const verifyOrigin = async (providerIds: string[]) => {
-    if (!noticeThread) return false;
+    if (!notice.threadId || notice.originalMessageIds.length === 0) return false;
     for (const id of providerIds) {
-      const sentResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=minimal`, {
+      const sentResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Message-ID`, {
         headers: { Authorization: `Bearer ${accessToken}` },
         signal: AbortSignal.timeout(20000),
       });
       if (!sentResponse.ok) continue;
-      const sentMessage = (await sentResponse.json()) as { threadId?: string };
-      if (sentMessage.threadId === noticeThread) return true;
+      const sentMessage = (await sentResponse.json()) as { threadId?: string; payload?: { headers?: Array<{ name: string; value: string }> } };
+      const messageId = sentMessage.payload?.headers?.find((header) => header.name.toLowerCase() === "message-id")?.value;
+      if (sentMessageMatchesNotice({ threadId: sentMessage.threadId, messageId }, notice)) return true;
     }
     return false;
   };

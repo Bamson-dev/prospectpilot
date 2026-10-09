@@ -54,13 +54,16 @@ export async function verifySession(token: string): Promise<SessionPayload | nul
   }
 }
 
+// Unsubscribe links must keep working for as long as the email exists, so the token has no expiry.
+// It is purpose-scoped and carries only the contact id. The worst a leaked token can do is
+// unsubscribe that one contact, and every use is idempotent. Rotating AUTH_SECRET revokes all
+// outstanding links, so rotate only with a plan to keep the old key for verification.
 export async function signUnsubscribeToken(contactId: string) {
   const key = secretKey();
   if (!key) throw new Error("AUTH_SECRET must be at least 32 characters.");
   return new SignJWT({ purpose: "unsubscribe" })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(contactId)
-    .setExpirationTime("180d")
     .sign(key);
 }
 

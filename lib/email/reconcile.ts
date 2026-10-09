@@ -1,10 +1,11 @@
 import type { Prisma } from "@prisma/client";
 
-type ReconcileDb = {
+type ReconcileTx = {
   outreachMessage: Pick<Prisma.OutreachMessageDelegate, "findMany" | "findUnique" | "updateMany">;
   prospect: Pick<Prisma.ProspectDelegate, "update">;
   activityLog: Pick<Prisma.ActivityLogDelegate, "create">;
 };
+type ReconcileDb = ReconcileTx & { $transaction<T>(fn: (tx: ReconcileTx) => Promise<T>): Promise<T> };
 
 export type StuckMessage = {
   id: string;
@@ -44,32 +45,38 @@ export type Disposition = "sent" | "not-sent";
 // the provider message id found in the provider's own records.
 export async function reconcileMessage(
   db: ReconcileDb,
-  input: { messageId: string; confirm: string; disposition: Disposition; evidence: string; providerMessageId?: string; now?: Date },
+  input: { messageId: string; confirm: string; disposition: Disposition; evidence: string; providerMessageId?: string; now?: Date; thresholdMinutes?: number },
 ) {
   if (!input.messageId || input.confirm !== input.messageId) throw new Error("Confirmation must repeat the exact message id.");
   if (input.disposition !== "sent" && input.disposition !== "not-sent") throw new Error("Disposition must be sent or not-sent.");
   const evidence = input.evidence.trim();
   if (evidence.length < 10) throw new Error("Describe the evidence in at least 10 characters.");
   if (input.disposition === "sent" && !input.providerMessageId?.trim()) throw new Error("Marking a message sent needs the provider message id.");
-  const message = await db.outreachMessage.findUnique({ where: { id: input.messageId }, select: { id: true, state: true, organizationId: true, campaignId: true, prospectId: true } });
-  if (!message || message.state !== "SENDING") throw new Error("That message is not in SENDING.");
   const now = input.now ?? new Date();
-  const data: Prisma.OutreachMessageUpdateManyMutationInput =
-    input.disposition === "sent"
-      ? { state: "SENT", sentAt: now, providerMessageId: input.providerMessageId!.trim(), error: null }
-      : { state: "FAILED", error: "Confirmed not sent during manual reconciliation." };
-  const result = await db.outreachMessage.updateMany({ where: { id: message.id, organizationId: message.organizationId, state: "SENDING" }, data });
-  if (result.count !== 1) throw new Error("The message changed while you were reconciling it.");
-  const next = input.disposition === "sent" ? "SENT" : "FAILED";
-  await db.prospect.update({ where: { id: message.prospectId }, data: { outreachState: next } });
-  await db.activityLog.create({
-    data: {
-      organizationId: message.organizationId,
-      campaignId: message.campaignId,
-      prospectId: message.prospectId,
-      action: "outreach.reconciled",
-      detail: `Message ${message.id} moved from SENDING to ${next}. Evidence: ${evidence.slice(0, 300)}`,
-    },
+  const cutoff = new Date(now.getTime() - (input.thresholdMinutes ?? stuckThresholdMinutes()) * 60_000);
+  // One transaction: the guarded update, the prospect state and the audit record commit together or not at all.
+  return db.$transaction(async (tx) => {
+    const message = await tx.outreachMessage.findUnique({ where: { id: input.messageId }, select: { id: true, state: true, organizationId: true, campaignId: true, prospectId: true, updatedAt: true } });
+    if (!message || message.state !== "SENDING") throw new Error("That message is not in SENDING.");
+    // A send that started a moment ago may still be talking to the provider. Only stale claims qualify.
+    if (message.updatedAt.getTime() > cutoff.getTime()) throw new Error("That message entered SENDING too recently. Wait for the stale threshold before reconciling.");
+    const data: Prisma.OutreachMessageUpdateManyMutationInput =
+      input.disposition === "sent"
+        ? { state: "SENT", sentAt: now, providerMessageId: input.providerMessageId!.trim(), error: null }
+        : { state: "FAILED", error: "Confirmed not sent during manual reconciliation." };
+    const result = await tx.outreachMessage.updateMany({ where: { id: message.id, organizationId: message.organizationId, state: "SENDING", updatedAt: message.updatedAt }, data });
+    if (result.count !== 1) throw new Error("The message changed while you were reconciling it.");
+    const next = input.disposition === "sent" ? "SENT" : "FAILED";
+    await tx.prospect.update({ where: { id: message.prospectId }, data: { outreachState: next } });
+    await tx.activityLog.create({
+      data: {
+        organizationId: message.organizationId,
+        campaignId: message.campaignId,
+        prospectId: message.prospectId,
+        action: "outreach.reconciled",
+        detail: `Message ${message.id} moved from SENDING to ${next}. Evidence: ${evidence.slice(0, 300)}`,
+      },
+    });
+    return next;
   });
-  return next;
 }

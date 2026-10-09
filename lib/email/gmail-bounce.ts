@@ -7,7 +7,9 @@ export type GmailBounce = {
   kind: "permanent" | "temporary";
 };
 
-const MAILER_SENDERS = /^(mailer-daemon|postmaster)@/i;
+// Only Google's own delivery notices count. A notice from any other domain is read as ordinary mail,
+// so a forged mailer-daemon@ address on another domain can never reach the suppression path.
+const MAILER_SENDERS = /^mailer-daemon@(googlemail|gmail)\.com$/i;
 
 export function isBounceSender(from: string) {
   const address = from.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? "";
@@ -36,8 +38,9 @@ export function parseGmailBounce(input: { headers: Record<string, string>; body:
   // taken from the machine-readable delivery-status part first.
   const status = statusMatch?.[1];
   if (!status) return null;
-  if (actions.length > 0 && !actions.includes("failed") && !actions.includes("delayed")) return null;
-  const permanent = status.startsWith("5") && !actions.includes("delayed");
+  // The machine-readable delivery-status part must say what happened. Text alone is not enough.
+  if (actions.length !== 1 || (actions[0] !== "failed" && actions[0] !== "delayed")) return null;
+  const permanent = status.startsWith("5") && actions[0] === "failed";
   return { recipient, status, kind: permanent ? "permanent" : "temporary" };
 }
 
@@ -53,7 +56,13 @@ export type BounceOutcome = "suppressed" | "already-recorded" | "temporary-logge
 
 // Applies one parsed bounce inside one organization. The address is suppressed only when this
 // organization sent at least one message to it. Replaying the same Gmail message changes nothing.
-export async function applyGmailBounce(db: BounceDb, input: { organizationId: string; gmailMessageId: string; bounce: GmailBounce | null }): Promise<BounceOutcome> {
+// verifyOrigin receives the provider ids of this organization's messages to the failed address and
+// returns true only when the notice sits in the same Gmail thread as one of them. A forged notice
+// from a spoofed sender cannot join the thread of a message it never saw, so it suppresses nobody.
+export async function applyGmailBounce(
+  db: BounceDb,
+  input: { organizationId: string; gmailMessageId: string; bounce: GmailBounce | null; verifyOrigin: (providerMessageIds: string[]) => Promise<boolean> },
+): Promise<BounceOutcome> {
   const marker = `gmail-dsn:${input.gmailMessageId}`;
   const seen = await db.activityLog.findFirst({ where: { organizationId: input.organizationId, detail: { contains: marker } }, select: { id: true } });
   if (seen) return "already-recorded";
@@ -71,10 +80,15 @@ export async function applyGmailBounce(db: BounceDb, input: { organizationId: st
       state: { in: ["SENT", "DELIVERED", "OPENED", "REPLIED", "SENDING"] },
       contact: { email: { equals: email, mode: "insensitive" } },
     },
-    select: { prospectId: true },
+    select: { prospectId: true, providerMessageId: true },
   });
   if (sent.length === 0) {
     await log("outreach.bounce_unresolved", `Bounce for an address this organization has not contacted (${input.bounce.status}).`);
+    return "unresolved";
+  }
+  const providerIds = sent.map((item) => item.providerMessageId).filter((id): id is string => Boolean(id));
+  if (providerIds.length === 0 || !(await input.verifyOrigin(providerIds))) {
+    await log("outreach.bounce_unresolved", `Failure notice for ${email} is not in the thread of a message this organization sent. No suppression.`);
     return "unresolved";
   }
   if (input.bounce.kind !== "permanent") {

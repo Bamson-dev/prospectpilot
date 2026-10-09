@@ -76,7 +76,8 @@ export async function reserveRecipientSend(
           organizationId: input.organizationId,
           id: { not: input.messageId },
           contact: { email: { endsWith: `@${domain}`, mode: "insensitive" } },
-          OR: [{ state: "SENDING", updatedAt: { gte: dayStart } }, { sentAt: { gte: dayStart } }],
+          // A message in SENDING may have been delivered, so it counts until someone reconciles it.
+          OR: [{ state: "SENDING" }, { sentAt: { gte: dayStart } }],
         },
       });
       if (usedToday >= input.domainDailyLimit) return "domain-limit" as const;

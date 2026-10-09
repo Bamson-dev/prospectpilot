@@ -9,7 +9,7 @@ import {
   applyGmailBounce,
   gmailDeliveryStatusText,
   isBounceSender,
-  noticeAuthenticationFailed,
+  noticeAuthenticated,
   originalMessageIds,
   parseGmailBounce,
   sentMessageMatchesNotice,
@@ -192,7 +192,7 @@ async function importGmailBounce(organizationId: string, accessToken: string, me
   const root = message.payload;
   const headers: Record<string, string> = {};
   for (const header of root?.headers ?? []) headers[header.name.toLowerCase()] = header.value;
-  const bounce = noticeAuthenticationFailed(headers) ? null : parseGmailBounce({ headers, body: gmailDeliveryStatusText(root) });
+  const bounce = noticeAuthenticated(headers) ? parseGmailBounce({ headers, body: gmailDeliveryStatusText(root) }) : null;
   const notice = { threadId: message.threadId, originalMessageIds: originalMessageIds(root) };
   const verifyOrigin = async (providerIds: string[]) => {
     if (!notice.threadId || notice.originalMessageIds.length === 0) return false;

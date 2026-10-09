@@ -10,7 +10,9 @@ export const dynamic = "force-dynamic";
 
 export async function authorizeAdmin(request: Request) {
   const authHeader = request.headers.get("authorization");
-  if (authHeader && authHeader === `Bearer ${process.env.AUTH_SECRET}`) {
+  const secret = process.env.AUTH_SECRET;
+  // An unset secret must never match the header "Bearer undefined".
+  if (secret && authHeader === `Bearer ${secret}`) {
     const adminUser = await prisma.user.findFirst({
       where: { memberships: { some: { role: { in: ["ADMIN", "OWNER"] } } } },
       orderBy: { createdAt: "desc" }

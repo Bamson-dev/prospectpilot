@@ -32,3 +32,17 @@ describe("one-click unsubscribe route", () => {
     expect(await call("GET", "?token=good")).toBeNull();
   });
 });
+
+describe("unsubscribe token lifetime", () => {
+  it("still verifies a token after more than a year", async () => {
+    vi.resetModules();
+    vi.doUnmock("@/lib/session");
+    process.env.AUTH_SECRET = "unsubscribe-test-secret-with-more-than-32-chars";
+    const session = await vi.importActual<typeof import("@/lib/session")>("@/lib/session");
+    const token = await session.signUnsubscribeToken("c9");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 800 * 24 * 3600 * 1000));
+    expect(await session.verifyUnsubscribeToken(token)).toBe("c9");
+    vi.useRealTimers();
+  });
+});

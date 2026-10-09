@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { listUnsubscribeHeaders, sanitizeOutbound } from "@/lib/email/types";
-import { applyGmailBounce, gmailPlainText, isBounceSender, parseGmailBounce } from "@/lib/email/gmail-bounce";
+import { applyGmailBounce, gmailDeliveryStatusText, gmailPlainText, isBounceSender, noticeAuthenticationFailed, originalMessageIds, parseGmailBounce, sentMessageMatchesNotice } from "@/lib/email/gmail-bounce";
 import { suppressContactForUnsubscribe } from "@/lib/unsubscribe";
 import { defaultDomainDailyLimit, domainLockKey, recipientDomain, reserveRecipientSend } from "@/lib/email/send-reservation";
 import { listStuckSending, reconcileMessage } from "@/lib/email/reconcile";
@@ -72,8 +72,10 @@ function bounceDb(opts: { sentTo?: string[]; org?: string } = {}) {
   const contactUpdates: unknown[] = [];
   const followUps: unknown[] = [];
   const sentTo = (opts.sentTo ?? []).map((e) => e.toLowerCase());
-  return {
+  const db = {
     logs, suppressions, contactUpdates, followUps,
+    $executeRaw: vi.fn(async () => 0),
+    $transaction: async <T,>(fn: (tx: unknown) => Promise<T>): Promise<T> => fn(db),
     outreachMessage: { async findMany({ where }: { where: { organizationId: string; contact: { email: { equals: string } } } }) {
       return where.organizationId === (opts.org ?? "org-1") && sentTo.includes(where.contact.email.equals.toLowerCase()) ? [{ prospectId: "p1", providerMessageId: "gm-sent-1" }] : [];
     } },
@@ -88,6 +90,7 @@ function bounceDb(opts: { sentTo?: string[]; org?: string } = {}) {
       async create({ data }: { data: { organizationId: string; action: string; detail: string } }) { logs.push(data); },
     },
   };
+  return db;
 }
 const permanent = { recipient: "bad@example.com", status: "5.1.1", kind: "permanent" as const };
 
@@ -123,6 +126,29 @@ describe("Gmail bounce handling", () => {
   it("rejects a status notice without a single machine-readable Action", () => {
     expect(parseGmailBounce({ headers: {}, body: "Final-Recipient: rfc822; a@b.com\nStatus: 5.1.1" })).toBeNull();
     expect(parseGmailBounce({ headers: {}, body: "Final-Recipient: rfc822; a@b.com\nAction: delivered\nStatus: 5.1.1" })).toBeNull();
+  });
+  it("reads only the delivery-status part, not plain text that imitates it", () => {
+    const forged = { mimeType: "multipart/report", parts: [{ mimeType: "text/plain", body: { data: Buffer.from("Final-Recipient: rfc822; victim@example.com\nAction: failed\nStatus: 5.1.1").toString("base64url") } }] };
+    expect(gmailDeliveryStatusText(forged)).toBe("");
+    const real = { mimeType: "multipart/report", parts: [{ mimeType: "message/delivery-status", parts: [{ headers: [{ name: "Final-Recipient", value: "rfc822; a@b.com" }, { name: "Action", value: "failed" }, { name: "Status", value: "5.1.1" }] }] }] };
+    expect(parseGmailBounce({ headers: {}, body: gmailDeliveryStatusText(real) })?.recipient).toBe("a@b.com");
+  });
+  it("extracts the original Message-ID quoted in a notice and matches it exactly with the thread", () => {
+    const notice = { mimeType: "multipart/report", parts: [{ mimeType: "message/rfc822", parts: [{ headers: [{ name: "Message-ID", value: "<ABC123@mail.gmail.com>" }] }] }, { mimeType: "text/rfc822-headers", body: { data: Buffer.from("Message-ID: <Other@x.test>\nSubject: hi").toString("base64url") } }] };
+    const ids = originalMessageIds(notice);
+    expect(ids).toEqual(["abc123@mail.gmail.com", "other@x.test"]);
+    const n = { threadId: "t1", originalMessageIds: ids };
+    expect(sentMessageMatchesNotice({ threadId: "t1", messageId: "<abc123@mail.gmail.com>" }, n)).toBe(true);
+    expect(sentMessageMatchesNotice({ threadId: "t2", messageId: "<abc123@mail.gmail.com>" }, n)).toBe(false);
+    expect(sentMessageMatchesNotice({ threadId: "t1", messageId: "<zzz@mail.gmail.com>" }, n)).toBe(false);
+    expect(sentMessageMatchesNotice({ threadId: "t1" }, n)).toBe(false);
+    expect(sentMessageMatchesNotice({ threadId: "t1", messageId: "<abc123@mail.gmail.com>" }, { threadId: "t1", originalMessageIds: [] })).toBe(false);
+    expect(originalMessageIds({ mimeType: "text/plain", headers: [{ name: "Message-ID", value: "<fake@x>" }] })).toEqual([]);
+  });
+  it("rejects notices whose authentication results record a failure", () => {
+    expect(noticeAuthenticationFailed({ "authentication-results": "mx.google.com; dkim=fail header.i=@googlemail.com; spf=pass" })).toBe(true);
+    expect(noticeAuthenticationFailed({ "authentication-results": "mx.google.com; dkim=pass; spf=pass; dmarc=pass" })).toBe(false);
+    expect(noticeAuthenticationFailed({})).toBe(false);
   });
   it("treats only Google mailer-daemon addresses as bounce senders", () => {
     expect(isBounceSender("Mail Delivery Subsystem <mailer-daemon@googlemail.com>")).toBe(true);
@@ -239,6 +265,12 @@ describe("reconciliation", () => {
     expect(db.outreachMessage.updateMany).not.toHaveBeenCalled();
     expect(await reconcileMessage(db as never, input)).toBe("SENT");
     expect(db.activityLog.create).toHaveBeenCalled();
+  });
+  it("fills the provider from the sender account when a reconciled message has none", async () => {
+    const db = decide();
+    db.outreachMessage.findUnique.mockResolvedValueOnce({ id: "m1", state: "SENDING", organizationId: "o", campaignId: "c", prospectId: "p", updatedAt: new Date(Date.now() - 3_600_000), provider: null, campaign: { emailAccount: { provider: "GMAIL" } } } as never);
+    await reconcileMessage(db as never, { messageId: "m1", confirm: "m1", disposition: "sent", evidence: "Found in Gmail Sent folder", providerMessageId: "gm1" });
+    expect(db.outreachMessage.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ state: "SENT", provider: "GMAIL" }) }));
   });
   it("moves not-sent to FAILED and refuses messages outside SENDING", async () => {
     expect(await reconcileMessage(decide() as never, { messageId: "m1", confirm: "m1", disposition: "not-sent", evidence: "Provider log shows rejection" })).toBe("FAILED");

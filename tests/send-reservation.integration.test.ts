@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
+import { applyGmailBounce } from "@/lib/email/gmail-bounce";
 import { acquireRecipientLock, reserveRecipientSend } from "@/lib/email/send-reservation";
 
 // Runs against a real PostgreSQL database. Skipped unless PG_INTEGRATION_URL is set, and refuses any
@@ -107,6 +108,20 @@ describe.skipIf(!url)("recipient reservation on PostgreSQL", () => {
     expect(await reserveRecipientSend(prisma, { messageId: fresh.id, organizationId: org2, email: "new@stale.example", domainDailyLimit: 1 })).toBe("domain-limit");
     const other = await seedMessage(org2, "new@other.example");
     expect(await reserveRecipientSend(prisma, { messageId: other.id, organizationId: org2, email: "new@other.example", domainDailyLimit: 1 })).toBe("claimed");
+  });
+
+  it("records one outcome when two inbox syncs process the same bounce notice at once", async () => {
+    const org = await seedOrg();
+    const sent = await seedMessage(org, "gone@bounce.example", "SENT");
+    await prisma.outreachMessage.update({ where: { id: sent.id }, data: { providerMessageId: "gm-sent-1" } });
+    const args = { organizationId: org, gmailMessageId: "dsn-1", bounce: { recipient: "gone@bounce.example", status: "5.1.1", kind: "permanent" as const }, verifyOrigin: async () => true };
+    const results = await Promise.all([applyGmailBounce(prisma as never, args), applyGmailBounce(prisma as never, args), applyGmailBounce(prisma as never, args)]);
+    expect(results.filter((r) => r === "suppressed")).toHaveLength(1);
+    expect(results.filter((r) => r === "already-recorded")).toHaveLength(2);
+    expect(await prisma.activityLog.count({ where: { organizationId: org, detail: { contains: "gmail-dsn:dsn-1" } } })).toBe(1);
+    expect(await prisma.suppression.count({ where: { organizationId: org, email: "gone@bounce.example" } })).toBe(1);
+    const forged = await applyGmailBounce(prisma as never, { ...args, gmailMessageId: "dsn-2", verifyOrigin: async () => false, bounce: { ...args.bounce, recipient: "other@bounce.example" } });
+    expect(forged).toBe("unresolved");
   });
 
   it("holds the advisory lock until the transaction ends and makes a second transaction wait", async () => {

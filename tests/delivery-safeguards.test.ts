@@ -227,7 +227,7 @@ describe("per-domain daily limit", () => {
       async $queryRaw(strings: TemplateStringsArray) {
         const sql = strings.join("");
         queries.push(sql);
-        return sql.includes("split_part") ? [{ count: BigInt(0) }] : [];
+        return sql.includes("split_part") ? [{ count: 0 }] : [];
       },
       outreachMessage: { findMany: async () => [], updateMany: async () => ({ count: 1 }) },
     };
@@ -242,7 +242,7 @@ describe("per-domain daily limit", () => {
       const tx = {
         $executeRaw: vi.fn(async () => 0),
         async $queryRaw(strings: TemplateStringsArray) {
-          return strings.join("").includes("split_part") ? [{ count: BigInt(used) }] : [];
+          return strings.join("").includes("split_part") ? [{ count: used }] : [];
         },
         outreachMessage: {
           findMany: async () => [],

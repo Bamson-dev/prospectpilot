@@ -13,6 +13,7 @@ import { recordActivity } from "@/lib/jobs";
 import { signUnsubscribeToken } from "@/lib/session";
 import { assertSafeOutboundCopy } from "@/lib/sales/intelligence";
 import { buildFollowUpCopy } from "@/lib/sales/follow-up-copy";
+import { buildOutreachFooter, isUkMarket, providerMayCarryContact, readCompanyVerification, senderIdentityFromEnv, ukCompanyEligibility } from "@/lib/compliance/uk-b2b";
 
 export async function processOutreach(messageId: string) {
   if (!outreachSendingEnabled()) throw new AppError("Outbound sending is turned off.");
@@ -75,11 +76,34 @@ export async function processOutreach(messageId: string) {
     throw new AppError("The global system outreach limit has been reached today.");
   }
 
+  if (isUkMarket(message.campaign.country, message.prospect.country)) {
+    const eligibility = ukCompanyEligibility(readCompanyVerification(message.prospect.salesIntelligence), message.contact.email);
+    if (!eligibility.eligible) throw new AppError(eligibility.reason);
+  }
+  if (!providerMayCarryContact(account.provider, message.contact.source ?? "")) {
+    throw new AppError("The sending provider's policy does not allow this contact source.");
+  }
+  const sender = senderIdentityFromEnv();
+  if (!sender) throw new AppError("Sender identity is incomplete. Set OUTREACH_SENDER_LEGAL_NAME, OUTREACH_SENDER_ADDRESS and OUTREACH_REPLY_EMAIL.");
+
   const provider = providerFor(account.provider, account.refreshTokenEncrypted);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://leadpilot.live";
   const unsubscribe = await signUnsubscribeToken(message.contact.id);
-  const text = `${message.body.trim()}\n\nIf you'd rather not receive emails from me, unsubscribe here: ${appUrl}/unsubscribe?token=${unsubscribe}`;
-  const html = `${message.body.trim().replace(/\n/g, "<br/>")}<br/><br/>If you'd rather not receive emails from me, <a href="${appUrl}/unsubscribe?token=${unsubscribe}">unsubscribe here</a>.`;
+  const sourceHost = (() => {
+    try {
+      return message.prospect.sourceUrl ? new URL(message.prospect.sourceUrl).hostname : null;
+    } catch {
+      return null;
+    }
+  })();
+  const footer = buildOutreachFooter({
+    sender,
+    recipientCompany: message.prospect.companyName,
+    sourceHost,
+    unsubscribeUrl: `${appUrl}/unsubscribe?token=${unsubscribe}`,
+  });
+  const text = `${message.body.trim()}\n\n${footer.text}`;
+  const html = `${message.body.trim().replace(/\n/g, "<br/>")}<br/><br/>${footer.html}`;
   const reservation = await reserveRecipientSend(prisma, {
     messageId: message.id,
     organizationId: message.organizationId,

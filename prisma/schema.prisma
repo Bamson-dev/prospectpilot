@@ -44,6 +44,7 @@ model Organization {
   sequences          Sequence[]
   settings           Setting[]
   suppressions       Suppression[]
+  subscribers        Subscriber[]
   tags               Tag[]
 }
 
@@ -1422,4 +1423,34 @@ enum ApplicationQuestionKind {
   PORTFOLIO
   EDUCATION
   OTHER
+}
+
+// A person who asked to receive email through the public subscribe form. Consent is recorded with the
+// exact wording and version shown, and becomes valid only after the person confirms from their inbox.
+model Subscriber {
+  id               String           @id @default(cuid())
+  organizationId   String
+  email            String
+  name             String?
+  company          String?
+  status           SubscriberStatus @default(PENDING)
+  consentText      String
+  consentVersion   String
+  source           String
+  confirmTokenHash String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  confirmedAt      DateTime?
+  unsubscribedAt   DateTime?
+  contactId        String?
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([confirmTokenHash])
+}
+
+enum SubscriberStatus {
+  PENDING
+  CONFIRMED
+  UNSUBSCRIBED
 }

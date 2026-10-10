@@ -26,11 +26,11 @@ describe("collectInboxMessageIds", () => {
     expect(result).toEqual({ ids: ["m1", "m2", "m3"], pages: 3, truncated: true });
     expect(n).toBe(3);
   });
-  it("stops when Gmail repeats a page token", async () => {
+  it("reports an incomplete listing when Gmail repeats a page token", async () => {
     let n = 0;
     const result = await collectInboxMessageIds(async () => { n += 1; return { ids: [`m${n}`], nextPageToken: "same" }; }, { maxPages: 10 });
     expect(n).toBe(2);
-    expect(result.truncated).toBe(false);
+    expect(result.truncated).toBe(true);
   });
   it("propagates a page failure instead of returning a partial result", async () => {
     let n = 0;

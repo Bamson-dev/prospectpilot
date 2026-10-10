@@ -3,7 +3,7 @@ import { prepareDiscoveredVacancies } from "@/lib/applications/job-pipeline";
 import { persistNormalizedVacancies, archiveStaleVacancies } from "@/lib/applications/service";
 import type { RawDiscoveredVacancy } from "@/lib/applications/job-normalize";
 import { collectPublicVacancies } from "@/lib/applications/job-sources";
-import { applicationWorkerConcurrency, applicationDomainConcurrency } from "@/lib/applications/config";
+import { applicationWorkerConcurrency, applicationBrowserConcurrency, applicationDomainConcurrency } from "@/lib/applications/config";
 import { runBatchCLI } from "@/scripts/bulk-prepare-applications";
 
 // Mock prisma for E, F, I, J
@@ -122,14 +122,30 @@ describe("Milestone F Phase 1 Features", () => {
     consoleSpy.mockRestore();
   });
 
-  it("M. Browser concurrency bounds", () => {
-    const original = process.env.APPLICATION_WORKER_CONCURRENCY;
-    process.env.APPLICATION_WORKER_CONCURRENCY = "10";
-    expect(applicationWorkerConcurrency()).toBeLessThanOrEqual(4);
-    process.env.APPLICATION_WORKER_CONCURRENCY = "-1";
-    expect(applicationWorkerConcurrency()).toBe(2);
-    process.env.APPLICATION_DOMAIN_CONCURRENCY = "5";
-    expect(applicationDomainConcurrency()).toBeLessThanOrEqual(2);
-    process.env.APPLICATION_WORKER_CONCURRENCY = original;
+  it("M. Application worker, browser, and domain concurrency respect caps and fallbacks", () => {
+    const keys = ["APPLICATION_WORKER_CONCURRENCY", "APPLICATION_BROWSER_CONCURRENCY", "APPLICATION_DOMAIN_CONCURRENCY"] as const;
+    const original = new Map(keys.map((key) => [key, process.env[key]] as const));
+    try {
+      process.env.APPLICATION_WORKER_CONCURRENCY = "100";
+      expect(applicationWorkerConcurrency()).toBe(20);
+      process.env.APPLICATION_WORKER_CONCURRENCY = "-1";
+      expect(applicationWorkerConcurrency()).toBe(4);
+
+      process.env.APPLICATION_BROWSER_CONCURRENCY = "100";
+      expect(applicationBrowserConcurrency()).toBe(6);
+      process.env.APPLICATION_BROWSER_CONCURRENCY = "-1";
+      expect(applicationBrowserConcurrency()).toBe(2);
+
+      process.env.APPLICATION_DOMAIN_CONCURRENCY = "5";
+      expect(applicationDomainConcurrency()).toBe(3);
+      process.env.APPLICATION_DOMAIN_CONCURRENCY = "-1";
+      expect(applicationDomainConcurrency()).toBe(1);
+    } finally {
+      for (const key of keys) {
+        const value = original.get(key);
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 });

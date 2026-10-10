@@ -108,6 +108,18 @@ describe.skipIf(!url)("recipient reservation on PostgreSQL", () => {
     expect(await reserveRecipientSend(prisma, { messageId: fresh.id, organizationId: org2, email: "new@stale.example", domainDailyLimit: 1 })).toBe("domain-limit");
     const other = await seedMessage(org2, "new@other.example");
     expect(await reserveRecipientSend(prisma, { messageId: other.id, organizationId: org2, email: "new@other.example", domainDailyLimit: 1 })).toBe("claimed");
+
+    // Whitespace in legacy contact records must not bypass the per-domain cap.
+    const org3 = await seedOrg();
+    const whitespaceExisting = await seedMessage(org3, " old@space.example ");
+    await prisma.outreachMessage.update({ where: { id: whitespaceExisting.id }, data: { state: "SENDING" } });
+    const whitespaceFresh = await seedMessage(org3, "new@space.example");
+    expect(await reserveRecipientSend(prisma, {
+      messageId: whitespaceFresh.id,
+      organizationId: org3,
+      email: "new@space.example",
+      domainDailyLimit: 1,
+    })).toBe("domain-limit");
   });
 
   it("records one outcome when two inbox syncs process the same bounce notice at once", async () => {

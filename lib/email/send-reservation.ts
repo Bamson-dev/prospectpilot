@@ -48,15 +48,19 @@ export async function reserveRecipientSend(
   const email = normalizeRecipient(input.email);
   return db.$transaction(async (tx) => {
     await acquireRecipientLock(tx, input.organizationId, email);
-    const others = await tx.outreachMessage.findMany({
-      where: {
-        organizationId: input.organizationId,
-        id: { not: input.messageId },
-        state: { in: [...CONTACTED_STATES] },
-        contact: { email: { equals: email, mode: "insensitive" } },
-      },
-      select: { state: true },
-    });
+
+    // Normalize the stored value too: legacy/imported contacts may contain surrounding whitespace.
+    // Matching only a case-insensitive exact string lets that whitespace bypass duplicate protection.
+    const others = await tx.$queryRaw<Array<{ state: string }>>`
+      SELECT om.state::text AS state
+      FROM "OutreachMessage" AS om
+      JOIN "Contact" AS c ON c.id = om."contactId"
+      WHERE om."organizationId" = ${input.organizationId}
+        AND om.id <> ${input.messageId}
+        AND om.state::text IN ('SENDING', 'SENT', 'DELIVERED', 'OPENED', 'REPLIED')
+        AND lower(btrim(c.email)) = ${email}
+      LIMIT 1
+    `;
     if (alreadyContactedRecipient(others.map((item) => item.state))) {
       await tx.outreachMessage.updateMany({
         where: { id: input.messageId, state: { in: [...CLAIMABLE_STATES] } },
@@ -71,15 +75,18 @@ export async function reserveRecipientSend(
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${domainLockKey(input.organizationId, domain)}, 0))`;
       const dayStart = new Date(input.now ?? new Date());
       dayStart.setUTCHours(0, 0, 0, 0);
-      const usedToday = await tx.outreachMessage.count({
-        where: {
-          organizationId: input.organizationId,
-          id: { not: input.messageId },
-          contact: { email: { endsWith: `@${domain}`, mode: "insensitive" } },
-          // A message in SENDING may have been delivered, so it counts until someone reconciles it.
-          OR: [{ state: "SENDING" }, { sentAt: { gte: dayStart } }],
-        },
-      });
+      // Use the trimmed stored address here as well, so malformed legacy values cannot bypass
+      // the per-domain cap just because they contain surrounding whitespace.
+      const usage = await tx.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*) AS count
+        FROM "OutreachMessage" AS om
+        JOIN "Contact" AS c ON c.id = om."contactId"
+        WHERE om."organizationId" = ${input.organizationId}
+          AND om.id <> ${input.messageId}
+          AND lower(split_part(btrim(c.email), '@', 2)) = ${domain}
+          AND (om.state::text = 'SENDING' OR om."sentAt" >= ${dayStart})
+      `;
+      const usedToday = Number(usage[0]?.count ?? 0);
       if (usedToday >= input.domainDailyLimit) return "domain-limit" as const;
     }
     const claim = await tx.outreachMessage.updateMany({

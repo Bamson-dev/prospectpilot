@@ -221,22 +221,31 @@ describe("per-domain daily limit", () => {
     expect(defaultDomainDailyLimit("0")).toBe(2);
   });
   it("counts every unresolved SENDING message, whatever its age", async () => {
-    let where: { OR: unknown[] } | undefined;
+    const queries: string[] = [];
     const tx = {
       $executeRaw: vi.fn(async () => 0),
-      outreachMessage: { findMany: async () => [], count: vi.fn(async (args: { where: { OR: unknown[] } }) => { where = args.where; return 0; }), updateMany: async () => ({ count: 1 }) },
+      async $queryRaw(strings: TemplateStringsArray) {
+        const sql = strings.join("");
+        queries.push(sql);
+        return sql.includes("split_part") ? [{ count: 0 }] : [];
+      },
+      outreachMessage: { findMany: async () => [], updateMany: async () => ({ count: 1 }) },
     };
     await reserveRecipientSend({ $transaction: async <T,>(fn: (t: never) => Promise<T>) => fn(tx as never) } as never, { messageId: "m", organizationId: "o", email: "a@b.com", domainDailyLimit: 2 });
-    expect(where?.OR[0]).toEqual({ state: "SENDING" });
+    const domainQuery = queries.find((sql) => sql.includes("split_part")) ?? "";
+    expect(domainQuery).toContain("om.state::text = 'SENDING'");
+    expect(domainQuery).toContain('om."sentAt" >=');
   });
   it("refuses to claim when the domain already used its limit, and claims otherwise", async () => {
     const make = (used: number) => {
       const claimed: string[] = [];
       const tx = {
         $executeRaw: vi.fn(async () => 0),
+        async $queryRaw(strings: TemplateStringsArray) {
+          return strings.join("").includes("split_part") ? [{ count: used }] : [];
+        },
         outreachMessage: {
           findMany: async () => [],
-          count: vi.fn(async () => used),
           updateMany: async ({ where }: { where: { id: string } }) => { claimed.push(where.id); return { count: 1 }; },
         },
       };

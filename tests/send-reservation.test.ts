@@ -25,6 +25,16 @@ function fakeDb(messages: Msg[], options: { lock?: boolean } = {}) {
           held.push({ key, release });
           return 0;
         },
+          async $queryRaw(strings: TemplateStringsArray, ...values: unknown[]) {
+          await yieldTick();
+          const sql = strings.join("");
+          if (sql.includes("split_part")) return [{ count: 0 }];
+          const [organizationId, messageId, email] = values.map(String);
+          return messages
+            .filter((m) => m.organizationId === organizationId && m.id !== messageId && CONTACTED_TEST_STATES.has(m.state) && m.email.trim().toLowerCase() === email)
+            .map((m) => ({ state: m.state }))
+            .slice(0, 1);
+        },
         outreachMessage: {
           async findMany({ where }: { where: { organizationId: string; id: { not: string }; state: { in: string[] }; contact: { email: { equals: string } } } }) {
             await yieldTick();
@@ -53,6 +63,8 @@ function fakeDb(messages: Msg[], options: { lock?: boolean } = {}) {
     },
   };
 }
+
+const CONTACTED_TEST_STATES = new Set(["SENDING", "SENT", "DELIVERED", "OPENED", "REPLIED"]);
 
 const msg = (id: string, email: string, state = "APPROVED", extra: Partial<Msg> = {}): Msg => ({ id, organizationId: "org-1", state, email, campaignId: `camp-${id}`, prospectId: `pros-${id}`, ...extra });
 const reserve = (db: ReturnType<typeof fakeDb>, id: string, email: string, organizationId = "org-1") =>

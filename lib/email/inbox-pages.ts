@@ -18,7 +18,7 @@ export async function collectInboxMessageIds(
     pages += 1;
     for (const id of page.ids) seen.add(id);
     if (!page.nextPageToken) return { ids: [...seen], pages, truncated: false };
-    if (tokens.has(page.nextPageToken)) return { ids: [...seen], pages, truncated: false };
+    if (tokens.has(page.nextPageToken)) return { ids: [...seen], pages, truncated: true };
     tokens.add(page.nextPageToken);
     token = page.nextPageToken;
   }

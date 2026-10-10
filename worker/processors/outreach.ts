@@ -5,6 +5,7 @@ import { GmailProvider } from "@/lib/email/gmail";
 import { ResendProvider } from "@/lib/email/resend";
 import { outreachSendDecision } from "@/lib/email/message-policy";
 import { outreachSendingEnabled } from "@/lib/email/send-gate";
+import { defaultDomainDailyLimit, reserveRecipientSend } from "@/lib/email/send-reservation";
 
 import type { EmailProvider } from "@/lib/email/types";
 import { parseFollowUpSteps } from "@/lib/follow-ups";
@@ -79,11 +80,15 @@ export async function processOutreach(messageId: string) {
   const unsubscribe = await signUnsubscribeToken(message.contact.id);
   const text = `${message.body.trim()}\n\nIf you'd rather not receive emails from me, unsubscribe here: ${appUrl}/unsubscribe?token=${unsubscribe}`;
   const html = `${message.body.trim().replace(/\n/g, "<br/>")}<br/><br/>If you'd rather not receive emails from me, <a href="${appUrl}/unsubscribe?token=${unsubscribe}">unsubscribe here</a>.`;
-  const claim = await prisma.outreachMessage.updateMany({
-    where: { id: message.id, state: { in: ["APPROVED", "QUEUED", "FAILED"] } },
-    data: { state: "SENDING", error: null },
+  const reservation = await reserveRecipientSend(prisma, {
+    messageId: message.id,
+    organizationId: message.organizationId,
+    email: message.contact.email,
+    domainDailyLimit: defaultDomainDailyLimit(),
   });
-  if (claim.count !== 1) return;
+  if (reservation === "duplicate-recipient") throw new AppError("This address was already contacted by another message.");
+  if (reservation === "domain-limit") throw new AppError("The daily limit for this recipient domain has been reached.");
+  if (reservation !== "claimed") return;
   try {
     const result = await provider.sendEmail({
       to: message.contact.email,
@@ -92,6 +97,7 @@ export async function processOutreach(messageId: string) {
       subject: message.subject,
       text,
       html,
+      listUnsubscribeUrl: `${appUrl}/unsubscribe/one-click?token=${unsubscribe}`,
     });
     const sent = await prisma.outreachMessage.updateMany({
       where: { id: message.id, state: "SENDING" },
@@ -115,16 +121,19 @@ export async function processOutreach(messageId: string) {
     });
   } catch (error) {
     const permanent = error instanceof Error && error.name === "PermanentProviderError";
-    await prisma.outreachMessage.updateMany({
-      where: { id: message.id, state: "SENDING" },
-      data: { state: "FAILED", error: error instanceof Error ? error.message.slice(0, 300) : "Send failed" },
-    });
-    await prisma.prospect.update({ where: { id: message.prospectId }, data: { outreachState: "FAILED" } });
+    const reason = error instanceof Error ? error.message.slice(0, 300) : "Send failed";
     if (permanent) {
+      // The provider rejected the message, so it provably was not sent.
+      await prisma.outreachMessage.updateMany({ where: { id: message.id, state: "SENDING" }, data: { state: "FAILED", error: reason } });
+      await prisma.prospect.update({ where: { id: message.prospectId }, data: { outreachState: "FAILED" } });
       await prisma.emailAccount.update({
         where: { id: account.id },
         data: { status: "RESTRICTED", lastError: error instanceof Error ? error.message.slice(0, 300) : "Provider stopped sending." },
       });
+    } else {
+      // A timeout or server error does not prove the email was not delivered. Keep SENDING so no
+      // retry or sibling message reaches the same address until someone reconciles it.
+      await prisma.outreachMessage.updateMany({ where: { id: message.id, state: "SENDING" }, data: { error: `Delivery unconfirmed: ${reason}`.slice(0, 300) } });
     }
     throw error;
   }

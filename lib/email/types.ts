@@ -6,6 +6,8 @@ export type OutboundEmail = {
   text: string;
   html?: string;
   replyTo?: string | null;
+  // HTTPS endpoint for RFC 8058 one-click unsubscribe. Sent as List-Unsubscribe headers.
+  listUnsubscribeUrl?: string | null;
 };
 
 export type SendResult = {
@@ -39,5 +41,18 @@ export function sanitizeOutbound(message: OutboundEmail): OutboundEmail {
   if (text.length > 8000) throw new Error("The email body is too long.");
   const html = message.html ? message.html.trim() : undefined;
   if (html && html.length > 16000) throw new Error("The email HTML body is too long.");
-  return { ...message, to, from, subject, text, html };
+  const listUnsubscribeUrl = message.listUnsubscribeUrl ? message.listUnsubscribeUrl.trim() : null;
+  if (listUnsubscribeUrl && !/^https:\/\/[^\s<>]+$/.test(listUnsubscribeUrl)) {
+    throw new Error("The unsubscribe URL must be an HTTPS address.");
+  }
+  return { ...message, to, from, subject, text, html, listUnsubscribeUrl };
+}
+
+// Headers for RFC 8058 one-click unsubscribe. Returns an empty list when no URL is set.
+export function listUnsubscribeHeaders(url: string | null | undefined): Array<[string, string]> {
+  if (!url) return [];
+  return [
+    ["List-Unsubscribe", `<${url}>`],
+    ["List-Unsubscribe-Post", "List-Unsubscribe=One-Click"],
+  ];
 }

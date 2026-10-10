@@ -6,6 +6,7 @@ import { logInfo } from "@/lib/logger";
 import { queueJob } from "@/lib/jobs";
 import { classifyJobId, inboundReplyId, onlyMatchingContact, providerEventWrite, webhookTimestampFresh } from "@/lib/email/message-policy";
 import { isSuppressionRequest } from "@/lib/suppression";
+import { suppressRecipientForProviderEvent } from "@/lib/email/suppression-events";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,7 @@ export async function POST(request: Request) {
       }
     }
   }
+  if (event.type && emailId) await suppressRecipientForProviderEvent(prisma, event.type, emailId);
   if ((event.type === "email.received" || event.type === "email.replied") && event.data?.from) {
     const from = event.data.from.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.toLowerCase();
     if (from) {

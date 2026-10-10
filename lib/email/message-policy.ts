@@ -89,3 +89,14 @@ export function replyWorkDecision(classification: string, suppression: boolean) 
   if (classification === "UNCLASSIFIED") return "classify" as const;
   return "skip" as const;
 }
+
+const CONTACTED_STATES = new Set(["SENDING", "SENT", "DELIVERED", "OPENED", "REPLIED"]);
+
+export function providerEventSuppresses(type: string) {
+  return type === "email.bounced" || type === "email.complained";
+}
+
+// Another message to the same address (any campaign or prospect) was already sent or is sending.
+export function alreadyContactedRecipient(otherMessageStates: string[]) {
+  return otherMessageStates.some((state) => CONTACTED_STATES.has(state));
+}

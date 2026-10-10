@@ -54,24 +54,41 @@ export async function verifySession(token: string): Promise<SessionPayload | nul
   }
 }
 
+// Unsubscribe links must keep working for as long as the email exists, so the token has no expiry.
+// It is purpose-scoped and carries only the contact id. The worst a leaked token can do is
+// unsubscribe that one contact, and every use is idempotent. Rotating AUTH_SECRET revokes all
+// outstanding links, so rotate only with a plan to keep the old key for verification.
 export async function signUnsubscribeToken(contactId: string) {
   const key = secretKey();
   if (!key) throw new Error("AUTH_SECRET must be at least 32 characters.");
   return new SignJWT({ purpose: "unsubscribe" })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(contactId)
-    .setExpirationTime("180d")
     .sign(key);
 }
 
+// Keys that may verify an unsubscribe link: the current AUTH_SECRET first, then any retired secrets
+// listed in AUTH_SECRET_PREVIOUS (comma separated). Keep a retired secret listed for as long as
+// emails signed with it may still be opened. New links are always signed with AUTH_SECRET.
+function unsubscribeVerificationKeys() {
+  const current = secretKey();
+  const retired = (process.env.AUTH_SECRET_PREVIOUS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length >= 32)
+    .map((value) => new TextEncoder().encode(value));
+  return [...(current ? [current] : []), ...retired];
+}
+
 export async function verifyUnsubscribeToken(token: string) {
-  const key = secretKey();
-  if (!key) return null;
-  try {
-    const { payload } = await jwtVerify(token, key);
-    if (payload.purpose !== "unsubscribe" || !payload.sub) return null;
-    return payload.sub;
-  } catch {
-    return null;
+  for (const key of unsubscribeVerificationKeys()) {
+    try {
+      const { payload } = await jwtVerify(token, key);
+      if (payload.purpose !== "unsubscribe" || !payload.sub) return null;
+      return payload.sub;
+    } catch {
+      // Try the next key.
+    }
   }
+  return null;
 }

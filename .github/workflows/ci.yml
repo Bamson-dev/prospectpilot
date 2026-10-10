@@ -21,19 +21,41 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       DATABASE_URL: postgresql://prospectpilot:prospectpilot@localhost:5432/prospectpilot_test
+      PG_INTEGRATION_URL: postgresql://prospectpilot:prospectpilot@localhost:5432/prospectpilot_test
+      REDIS_URL: redis://localhost:6379
       AUTH_SECRET: ci-only-auth-secret-not-used-in-production
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - run: npm ci
+      - name: Install Chromium for Playwright tests
+        run: npx playwright install --with-deps chromium
+      - name: Prepare crawler Python environment
+        run: |
+          python -m venv /tmp/pp-crawl-venv
+          /tmp/pp-crawl-venv/bin/python -m pip install --upgrade pip
+          /tmp/pp-crawl-venv/bin/pip install 'scrapy==2.11.2' 'Twisted==25.5.0' 'w3lib==2.2.1'
+          /tmp/pp-crawl-venv/bin/python -c 'import scrapy; from scrapy.utils.url import _safe_chars'
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
       - run: npx prisma db push
-      - run: npm run test
+      - name: Run full test suite, including PostgreSQL integration tests
+        run: npm run test

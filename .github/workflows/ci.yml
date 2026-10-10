@@ -7,8 +7,22 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: prospectpilot
+          POSTGRES_PASSWORD: prospectpilot
+          POSTGRES_DB: prospectpilot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
-      DATABASE_URL: postgresql://prospectpilot:prospectpilot@localhost:5432/prospectpilot
+      DATABASE_URL: postgresql://prospectpilot:prospectpilot@localhost:5432/prospectpilot_test
       AUTH_SECRET: ci-only-auth-secret-not-used-in-production
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
@@ -21,3 +35,5 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
+      - run: npx prisma db push
+      - run: npm run test

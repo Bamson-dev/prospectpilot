@@ -4,6 +4,7 @@ type UnsubscribeDb = {
   contact: Pick<Prisma.ContactDelegate, "findUnique" | "findMany" | "updateMany">;
   suppression: Pick<Prisma.SuppressionDelegate, "upsert">;
   followUp: Pick<Prisma.FollowUpDelegate, "updateMany">;
+  subscriber?: Pick<Prisma.SubscriberDelegate, "updateMany">;
 };
 
 // Adds the contact's address to the suppression list, marks every contact with that address as
@@ -27,6 +28,10 @@ export async function suppressContactForUnsubscribe(db: UnsubscribeDb, contactId
   await db.followUp.updateMany({
     where: { organizationId: contact.organizationId, prospectId: { in: prospectIds }, state: { in: ["SCHEDULED", "PENDING_APPROVAL"] } },
     data: { state: "CANCELLED" },
+  });
+  await db.subscriber?.updateMany({
+    where: { organizationId: contact.organizationId, email, status: { not: "UNSUBSCRIBED" } },
+    data: { status: "UNSUBSCRIBED", unsubscribedAt: new Date(), confirmTokenHash: null },
   });
   return email;
 }

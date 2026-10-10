@@ -5,6 +5,7 @@ import { classifyJobId, gmailReplyId, inboxImportDecision } from "@/lib/email/me
 import { AppError } from "@/lib/errors";
 import { classifyProviderFailure, isPermanentProviderFailure } from "@/lib/provider-errors";
 import { queueJob } from "@/lib/jobs";
+import { collectInboxMessageIds, inboxMaxPages, inboxPageSize } from "@/lib/email/inbox-pages";
 import {
   applyGmailBounce,
   gmailDeliveryStatusText,
@@ -24,24 +25,36 @@ export async function processInboxSync(organizationId: string) {
   for (const account of accounts) {
     if (!account.refreshTokenEncrypted) continue;
     const accessToken = await gmailAccessToken(decryptSecret(account.refreshTokenEncrypted));
-    const list = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15&q=in:inbox", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!list.ok) {
-      const body = await list.text().catch(() => "");
-      const kind = classifyProviderFailure(list.status, body);
-      if (isPermanentProviderFailure(kind)) {
-        await prisma.emailAccount.update({
-          where: { id: account.id },
-          data: { status: "RESTRICTED", lastError: `Inbox sync restricted: ${kind}` },
-        });
-      }
-      throw new AppError(`Gmail inbox sync failed with status ${list.status}.`);
+    const pageSize = inboxPageSize();
+    const collected = await collectInboxMessageIds(
+      async (pageToken) => {
+        const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
+        url.searchParams.set("maxResults", String(pageSize));
+        url.searchParams.set("q", "in:inbox");
+        if (pageToken) url.searchParams.set("pageToken", pageToken);
+        const list = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(20000) });
+        if (!list.ok) {
+          const body = await list.text().catch(() => "");
+          const kind = classifyProviderFailure(list.status, body);
+          if (isPermanentProviderFailure(kind)) {
+            await prisma.emailAccount.update({
+              where: { id: account.id },
+              data: { status: "RESTRICTED", lastError: `Inbox sync restricted: ${kind}` },
+            });
+          }
+          throw new AppError(`Gmail inbox sync failed with status ${list.status}.`);
+        }
+        const payload = (await list.json()) as { messages?: Array<{ id: string }>; nextPageToken?: string };
+        return { ids: (payload.messages ?? []).map((item) => item.id), nextPageToken: payload.nextPageToken };
+      },
+      { maxPages: inboxMaxPages() },
+    );
+    for (const id of collected.ids) {
+      await importGmailMessage(organizationId, accessToken, id);
     }
-    const payload = (await list.json()) as { messages?: Array<{ id: string }> };
-    for (const item of payload.messages ?? []) {
-      await importGmailMessage(organizationId, accessToken, item.id);
+    if (collected.truncated) {
+      // Visible failure: the newest messages were processed, but older ones were not reached.
+      throw new AppError(`Inbox sync stopped at ${collected.pages} pages. Older messages were not processed.`);
     }
     await prisma.emailAccount.update({
       where: { id: account.id },
@@ -55,7 +68,9 @@ async function importGmailMessage(organizationId: string, accessToken: string, m
     `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
     { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(20000) },
   );
-  if (!response.ok) return;
+  // A message deleted since listing returns 404 and is skipped. Any other failure stops the sync visibly.
+  if (response.status === 404) return;
+  if (!response.ok) throw new AppError(`Gmail message fetch failed with status ${response.status}.`);
   const payload = (await response.json()) as {
     snippet?: string;
     payload?: { headers?: Array<{ name: string; value: string }> };
@@ -187,7 +202,8 @@ async function importGmailBounce(organizationId: string, accessToken: string, me
     headers: { Authorization: `Bearer ${accessToken}` },
     signal: AbortSignal.timeout(20000),
   });
-  if (!response.ok) return;
+  if (response.status === 404) return;
+  if (!response.ok) throw new AppError(`Gmail bounce fetch failed with status ${response.status}.`);
   const message = (await response.json()) as GmailPart & { payload?: GmailPart; threadId?: string };
   const root = message.payload;
   const headers: Record<string, string> = {};

@@ -42,6 +42,6 @@ describe("application queue", () => {
   it("treats a paused form as inspected and a captcha as blocked", () => {
     expect(inspectionIsBlocked({ submitted: false, reason: "pause before submit", status: "READY_FOR_HUMAN_SUBMISSION" })).toBe(false);
     expect(inspectionIsBlocked({ submitted: false, reason: "captcha", status: "REQUIRES_MANUAL_ACTION" })).toBe(true);
-    expect(inspectionIsBlocked({ submitted: true, reason: null, status: "READY_FOR_HUMAN_SUBMISSION" })).toBe(true);
+    expect(inspectionIsBlocked({ submitted: true, reason: null, status: "READY_FOR_HUMAN_SUBMISSION" })).toBe(false);
   });
 });

@@ -29,9 +29,9 @@ export function applicationDailyTarget() {
 }
 
 export function applicationWorkerConcurrency() {
-  const value = Number(process.env.APPLICATION_WORKER_CONCURRENCY ?? 2);
-  if (!Number.isFinite(value) || value < 1) return 2;
-  return Math.min(Math.floor(value), 4);
+  const value = Number(process.env.APPLICATION_WORKER_CONCURRENCY ?? 4);
+  if (!Number.isFinite(value) || value < 1) return 4;
+  return Math.min(Math.floor(value), 20);
 }
 
 export function applicationBrowserConcurrency() {
@@ -43,7 +43,7 @@ export function applicationBrowserConcurrency() {
 export function applicationDomainConcurrency() {
   const value = Number(process.env.APPLICATION_DOMAIN_CONCURRENCY ?? 1);
   if (!Number.isFinite(value) || value < 1) return 1;
-  return Math.min(Math.floor(value), 2);
+  return Math.min(Math.floor(value), 3);
 }
 
 export function applicationMaxRetries() {

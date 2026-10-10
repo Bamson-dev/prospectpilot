@@ -28,7 +28,7 @@ function fakeDb(messages: Msg[], options: { lock?: boolean } = {}) {
           async $queryRaw(strings: TemplateStringsArray, ...values: unknown[]) {
           await yieldTick();
           const sql = strings.join("");
-          if (sql.includes("split_part")) return [{ count: BigInt(0) }];
+          if (sql.includes("split_part")) return [{ count: 0 }];
           const [organizationId, messageId, email] = values.map(String);
           return messages
             .filter((m) => m.organizationId === organizationId && m.id !== messageId && CONTACTED_TEST_STATES.has(m.state) && m.email.trim().toLowerCase() === email)

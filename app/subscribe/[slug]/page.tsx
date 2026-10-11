@@ -9,6 +9,12 @@ import { sendSubscriptionConfirmation } from "@/lib/subscription-mail";
 
 export const dynamic = "force-dynamic";
 
+async function underLimit(key: string, max: number, seconds: number) {
+  const count = await getRedis().incr(key);
+  if (count === 1) await getRedis().expire(key, seconds);
+  return count <= max;
+}
+
 async function subscribe(formData: FormData) {
   "use server";
   const slug = String(formData.get("slug") ?? "");
@@ -16,11 +22,10 @@ async function subscribe(formData: FormData) {
   const sender = senderIdentityFromEnv();
   const organization = await prisma.organization.findUnique({ where: { slug } });
   if (!sender || !organization) return back("closed");
-  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  const key = `subscribe:rate:${ip}`;
-  const count = await getRedis().incr(key);
-  if (count === 1) await getRedis().expire(key, 3600);
-  if (count > 5) return back("limited");
+  // Cloudflare sets cf-connecting-ip; the left-most x-forwarded-for entry can be supplied by the client.
+  const h = await headers();
+  const ip = h.get("cf-connecting-ip")?.trim() || h.get("x-real-ip")?.trim() || "unknown";
+  if (!(await underLimit(`subscribe:rate:ip:${ip}`, 5, 3600))) return back("limited");
   const valid = validateSubscription({
     email: String(formData.get("email") ?? ""),
     name: String(formData.get("name") ?? ""),
@@ -28,6 +33,10 @@ async function subscribe(formData: FormData) {
     consent: formData.get("consent") === "yes",
   });
   if (!valid.ok) return back("invalid");
+  // One confirmation email per address per 10 minutes and 3 per day, so the form cannot be used to flood an inbox.
+  if (!(await underLimit(`subscribe:rate:email:${valid.email}`, 1, 600)) || !(await underLimit(`subscribe:rate:email-day:${valid.email}`, 3, 86400))) {
+    return back("check-inbox");
+  }
   const wording = consentText(sender.legalName);
   const token = await createPendingSubscription(prisma as never, {
     organizationId: organization.id,

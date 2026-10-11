@@ -191,16 +191,17 @@ describe("outreach-sync POST", () => {
     expect(calls.filter((c) => c.model === "outreachMessage")).toEqual([]);
   });
 
-  it("with the send switch on, the scan still limits itself to approval-free campaigns and unsuppressed contacts", async () => {
+  it("with sending on, the scan only auto-approves opt-in contacts and ignores the approval setting", async () => {
     process.env.OUTREACH_SEND_ENABLED = "true";
     const { sync } = await loadRoutes("real");
     await sync.POST(request("http://localhost/b", { method: "POST", headers }));
     const scan = calls.find((c) => c.model === "outreachMessage" && c.method === "findMany");
     expect(scan).toBeDefined();
     const where = (scan?.args as { where: { campaign: Record<string, unknown>; contact: Record<string, unknown>; state: { in: string[] } } }).where;
-    expect(where.campaign.requireApproval).toBe(false);
+    expect(where.campaign).not.toHaveProperty("requireApproval");
     expect(where.campaign.status).toEqual({ notIn: ["PAUSED", "ARCHIVED", "COMPLETED"] });
     expect(where.contact.suppressed).toBe(false);
+    expect(where.contact.source).toBe("opt-in");
     expect(where.state.in).toEqual(["DRAFT", "PENDING_APPROVAL"]);
     // Nothing was approved or queued because the fake database returned no messages.
     expect(writesMade()).toEqual([]);

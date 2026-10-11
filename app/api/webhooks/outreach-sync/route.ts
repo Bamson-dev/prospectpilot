@@ -7,9 +7,9 @@ export const dynamic = "force-dynamic";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
-// Runs the existing outreach scan. The scan still returns immediately while OUTREACH_SEND_ENABLED
-// is off, only touches campaigns with requireApproval=false, and skips suppressed contacts. The send
-// worker repeats the suppression, eligibility and limit checks before any message leaves.
+// Runs the existing outreach scan. The scan returns while OUTREACH_SEND_ENABLED is off and
+// automatically approves only confirmed opt-in contacts in sendable campaigns. The send worker repeats
+// suppression, provider-eligibility, recipient de-duplication and limit checks before sending.
 export async function POST(request: Request) {
   const auth = await authorizeAdmin(request);
   if (!auth) return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });

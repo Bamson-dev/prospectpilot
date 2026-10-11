@@ -35,4 +35,18 @@ describe("outreach send gate", () => {
 
     expect(prisma.outreachMessage.findMany).not.toHaveBeenCalled();
   });
+
+  it("automatically scans only confirmed opt-in contacts when sending is enabled", async () => {
+    vi.stubEnv("OUTREACH_SEND_ENABLED", "true");
+    vi.mocked(prisma.outreachMessage.findMany).mockResolvedValue([] as never);
+
+    await processOutreachScan();
+
+    expect(prisma.outreachMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        campaign: expect.not.objectContaining({ requireApproval: false }),
+        contact: expect.objectContaining({ source: "opt-in", suppressed: false, email: { not: null } }),
+      }),
+    }));
+  });
 });

@@ -73,6 +73,7 @@ export async function createCampaign(formData: FormData) {
     if (!account) redirect("/campaigns/new?error=That+sender+is+not+in+this+workspace.");
     emailAccountId = account.id;
   }
+  const approvalSetting = await prisma.setting.findUnique({ where: { organizationId_key: { organizationId: organization.id, key: "requireApproval" } } });
   const campaign = await prisma.campaign.create({
     data: {
       organizationId: organization.id,
@@ -98,7 +99,7 @@ export async function createCampaign(formData: FormData) {
       provider: parsed.data.provider ? parsed.data.provider : null,
       emailAccountId,
       followUpSteps: stepsFromText(parsed.data.followUps || "3,7,14"),
-      requireApproval: true,
+      requireApproval: approvalSetting?.value !== "false",
       autoFollowUp: false,
     },
   });

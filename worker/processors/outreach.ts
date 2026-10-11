@@ -47,8 +47,8 @@ export async function processOutreach(messageId: string) {
     await prisma.prospect.update({ where: { id: message.prospectId }, data: { outreachState: "SUPPRESSED" } });
     throw new AppError("This contact is on the suppression list.");
   }
-  if (!message.campaign || message.campaign.status === "PAUSED" || message.campaign.status === "ARCHIVED") {
-    throw new AppError("The campaign is not allowed to send.");
+  if (!message.campaign || message.campaign.status !== "ACTIVE") {
+    throw new AppError("The campaign must be active before it can send.");
   }
   const start = new Date();
   start.setUTCHours(0, 0, 0, 0);

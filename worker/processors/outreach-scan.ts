@@ -10,13 +10,13 @@ export async function processOutreachScan() {
     where: {
       state: { in: ["DRAFT", "PENDING_APPROVAL"] },
       campaign: {
-        status: { notIn: ["PAUSED", "ARCHIVED", "COMPLETED"] },
-        requireApproval: false,
+        status: "ACTIVE",
         emailAccountId: { not: null },
       },
       contact: {
         email: { not: null },
         suppressed: false,
+        source: "opt-in",
       }
     },
     select: { id: true, prospectId: true, organizationId: true }
@@ -49,7 +49,7 @@ export async function processOutreachScan() {
   }
 
   const stranded = await prisma.outreachMessage.findMany({
-    where: { state: "APPROVED", campaign: { status: "ACTIVE" } },
+    where: { state: "APPROVED", campaign: { status: "ACTIVE" }, contact: { email: { not: null }, suppressed: false, source: "opt-in" } },
     select: { id: true, organizationId: true }
   });
 

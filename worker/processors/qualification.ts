@@ -156,7 +156,11 @@ export async function processQualification(prospectId: string) {
           subject: draft.subject,
         },
       });
-      const targetState = contact?.email ? (campaign.requireApproval ? "PENDING_APPROVAL" : "APPROVED") : "DRAFT";
+      // Only confirmed opt-in contacts can enter unattended sending. Other contact sources
+      // stay pending review even when the workspace default disables approval for opt-in mail.
+      const targetState = contact?.email
+        ? (contact.source === "opt-in" && campaign.status === "ACTIVE" ? "APPROVED" : "PENDING_APPROVAL")
+        : "DRAFT";
       
       const message = await tx.outreachMessage.create({
         data: {

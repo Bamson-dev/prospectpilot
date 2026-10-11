@@ -83,7 +83,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 </select>
               </label>
               <label className="text-sm text-muted">Approval required
-                <select name="requireApproval" defaultValue={stored.requireApproval ?? "true"}>
+                <select name="requireApproval" defaultValue={stored.requireApproval ?? "false"}>
                   <option value="true">Yes</option>
                   <option value="false">No</option>
                 </select>

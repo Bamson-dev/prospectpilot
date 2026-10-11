@@ -199,7 +199,7 @@ describe("outreach-sync POST", () => {
     expect(scan).toBeDefined();
     const where = (scan?.args as { where: { campaign: Record<string, unknown>; contact: Record<string, unknown>; state: { in: string[] } } }).where;
     expect(where.campaign).not.toHaveProperty("requireApproval");
-    expect(where.campaign.status).toEqual({ notIn: ["PAUSED", "ARCHIVED", "COMPLETED"] });
+    expect(where.campaign.status).toBe("ACTIVE");
     expect(where.contact.suppressed).toBe(false);
     expect(where.contact.source).toBe("opt-in");
     expect(where.state.in).toEqual(["DRAFT", "PENDING_APPROVAL"]);

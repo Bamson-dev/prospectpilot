@@ -8,6 +8,14 @@ vi.mock("@/lib/db", () => ({
     outreachMessage: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
+      updateMany: vi.fn(),
+      count: vi.fn(),
+    },
+    suppression: { findUnique: vi.fn() },
+    prospect: { update: vi.fn() },
+    subscriber: {
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
     },
   },
 }));
@@ -33,11 +41,13 @@ describe("outreach send gate", () => {
 
     await processOutreachScan();
 
+    expect(prisma.subscriber.findMany).not.toHaveBeenCalled();
     expect(prisma.outreachMessage.findMany).not.toHaveBeenCalled();
   });
 
   it("automatically scans only confirmed opt-in contacts when sending is enabled", async () => {
     vi.stubEnv("OUTREACH_SEND_ENABLED", "true");
+    vi.mocked(prisma.subscriber.findMany).mockResolvedValue([{ contactId: "contact-1" }] as never);
     vi.mocked(prisma.outreachMessage.findMany).mockResolvedValue([] as never);
 
     await processOutreachScan();
@@ -45,8 +55,37 @@ describe("outreach send gate", () => {
     expect(prisma.outreachMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         campaign: expect.not.objectContaining({ requireApproval: false }),
-        contact: expect.objectContaining({ source: "opt-in", suppressed: false, email: { not: null } }),
+        contact: expect.objectContaining({ id: { in: ["contact-1"] }, source: "opt-in", suppressed: false, email: { not: null } }),
       }),
     }));
+  });
+
+  it("cancels an approved message at send time when the contact has no confirmed subscription", async () => {
+    vi.stubEnv("OUTREACH_SEND_ENABLED", "true");
+    vi.mocked(prisma.outreachMessage.findUnique).mockResolvedValue({
+      id: "message-1",
+      organizationId: "org-1",
+      campaignId: "campaign-1",
+      prospectId: "prospect-1",
+      state: "APPROVED",
+      subject: "Hello",
+      body: "A short note.",
+      contact: { id: "contact-1", email: "person@example.com", suppressed: false, source: "opt-in" },
+      prospect: { id: "prospect-1", companyName: "Example", country: "NG", salesIntelligence: null },
+      campaign: { id: "campaign-1", status: "ACTIVE", country: "NG", dailyOutreachLimit: 25, emailAccount: { id: "acct-1", status: "ACTIVE", provider: "GMAIL", refreshTokenEncrypted: null } },
+    } as never);
+    vi.mocked(prisma.suppression.findUnique).mockResolvedValue(null as never);
+    vi.mocked(prisma.subscriber.findFirst).mockResolvedValue(null as never);
+    vi.mocked(prisma.outreachMessage.updateMany).mockResolvedValue({ count: 1 } as never);
+
+    await expect(processOutreach("message-1")).rejects.toThrow("no confirmed subscription");
+
+    expect(prisma.subscriber.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { organizationId: "org-1", contactId: "contact-1", status: "CONFIRMED" },
+    }));
+    expect(prisma.outreachMessage.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ state: "CANCELLED" }),
+    }));
+    expect(prisma.outreachMessage.count).not.toHaveBeenCalled();
   });
 });

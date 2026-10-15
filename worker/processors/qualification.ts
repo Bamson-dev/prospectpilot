@@ -4,6 +4,7 @@ import { completeJson, hashInput } from "@/lib/ai/client";
 import { companyAnalysisPrompt, emailPrompt, PROMPTS } from "@/lib/ai/prompts";
 import { companyAnalysisSchema, emailDraftSchema, extractJsonObject, type EmailDraft } from "@/lib/ai/schemas";
 import { queueJob, recordActivity } from "@/lib/jobs";
+import { hasConfirmedSubscription, isOptInSource } from "@/lib/email/opt-in";
 import { logInfo } from "@/lib/logger";
 import { analysisRetryDecision, qualificationEvidence, qualificationWritePlan, shouldStoreQualificationDraft } from "@/lib/research/evidence";
 import { QUOTA_LEASE_MS } from "@/lib/campaign-quota";
@@ -145,6 +146,9 @@ export async function processQualification(prospectId: string) {
       });
     }
     if (draft) {
+    // The "opt-in" source label is not consent by itself. Only a CONFIRMED subscriber record linked to this
+    // contact may skip manual review.
+    const confirmedOptIn = Boolean(contact && isOptInSource(contact.source) && (await hasConfirmedSubscription(prisma, prospect.organizationId, contact.id)));
     const wroteMessage = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${prospect.id}))`;
       const messages = await tx.outreachMessage.findMany({ where: { prospectId: prospect.id }, select: { state: true } });
@@ -159,7 +163,7 @@ export async function processQualification(prospectId: string) {
       // Only confirmed opt-in contacts can enter unattended sending. Other contact sources
       // stay pending review even when the workspace default disables approval for opt-in mail.
       const targetState = contact?.email
-        ? (contact.source === "opt-in" && campaign.status === "ACTIVE" ? "APPROVED" : "PENDING_APPROVAL")
+        ? (confirmedOptIn && campaign.status === "ACTIVE" ? "APPROVED" : "PENDING_APPROVAL")
         : "DRAFT";
       
       const message = await tx.outreachMessage.create({

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { queueJob } from "@/lib/jobs";
 import { outreachSendingEnabled } from "@/lib/email/send-gate";
 import { confirmedOptInContactIds } from "@/lib/email/opt-in";
+import { testRecipientLock } from "@/lib/email/test-recipient";
 import { logInfo } from "@/lib/logger";
 
 // A failed send job is requeued by the scan at most this often, so a message that cannot send does not
@@ -22,9 +23,15 @@ export async function processOutreachScan() {
     return;
   }
 
+  const lock = testRecipientLock();
+  if (lock.active && lock.email === null) {
+    logInfo("worker.outreach_scan_idle", { reason: "invalid_test_recipient" });
+    return;
+  }
+
   const contactFilter = {
     id: { in: confirmedContactIds },
-    email: { not: null },
+    email: lock.active && lock.email ? { equals: lock.email, mode: "insensitive" as const } : { not: null },
     suppressed: false,
     source: "opt-in",
   };

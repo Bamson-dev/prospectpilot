@@ -60,6 +60,55 @@ describe("outreach send gate", () => {
     }));
   });
 
+  it("refuses to send to anyone but the test recipient while the lock is set", async () => {
+    vi.stubEnv("OUTREACH_SEND_ENABLED", "true");
+    vi.stubEnv("OUTREACH_TEST_RECIPIENT", "owner@example.com");
+    vi.mocked(prisma.outreachMessage.findUnique).mockResolvedValue({
+      id: "message-9",
+      organizationId: "org-1",
+      campaignId: "campaign-1",
+      prospectId: "prospect-1",
+      state: "APPROVED",
+      subject: "Hello",
+      body: "A short note.",
+      contact: { id: "contact-9", email: "someone-else@example.com", suppressed: false, source: "opt-in" },
+      prospect: { id: "prospect-1", companyName: "Example", country: "NG", salesIntelligence: null },
+      campaign: { id: "campaign-1", status: "ACTIVE", country: "NG", dailyOutreachLimit: 25, emailAccount: { id: "acct-1", status: "ACTIVE", provider: "GMAIL", refreshTokenEncrypted: null } },
+    } as never);
+    vi.mocked(prisma.outreachMessage.updateMany).mockClear();
+
+    await expect(processOutreach("message-9")).rejects.toThrow("restricted to the test recipient");
+
+    expect(prisma.outreachMessage.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("scans only the test recipient while the lock is set", async () => {
+    vi.stubEnv("OUTREACH_SEND_ENABLED", "true");
+    vi.stubEnv("OUTREACH_TEST_RECIPIENT", "Owner@Example.com");
+    vi.mocked(prisma.subscriber.findMany).mockResolvedValue([{ contactId: "contact-1" }] as never);
+    vi.mocked(prisma.outreachMessage.findMany).mockClear();
+    vi.mocked(prisma.outreachMessage.findMany).mockResolvedValue([] as never);
+
+    await processOutreachScan();
+
+    expect(prisma.outreachMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        contact: expect.objectContaining({ email: { equals: "owner@example.com", mode: "insensitive" } }),
+      }),
+    }));
+  });
+
+  it("scans nothing when the lock value is not a valid address", async () => {
+    vi.stubEnv("OUTREACH_SEND_ENABLED", "true");
+    vi.stubEnv("OUTREACH_TEST_RECIPIENT", "not-an-email");
+    vi.mocked(prisma.subscriber.findMany).mockResolvedValue([{ contactId: "contact-1" }] as never);
+    vi.mocked(prisma.outreachMessage.findMany).mockClear();
+
+    await processOutreachScan();
+
+    expect(prisma.outreachMessage.findMany).not.toHaveBeenCalled();
+  });
+
   it("cancels an approved message at send time when the contact has no confirmed subscription", async () => {
     vi.stubEnv("OUTREACH_SEND_ENABLED", "true");
     vi.mocked(prisma.outreachMessage.findUnique).mockResolvedValue({

@@ -6,6 +6,7 @@ import { ResendProvider } from "@/lib/email/resend";
 import { outreachSendDecision } from "@/lib/email/message-policy";
 import { outreachSendingEnabled } from "@/lib/email/send-gate";
 import { hasConfirmedSubscription, isOptInSource } from "@/lib/email/opt-in";
+import { recipientAllowed, testRecipientLock } from "@/lib/email/test-recipient";
 import { accountDailyLimit, sentTodayWhere, systemDailyLimit } from "@/lib/email/send-limits";
 import { defaultDomainDailyLimit, reserveRecipientSend } from "@/lib/email/send-reservation";
 
@@ -29,6 +30,10 @@ export async function processOutreach(messageId: string) {
   if (decision === "already-sent" || decision === "do-not-resend") return;
   if (decision === "refuse") throw new AppError("This message is not approved to send.");
   if (!message.contact?.email) throw new AppError("The contact does not have an email address.");
+  if (!recipientAllowed(message.contact.email, testRecipientLock())) {
+    // Controlled test mode: leave the message untouched so it can send once the lock is lifted.
+    throw new AppError("Sending is restricted to the test recipient, so this message was not sent.");
+  }
   try {
     assertSafeOutboundCopy(message.subject, message.body);
   } catch (error) {

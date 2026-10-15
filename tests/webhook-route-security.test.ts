@@ -25,6 +25,7 @@ const freshModels = () => ({
   backgroundJob: model("backgroundJob", { groupBy: [{ state: "FAILED", _count: { _all: 1 } }] }),
   emailAccount: model("emailAccount", { findMany: [{ status: "ACTIVE" }] }),
   prospect: model("prospect"),
+  subscriber: model("subscriber", { findMany: [{ contactId: "contact-1" }] }),
   user: model("user", { findFirst: { id: "admin-1" }, findUnique: { id: "admin-1" } }),
   membership: model("membership", { findMany: [{ role: "ADMIN", organizationId: "org-1", organization: { id: "org-1" } }] }),
 });
@@ -202,8 +203,21 @@ describe("outreach-sync POST", () => {
     expect(where.campaign.status).toBe("ACTIVE");
     expect(where.contact.suppressed).toBe(false);
     expect(where.contact.source).toBe("opt-in");
+    // The source label alone is not consent: the scan is limited to contacts that a CONFIRMED subscriber record points at.
+    expect(where.contact.id).toEqual({ in: ["contact-1"] });
     expect(where.state.in).toEqual(["DRAFT", "PENDING_APPROVAL"]);
     // Nothing was approved or queued because the fake database returned no messages.
+    expect(writesMade()).toEqual([]);
+    expect(queueJob).not.toHaveBeenCalled();
+  });
+
+  it("with sending on and no confirmed subscriber, the scan reads no messages and writes nothing", async () => {
+    process.env.OUTREACH_SEND_ENABLED = "true";
+    fakePrisma.subscriber = model("subscriber", { findMany: [] });
+    const { sync } = await loadRoutes("real");
+    const response = await sync.POST(request("http://localhost/b", { method: "POST", headers }));
+    expect(response.status).toBe(200);
+    expect(calls.filter((c) => c.model === "outreachMessage")).toEqual([]);
     expect(writesMade()).toEqual([]);
     expect(queueJob).not.toHaveBeenCalled();
   });

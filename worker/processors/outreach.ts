@@ -5,6 +5,8 @@ import { GmailProvider } from "@/lib/email/gmail";
 import { ResendProvider } from "@/lib/email/resend";
 import { outreachSendDecision } from "@/lib/email/message-policy";
 import { outreachSendingEnabled } from "@/lib/email/send-gate";
+import { hasConfirmedSubscription, isOptInSource } from "@/lib/email/opt-in";
+import { accountDailyLimit, sentTodayWhere, systemDailyLimit } from "@/lib/email/send-limits";
 import { defaultDomainDailyLimit, reserveRecipientSend } from "@/lib/email/send-reservation";
 
 import type { EmailProvider } from "@/lib/email/types";
@@ -50,10 +52,20 @@ export async function processOutreach(messageId: string) {
   if (!message.campaign || message.campaign.status !== "ACTIVE") {
     throw new AppError("The campaign must be active before it can send.");
   }
+  if (isOptInSource(message.contact.source) && !(await hasConfirmedSubscription(prisma, message.organizationId, message.contact.id))) {
+    // Consent is checked again at send time. A revoked or never-confirmed subscription must not send,
+    // even if the message was approved earlier.
+    await prisma.outreachMessage.updateMany({
+      where: { id: message.id, state: { in: ["APPROVED", "QUEUED"] } },
+      data: { state: "CANCELLED", error: "No confirmed subscription for this contact." },
+    });
+    await prisma.prospect.update({ where: { id: message.prospectId }, data: { outreachState: "CANCELLED" } });
+    throw new AppError("This contact has no confirmed subscription, so the message was cancelled and not sent.");
+  }
   const start = new Date();
   start.setUTCHours(0, 0, 0, 0);
   const sentToday = await prisma.outreachMessage.count({
-    where: { campaignId: message.campaignId, sentAt: { gte: start } },
+    where: { campaignId: message.campaignId, ...sentTodayWhere(start) },
   });
   if (sentToday >= message.campaign.dailyOutreachLimit) {
     throw new AppError("The daily outreach limit has been reached for this campaign.");
@@ -63,16 +75,16 @@ export async function processOutreach(messageId: string) {
   if (!account || account.status === "RESTRICTED") throw new AppError("The campaign sender is not available.");
 
   const accountSentToday = await prisma.outreachMessage.count({
-    where: { campaign: { emailAccountId: account.id }, sentAt: { gte: start } },
+    where: { campaign: { emailAccountId: account.id }, ...sentTodayWhere(start) },
   });
-  if (accountSentToday >= 40) {
+  if (accountSentToday >= accountDailyLimit()) {
     throw new AppError("The safety limit for this sender account has been reached today.");
   }
 
   const systemSentToday = await prisma.outreachMessage.count({
-    where: { sentAt: { gte: start } },
+    where: sentTodayWhere(start),
   });
-  if (systemSentToday >= 200) {
+  if (systemSentToday >= systemDailyLimit()) {
     throw new AppError("The global system outreach limit has been reached today.");
   }
 

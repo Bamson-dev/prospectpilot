@@ -1,4 +1,4 @@
-import { matchesQuery } from "@/lib/applications/job-normalize";
+import { titleMatchesQuery } from "@/lib/applications/job-queries";
 import { discoveryBlock } from "@/lib/applications/providers";
 import { searxngEnabled, searxngSearch, parseSearxngResults } from "@/lib/discovery/searxng";
 import type { RawDiscoveredVacancy } from "@/lib/applications/job-normalize";
@@ -309,22 +309,8 @@ async function searxngVacancies(query: string, limit: number, fetchImpl: typeof 
         const resolved = await resolveAtsUrl(fetchImpl, hit.url);
         if (resolved.job) {
           jobs.push(resolved.job);
-        } else {
-          // If not an ATS, we just push it as a generic web job
-          jobs.push({
-            source: "web",
-            sourceUrl: hit.url,
-            applicationUrl: hit.url,
-            externalId: null,
-            companyName: "Web Discovery",
-            title: hit.title,
-            location: null,
-            employmentType: null,
-            description: hit.snippet,
-            originalDescription: hit.snippet,
-            postedAt: null,
-          });
         }
+        // Search result pages and aggregators are not vacancies, so anything that is not a resolved ATS posting is skipped.
       }
     }
     
@@ -463,7 +449,7 @@ function metadataValue(value: unknown, pattern: RegExp) {
 }
 
 function matchesTitle(title: unknown, query: string) {
-  return typeof title === "string" && matchesQuery({ title, description: "" }, query);
+  return typeof title === "string" && titleMatchesQuery(title, query);
 }
 
 function text(value: unknown) {

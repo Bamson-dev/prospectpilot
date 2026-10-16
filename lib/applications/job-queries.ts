@@ -9,3 +9,16 @@ export function explicitTargetRoles(roles: readonly string[] | null | undefined,
   }
   return [...seen];
 }
+
+const GENERIC_WORDS = new Set(["manager", "senior", "junior", "lead", "head", "associate", "director", "specialist", "executive", "officer", "with", "and", "the", "for", "remote", "hybrid"]);
+
+// A title matches when it contains every subject word of the query, so "marketing manager"
+// no longer accepts "Renewals Manager". Words like manager or senior are not subject words.
+export function titleMatchesQuery(title: string, query: string): boolean {
+  const tokens = query.toLowerCase().split(/[^a-z0-9+#]+/).filter((token) => token.length > 3);
+  if (tokens.length === 0) return true;
+  const subject = tokens.filter((token) => !GENERIC_WORDS.has(token));
+  const needed = subject.length > 0 ? subject : tokens;
+  const lower = title.toLowerCase();
+  return needed.every((token) => lower.includes(token));
+}

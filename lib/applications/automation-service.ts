@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import type { FieldResolutionStatus } from "@prisma/client";
 import { logInfo } from "@/lib/logger";
+import { applicationMode } from "@/lib/applications/config";
 import { recordSourceHealth } from "@/lib/discovery/health";
 import {
   admitRun,
@@ -190,7 +191,7 @@ export async function runApplicationAutomation(applicationId: string) {
     const outcome = await inspectPublicApplication(
       application.applicationUrl,
       inspectionValues(application.candidate),
-      { fill: true, cvPath: cvTmpPath, coverPath: coverTmpPath, storageState: resumeToken, allowSubmit: process.env.APPLICATION_LIVE_SUBMIT !== "false", manualResume: Boolean(manualAction?.resolved) }
+      { fill: true, cvPath: cvTmpPath, coverPath: coverTmpPath, storageState: resumeToken, allowSubmit: process.env.APPLICATION_LIVE_SUBMIT === "true" && applicationMode() === "AUTO_SUBMIT", manualResume: Boolean(manualAction?.resolved) }
     );
     const stored = outcome.resolvedFields.map(persistDetectedField);
     for (const field of stored) {

@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { logInfo } from "@/lib/logger";
 import { queueJob, recordActivity } from "@/lib/jobs";
 import { enqueue } from "@/lib/queues";
-import { applicationAutomationEnabled, applicationMode, jobDiscoveryEnabled } from "@/lib/applications/config";
+import { applicationAutomationEnabled, applicationLiveSubmitEnabled, applicationMode, jobDiscoveryEnabled } from "@/lib/applications/config";
 import { collectPublicVacancies } from "@/lib/applications/job-sources";
 import { isApplicationAccessible } from "@/lib/discovery/health";
 import { analysisJobDecision, emptySummary, prepareDiscoveredVacancies } from "@/lib/applications/job-pipeline";
@@ -113,17 +113,7 @@ export async function processJobDiscovery(organizationId: string, runId: string,
         queries.add("strategy and operations");
       }
     }
-    for (const query of queries) {
-      expandedQueries.add(`${query} site:ashbyhq.com`);
-      expandedQueries.add(`${query} site:jobs.workable.com`);
-      expandedQueries.add(`${query} site:jobs.smartrecruiters.com`);
-      expandedQueries.add(`${query} site:boards.greenhouse.io`);
-      expandedQueries.add(`${query} site:jobs.lever.co`);
-      expandedQueries.add(`${query} site:breezy.hr`);
-      expandedQueries.add(`${query} site:apply.workable.com`);
-      expandedQueries.add(`${query} careers`);
-      expandedQueries.add(query); // direct employer career pages
-    }
+    for (const query of queries) expandedQueries.add(query);
   }
 
   const limitPerQuery = manualLimit || Math.min(50, Math.ceil(dailyTarget / expandedQueries.size));
@@ -146,7 +136,7 @@ export async function processJobDiscovery(organizationId: string, runId: string,
       totalQueries += 1;
 
       try {
-        const collected = await collectPublicVacancies({ query: fullQuery, limit: limitPerQuery });
+        const collected = await collectPublicVacancies({ query, location: loc, limit: limitPerQuery });
         totalRawResults += collected.jobs.length;
         
         // Count errors
@@ -277,7 +267,7 @@ export async function processApplicationPreparation(organizationId: string, vaca
 export async function processApplicationSubmit(organizationId: string, applicationId: string) {
   const application = await prisma.jobApplication.findUnique({ where: { id: applicationId } });
   if (!application || application.organizationId !== organizationId) return;
-  if (!applicationAutomationEnabled() || applicationMode() !== "AUTO_SUBMIT") {
+  if (!applicationAutomationEnabled() || !applicationLiveSubmitEnabled() || applicationMode() !== "AUTO_SUBMIT") {
     await prisma.jobApplication.update({
       where: { id: application.id },
       data: { status: "READY_FOR_REVIEW", blockedReason: "Automatic submission is disabled." },

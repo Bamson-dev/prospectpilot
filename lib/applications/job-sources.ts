@@ -10,7 +10,7 @@ export type SourceCollection = {
   failures: SourceFailure[];
 };
 
-const BOARDS = [
+const DEFAULT_BOARDS = [
   { source: "greenhouse", board: "gitlab" },
   { source: "greenhouse", board: "stripe" },
   { source: "greenhouse", board: "airbnb" },
@@ -26,12 +26,26 @@ const BOARDS = [
   { source: "smartrecruiters", board: "ubisoft" },
 ] as const;
 
-export async function collectPublicVacancies(input: { query: string; limit: number; fetchImpl?: typeof fetch }): Promise<SourceCollection> {
+type Board = { source: "greenhouse" | "lever" | "ashby" | "workable" | "smartrecruiters"; board: string };
+
+// JOB_BOARDS overrides the built-in list. Format: "greenhouse:gitlab,lever:spotify".
+export function configuredBoards(raw: string | undefined = process.env.JOB_BOARDS): Board[] {
+  const sources = new Set(["greenhouse", "lever", "ashby", "workable", "smartrecruiters"]);
+  const parsed: Board[] = [];
+  for (const part of (raw ?? "").split(",")) {
+    const [source, board] = part.trim().toLowerCase().split(":");
+    if (source && board && sources.has(source) && /^[a-z0-9._-]+$/.test(board)) parsed.push({ source: source as Board["source"], board });
+  }
+  return parsed.length > 0 ? parsed : [...DEFAULT_BOARDS];
+}
+
+export async function collectPublicVacancies(input: { query: string; location?: string; limit: number; fetchImpl?: typeof fetch }): Promise<SourceCollection> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const jobs: RawDiscoveredVacancy[] = [];
   const failures: SourceFailure[] = [];
-  const perBoard = Math.max(5, Math.ceil(input.limit / BOARDS.length));
-  for (const board of BOARDS) {
+  const boards = configuredBoards();
+  const perBoard = Math.max(5, Math.ceil(input.limit / boards.length));
+  for (const board of boards) {
     if (jobs.length >= input.limit) break;
     const room = Math.min(perBoard, input.limit - jobs.length);
     let found: SourceCollection = { jobs: [], failures: [] };
@@ -50,7 +64,7 @@ export async function collectPublicVacancies(input: { query: string; limit: numb
     }
   }
   if (searxngEnabled()) {
-    const searched = await searxngVacancies(input.query, input.limit, fetchImpl);
+    const searched = await searxngVacancies(`${input.query} ${input.location ?? ""}`.trim(), input.limit, fetchImpl);
     jobs.push(...searched.jobs);
     failures.push(...searched.failures);
   } else {
@@ -400,7 +414,27 @@ export async function resolveAtsUrl(fetchImpl: typeof fetch, url: string): Promi
   }
 }
 
+const JSON_CACHE_TTL_MS = 10 * 60 * 1000;
+const JSON_CACHE_MAX = 400;
+const jsonCache = new Map<string, { at: number; body: unknown }>();
+
+// Board listings do not change between queries in one run, so repeated queries reuse the response.
 async function readJson(fetchImpl: typeof fetch, url: string) {
+  const cached = jsonCache.get(url);
+  if (cached && Date.now() - cached.at < JSON_CACHE_TTL_MS) return { body: cached.body, failure: null as string | null };
+  const fresh = await fetchJson(fetchImpl, url);
+  if (!fresh.failure && fresh.body !== null) {
+    if (jsonCache.size >= JSON_CACHE_MAX) jsonCache.delete(jsonCache.keys().next().value as string);
+    jsonCache.set(url, { at: Date.now(), body: fresh.body });
+  }
+  return fresh;
+}
+
+export function clearJsonCache() {
+  jsonCache.clear();
+}
+
+async function fetchJson(fetchImpl: typeof fetch, url: string) {
   try {
     const response = await fetchImpl(url, { signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" }, redirect: "follow" });
     const bodyText = await response.text();

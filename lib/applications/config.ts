@@ -4,6 +4,10 @@ export function applicationAutomationEnabled() {
   return process.env.APPLICATION_AUTOMATION_ENABLED !== "false";
 }
 
+export function applicationLiveSubmitEnabled() {
+  return process.env.APPLICATION_LIVE_SUBMIT === "true";
+}
+
 export function jobDiscoveryEnabled() {
   return process.env.JOB_DISCOVERY_ENABLED !== "false";
 }
@@ -19,7 +23,7 @@ export function coverLetterGenerationEnabled() {
 export function applicationMode(): ApplicationMode {
   const mode = process.env.APPLICATION_MODE;
   if (mode === "MANUAL" || mode === "AUTO_SUBMIT" || mode === "AUTO_PREPARE") return mode;
-  return "AUTO_SUBMIT";
+  return "AUTO_PREPARE";
 }
 
 export function applicationDailyTarget() {

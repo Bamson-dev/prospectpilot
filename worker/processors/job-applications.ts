@@ -2,8 +2,10 @@ import { prisma } from "@/lib/db";
 import { logInfo } from "@/lib/logger";
 import { queueJob, recordActivity } from "@/lib/jobs";
 import { enqueue } from "@/lib/queues";
-import { applicationAutomationEnabled, applicationLiveSubmitEnabled, applicationMode, jobDiscoveryEnabled } from "@/lib/applications/config";
+import { applicationAutomationEnabled, applicationLiveSubmitEnabled, applicationMode, jobApplicationEmailEnabled, jobDiscoveryEnabled } from "@/lib/applications/config";
 import { explicitTargetRoles } from "@/lib/applications/job-queries";
+import { emailFitAllowed, emailPackageBlockers, sendEmailApplication } from "@/lib/applications/email-apply";
+import { findApplicationEmail } from "@/lib/applications/email-route";
 import { collectPublicVacancies } from "@/lib/applications/job-sources";
 import { isApplicationAccessible } from "@/lib/discovery/health";
 import { analysisJobDecision, emptySummary, prepareDiscoveredVacancies } from "@/lib/applications/job-pipeline";
@@ -240,8 +242,10 @@ export async function processApplicationPreparation(organizationId: string, vaca
   await attachBrowserInspection(applicationId);
   const submitted = await prisma.jobApplication.findFirst({
     where: { id: applicationId, organizationId },
-    select: { submittedAt: true, status: true },
+    select: { submittedAt: true, status: true, emailSentAt: true },
   });
+  // A sent email application is finished. Re-running preparation must not touch it.
+  if (submitted?.emailSentAt || submitted?.status === "VERIFIED") return;
   if (submitted?.submittedAt || submitted?.status === "SUBMITTED" || submitted?.status === "SUBMITTING") {
     await prisma.jobApplication.update({
       where: { id: applicationId },
@@ -250,21 +254,38 @@ export async function processApplicationPreparation(organizationId: string, vaca
     return; // Don't enqueue browser for manual action
   }
   
-  if (submitted?.status === "READY_FOR_SUBMISSION" || submitted?.status === "PREPARED") {
-    // Automatically enqueue browser application worker
-    const jobId = `browser:${applicationId}`;
-    try {
-      await queueJob({
-        id: jobId,
-        organizationId,
-        queue: "application-browser",
-        name: "run",
-        payload: { applicationId },
-      });
-      logInfo("application.queued_for_browser", { applicationId });
-    } catch {
-      // Ignore if job already queued (unique constraint)
-    }
+  const prepared = await prisma.jobApplication.findFirst({
+    where: { id: applicationId, organizationId },
+    include: { package: true, vacancy: true },
+  });
+  if (!prepared) return;
+  const eligible = prepared.status !== "FAILED"
+    && Boolean(prepared.cvId && prepared.coverLetterId)
+    && emailFitAllowed(prepared.package?.strategy)
+    && emailPackageBlockers(prepared.package?.warnings ?? []).length === 0;
+  if (!eligible) {
+    logInfo("application.not_queued", { applicationId, status: prepared.status, strategy: prepared.package?.strategy ?? null });
+    return;
+  }
+  const route = findApplicationEmail({
+    description: prepared.vacancy.description,
+    companyName: prepared.vacancy.companyName,
+    companyDomain: prepared.vacancy.companyDomain,
+    applicationUrl: prepared.vacancy.applicationUrl,
+    sourceUrl: prepared.vacancy.sourceUrl,
+  });
+  const useEmail = route.found && jobApplicationEmailEnabled();
+  try {
+    await queueJob({
+      id: useEmail ? `application-submit:${applicationId}` : `browser:${applicationId}`,
+      organizationId,
+      queue: useEmail ? "application-submit" : "application-browser",
+      name: useEmail ? "submit" : "run",
+      payload: { organizationId, applicationId },
+    });
+    logInfo("application.queued", { applicationId, route: useEmail ? "EMAIL" : "FORM" });
+  } catch {
+    // Ignore if job already queued (unique constraint)
   }
 }
 
@@ -282,23 +303,13 @@ export async function processApplicationSubmit(organizationId: string, applicati
     return;
   }
   
+  // Email is the employer's route when the posting names an application address.
+  const emailResult = await sendEmailApplication(applicationId);
+  logInfo("application.email_result", { applicationId, outcome: emailResult.outcome });
+  if (emailResult.outcome !== "NO_EMAIL_ROUTE" && emailResult.outcome !== "DISABLED") return;
+
+  // Otherwise the official form. A CAPTCHA is recorded as a blocker and is never solved here.
   await attachBrowserInspection(applicationId, { allowSubmit: true });
-  
-  const updated = await prisma.jobApplication.findUnique({ where: { id: applicationId } });
-  if (updated?.status === "RECOVERABLE_MANUAL_ACTION" && updated?.blockedReason?.includes("CAPTCHA")) {
-    try {
-      await queueJob({
-        id: `captcha-solve:${applicationId}`,
-        organizationId,
-        queue: "captcha-solver",
-        name: "solve",
-        payload: { applicationId },
-      });
-      logInfo("application.queued_for_captcha_solver", { applicationId });
-    } catch {
-      // Ignore if already queued
-    }
-  }
 }
 
 export async function processApplicationFollowUp(organizationId: string) {

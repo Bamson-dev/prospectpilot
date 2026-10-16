@@ -1,3 +1,9 @@
+export type EmailAttachment = {
+  fileName: string;
+  mimeType: string;
+  content: Buffer;
+};
+
 export type OutboundEmail = {
   to: string;
   from: string;
@@ -8,6 +14,9 @@ export type OutboundEmail = {
   replyTo?: string | null;
   // HTTPS endpoint for RFC 8058 one-click unsubscribe. Sent as List-Unsubscribe headers.
   listUnsubscribeUrl?: string | null;
+  attachments?: EmailAttachment[];
+  // Extra headers, for example X-ProspectPilot-Application.
+  headers?: Record<string, string>;
 };
 
 export type SendResult = {
@@ -45,7 +54,10 @@ export function sanitizeOutbound(message: OutboundEmail): OutboundEmail {
   if (listUnsubscribeUrl && !/^https:\/\/[^\s<>]+$/.test(listUnsubscribeUrl)) {
     throw new Error("The unsubscribe URL must be an HTTPS address.");
   }
-  return { ...message, to, from, subject, text, html, listUnsubscribeUrl };
+  const attachments = message.attachments ?? [];
+  const attachmentBytes = attachments.reduce((sum, item) => sum + item.content.length, 0);
+  if (attachments.length > 5 || attachmentBytes > 4 * 1024 * 1024) throw new Error("The attachments are too large.");
+  return { ...message, to, from, subject, text, html, listUnsubscribeUrl, attachments };
 }
 
 // Headers for RFC 8058 one-click unsubscribe. Returns an empty list when no URL is set.

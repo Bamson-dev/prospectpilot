@@ -118,6 +118,15 @@ export default async function ApplicationReviewPage({ params, searchParams }: { 
         <p className="text-sm text-muted">{salary(application.vacancy.salaryMin, application.vacancy.salaryMax, application.vacancy.salaryCurrency)}</p>
         <p className="mt-2 text-sm">Source {application.source}. <a className="text-tide" href={application.applicationUrl} target="_blank" rel="noreferrer">Open the employer application manually</a></p>
       </Panel>
+      {application.applyEmail || application.emailAttemptAt ? (
+        <Panel className="mb-3">
+          <h2 className="font-display text-2xl">Email application</h2>
+          <p className="mt-2 text-sm">Recipient {application.applyEmail ?? "None"}. Source {application.applyEmailSource ?? "None"}.</p>
+          <p className="text-sm">Subject {application.emailSubject ?? "None"}</p>
+          <p className="text-sm">Attempted {application.emailAttemptAt ? application.emailAttemptAt.toISOString() : "Not attempted"}. Sent {application.emailSentAt ? application.emailSentAt.toISOString() : "Not sent"}.</p>
+          <p className="text-sm">Gmail message ID {application.emailMessageId ?? "None"}. Status {application.status}. Attachments CV and cover letter PDF.</p>
+        </Panel>
+      ) : null}
       <Panel className="mb-3 border-l-4 border-l-tide">
         <h2 className="font-display text-2xl">Generation Engine</h2>
         <p className="mt-2 text-sm font-semibold">Assigned Career Lane: <span className="text-tide">{application.profile}</span></p>

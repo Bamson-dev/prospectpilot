@@ -3,6 +3,7 @@ import { logInfo } from "@/lib/logger";
 import { queueJob, recordActivity } from "@/lib/jobs";
 import { enqueue } from "@/lib/queues";
 import { applicationAutomationEnabled, applicationLiveSubmitEnabled, applicationMode, jobDiscoveryEnabled } from "@/lib/applications/config";
+import { explicitTargetRoles } from "@/lib/applications/job-queries";
 import { collectPublicVacancies } from "@/lib/applications/job-sources";
 import { isApplicationAccessible } from "@/lib/discovery/health";
 import { analysisJobDecision, emptySummary, prepareDiscoveredVacancies } from "@/lib/applications/job-pipeline";
@@ -81,8 +82,11 @@ export async function processJobDiscovery(organizationId: string, runId: string,
   
   const expandedQueries = new Set<string>();
 
+  const targetRoles = explicitTargetRoles(run.candidate.targetRoles);
   if (manualQuery) {
     expandedQueries.add(manualQuery);
+  } else if (targetRoles.length > 0) {
+    for (const role of targetRoles) expandedQueries.add(role);
   } else {
     const queries = new Set<string>();
     for (const profile of run.candidate.profiles) {

@@ -61,3 +61,20 @@ export function applicationTimeoutMs() {
   if (!Number.isFinite(value) || value < 5_000) return 120_000;
   return Math.min(Math.floor(value), 120_000);
 }
+
+// Job application emails have their own switch. OUTREACH_SEND_ENABLED only controls prospecting email.
+export function jobApplicationEmailEnabled() {
+  return process.env.JOB_APPLICATION_EMAIL_ENABLED === "true";
+}
+
+export function jobEmailDailyLimit() {
+  const value = Number(process.env.JOB_APPLICATION_EMAIL_DAILY_LIMIT ?? 25);
+  if (!Number.isFinite(value) || value < 1) return 25;
+  return Math.min(Math.floor(value), 100);
+}
+
+export function jobEmailPerEmployerWeeklyLimit() {
+  const value = Number(process.env.JOB_APPLICATION_EMAIL_EMPLOYER_WEEKLY_LIMIT ?? 3);
+  if (!Number.isFinite(value) || value < 1) return 3;
+  return Math.min(Math.floor(value), 10);
+}

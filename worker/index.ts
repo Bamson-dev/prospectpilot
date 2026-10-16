@@ -6,6 +6,7 @@ import { jobRetryDelayMs } from "@/lib/research/failure";
 import { applicationWorkerConcurrency, applicationBrowserConcurrency } from "@/lib/applications/config";
 import { getQueue, getRedis } from "@/lib/queues";
 import { analyzeVacancy } from "@/lib/applications/service";
+import { queueDueEmailApplications } from "@/lib/applications/email-apply";
 import { recoverStaleAutomationRuns, runApplicationAutomation } from "@/lib/applications/automation-service";
 import { processApplicationFollowUp, processApplicationPreparation, processApplicationSubmit, processJobDiscovery, processJobDiscoveryScheduler } from "@/worker/processors/job-applications";
 import { processCampaignDiscoveryScheduler, processDiscovery } from "@/worker/processors/discovery";
@@ -191,6 +192,7 @@ const applicationFollowUps = new Worker(
   "application-followup",
   async (job) => {
     if (job.name === "scan") {
+      await queueDueEmailApplications();
       const due = await prisma.applicationFollowUp.findMany({
         where: { status: "DRAFT", runAt: { lte: new Date() } },
         distinct: ["applicationId"],

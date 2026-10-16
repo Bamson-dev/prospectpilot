@@ -895,6 +895,12 @@ model JobApplication {
   failureReason    String?
   blockedReason    String?
   retryCount       Int                          @default(0)
+  applyEmail       String?
+  applyEmailSource String?
+  emailSubject     String?
+  emailAttemptAt   DateTime?
+  emailSentAt      DateTime?
+  emailMessageId   String?
   createdAt        DateTime                     @default(now())
   updatedAt        DateTime                     @updatedAt
   answers          ApplicationAnswer[]
@@ -914,6 +920,7 @@ model JobApplication {
   @@unique([organizationId, vacancyId, candidateId])
   @@index([organizationId, status, createdAt])
   @@index([applicationUrl])
+  @@index([emailSentAt])
 }
 
 model ApplicationEvent {

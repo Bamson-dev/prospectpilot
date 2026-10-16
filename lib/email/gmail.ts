@@ -1,5 +1,6 @@
 import { AppError } from "@/lib/errors";
 import { classifyProviderFailure, isPermanentProviderFailure, providerFailureMessage } from "@/lib/provider-errors";
+import { buildMimeWithAttachments } from "@/lib/email/mime";
 import { listUnsubscribeHeaders, sanitizeOutbound, type EmailProvider, type OutboundEmail } from "@/lib/email/types";
 
 export class GmailProvider implements EmailProvider {
@@ -11,6 +12,9 @@ export class GmailProvider implements EmailProvider {
     const clean = sanitizeOutbound(message);
     const accessToken = await this.accessToken();
     const boundary = "boundary_" + Math.random().toString(36).substring(2);
+    if (clean.attachments && clean.attachments.length > 0) {
+      return this.sendRaw(accessToken, buildMimeWithAttachments(clean, boundary));
+    }
     const mime = [
       `From: ${clean.fromName ? `${clean.fromName} <${clean.from}>` : clean.from}`,
       `To: ${clean.to}`,
@@ -40,7 +44,11 @@ export class GmailProvider implements EmailProvider {
         clean.text
       );
     }
-    const raw = Buffer.from(mime.join("\r\n")).toString("base64url");
+    return this.sendRaw(accessToken, mime.join("\r\n"));
+  }
+
+  private async sendRaw(accessToken: string, message: string) {
+    const raw = Buffer.from(message).toString("base64url");
     const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
       method: "POST",
       signal: AbortSignal.timeout(20000),
@@ -60,6 +68,31 @@ export class GmailProvider implements EmailProvider {
     const payload = JSON.parse(body) as { id?: string };
     if (!payload.id) throw new AppError("Gmail accepted the message without an id.");
     return { providerMessageId: payload.id };
+  }
+
+  // True when Gmail reports the message in the SENT label. This is the delivery-side evidence that the send happened.
+  async confirmSent(id: string): Promise<boolean> {
+    const accessToken = await this.accessToken();
+    const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=minimal`, {
+      signal: AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) throw new AppError(`Gmail could not confirm the sent message (${response.status}).`);
+    const payload = (await response.json()) as { labelIds?: string[] };
+    return Array.isArray(payload.labelIds) && payload.labelIds.includes("SENT");
+  }
+
+  // Looks for a message already sent to this address with this subject since the given time.
+  async findSent(input: { to: string; subject: string; afterMs: number }): Promise<string | null> {
+    const accessToken = await this.accessToken();
+    const query = `in:sent to:${input.to} subject:"${input.subject.replace(/"/g, "")}" after:${Math.floor(input.afterMs / 1000)}`;
+    const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=3&q=${encodeURIComponent(query)}`, {
+      signal: AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) throw new AppError(`Gmail could not search sent mail (${response.status}).`);
+    const payload = (await response.json()) as { messages?: Array<{ id?: string }> };
+    return payload.messages?.[0]?.id ?? null;
   }
 
   async getMessage(id: string) {

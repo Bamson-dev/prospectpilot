@@ -6,6 +6,7 @@ import { GmailProvider } from "@/lib/email/gmail";
 import type { OutboundEmail } from "@/lib/email/types";
 import { jobApplicationEmailEnabled, jobEmailDailyLimit, jobEmailPerEmployerWeeklyLimit } from "@/lib/applications/config";
 import { applicationBody, applicationSubject, findApplicationEmail } from "@/lib/applications/email-route";
+import { titleMatchesTargetRoles } from "@/lib/applications/job-queries";
 import { classifyCandidateEmail } from "@/lib/applications/seed-data";
 import { safeAuditDetail } from "@/lib/applications/package-version";
 
@@ -26,8 +27,10 @@ export function emailPackageBlockers(warnings: readonly string[]) {
   return warnings.filter((warning) => /unsupported|readability|writing needs review|placeholder/i.test(warning));
 }
 
+// Only PREPARE is safe. The fit scorer returns REVIEW when a required skill is missing or a degree or
+// certification blocker exists, and MANUAL_REVIEW when work authorization or location is unknown.
 export function emailFitAllowed(strategy: string | null | undefined) {
-  return strategy === "PREPARE" || strategy === "REVIEW";
+  return strategy === "PREPARE";
 }
 
 async function defaultMailer(organizationId: string): Promise<{ mailer: ApplicationMailer; from: string; fromName: string | null } | null> {
@@ -77,6 +80,7 @@ export async function sendEmailApplication(applicationId: string, deps: { mailer
   };
 
   if (!emailFitAllowed(application.package?.strategy)) return block("The fit result does not allow an automatic application.");
+  if (!titleMatchesTargetRoles(application.vacancy.title, application.candidate.targetRoles)) return block("The vacancy title does not match the candidate's configured target roles.");
   const packageBlockers = emailPackageBlockers(application.package?.warnings ?? []);
   if (packageBlockers.length > 0) return block(`Package check failed: ${packageBlockers[0]}`);
   if (classifyCandidateEmail(application.candidate.email) !== "VALID_EMAIL") return block("The candidate email is missing or a placeholder.");

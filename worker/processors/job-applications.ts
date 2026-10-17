@@ -3,7 +3,7 @@ import { logInfo } from "@/lib/logger";
 import { queueJob, recordActivity } from "@/lib/jobs";
 import { enqueue } from "@/lib/queues";
 import { applicationAutomationEnabled, applicationLiveSubmitEnabled, applicationMode, jobApplicationEmailEnabled, jobDiscoveryEnabled } from "@/lib/applications/config";
-import { explicitTargetRoles } from "@/lib/applications/job-queries";
+import { explicitTargetRoles, titleMatchesTargetRoles } from "@/lib/applications/job-queries";
 import { emailFitAllowed, emailPackageBlockers, sendEmailApplication } from "@/lib/applications/email-apply";
 import { findApplicationEmail } from "@/lib/applications/email-route";
 import { collectPublicVacancies } from "@/lib/applications/job-sources";
@@ -256,12 +256,13 @@ export async function processApplicationPreparation(organizationId: string, vaca
   
   const prepared = await prisma.jobApplication.findFirst({
     where: { id: applicationId, organizationId },
-    include: { package: true, vacancy: true },
+    include: { package: true, vacancy: true, candidate: { select: { targetRoles: true } } },
   });
   if (!prepared) return;
   const eligible = prepared.status !== "FAILED"
     && Boolean(prepared.cvId && prepared.coverLetterId)
     && emailFitAllowed(prepared.package?.strategy)
+    && titleMatchesTargetRoles(prepared.vacancy.title, prepared.candidate.targetRoles)
     && emailPackageBlockers(prepared.package?.warnings ?? []).length === 0;
   if (!eligible) {
     logInfo("application.not_queued", { applicationId, status: prepared.status, strategy: prepared.package?.strategy ?? null });

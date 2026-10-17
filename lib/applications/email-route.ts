@@ -1,5 +1,5 @@
 // Finds the employer's application email address in a vacancy posting.
-// An address counts only when the posting itself designates it for applications.
+// An address counts only when the sentence that holds it tells candidates to apply there.
 // Nothing here guesses or scrapes addresses from other pages.
 
 export type EmailRoute =
@@ -8,12 +8,22 @@ export type EmailRoute =
 
 const EMAIL = /[a-z0-9][a-z0-9._%+-]*@[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi;
 const NOT_A_MAILBOX_SUFFIX = /\.(png|jpe?g|gif|svg|webp|js|css|ico|pdf|html?)$/i;
-const BLOCKED_LOCAL = /^(no-?reply|do-?not-?reply|donotreply|noreply|mailer-daemon|postmaster|abuse|privacy|dpo|legal|security|unsubscribe|support|help|press|media|billing|sales|marketing|webmaster|admin|root|spam|compliance|gdpr|notifications?)$/i;
+
+// Mailboxes that never receive applications. Matched anywhere in the local part so that
+// "accessibility", "accommodations", "verification-team" and "fraud.report" are all refused.
+const BLOCKED_LOCAL_PART = /(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|abuse|privacy|dpo|dataprotection|datarequest|gdpr|legal|security|unsubscribe|support|helpdesk|press|billing|sales|marketing|webmaster|spam|compliance|notification|accommodat|accessib|adjustment|disabilit|verif|fraud|scam|phish|complain|whistle|safeguard|ethics)/i;
+const BLOCKED_LOCAL_EXACT = new Set(["admin", "root", "help", "media", "info", "contact", "hello", "enquiries", "enquiry", "inquiries", "inquiry", "office", "team"]);
 const BLOCKED_DOMAIN = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|smartrecruiters\.com|linkedin\.com|indeed\.com|glassdoor\.com|monster\.com|ziprecruiter\.com|example\.(com|org|net)|sentry\.io|w3\.org|schema\.org|wixpress\.com|facebook\.com|twitter\.com|x\.com)$/i;
-const FREE_MAIL = /^(gmail|googlemail|yahoo|ymail|outlook|hotmail|live|aol|icloud|proton|protonmail|gmx|zoho|mail)\./i;
 const ATS_HOST = /(greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|smartrecruiters\.com|linkedin\.com|indeed\.com)$/i;
-const INSTRUCTION = /\b(apply|applications?|applicants?|send|submit|forward|e-?mail|mail|cv|resume|résumé|curriculum vitae|cover letter|recruit(?:ment|er|ing)?|hiring|careers?|interested candidates?)\b/i;
-const STRONG_INSTRUCTION = /\b(send|submit|forward|e-?mail|mail|apply)\b[^.\n]{0,120}$/i;
+
+// A sentence about any of these is not about applying, even when it also says "email" or "apply".
+const BLOCKED_CONTEXT = /\b(accommodations?|accommodate|accessibility|accessible|reasonable adjustments?|disabilit(?:y|ies)|verif(?:y|ication|ied)|fraud(?:ulent)?|scams?|phishing|suspicious|privacy|data protection|data subject|gdpr|complaints?|whistle-?blow\w*|unsubscribe|press enquir\w*|media enquir\w*|customer support|technical support|questions?|queries|enquir\w*|inquir\w*|report (?:a|any|this))\b/i;
+
+// The sentence itself names the application act.
+const APPLY_SENTENCE = /\b(apply|applying|applications?)\b/i;
+// A send verb, then a candidate document, then the address.
+const SEND_DOCUMENT_BEFORE = /\b(send|submit|forward|e-?mail|mail|attach)\b.{0,100}\b(cv|resume|résumé|curriculum vitae|cover letter)\b/i;
+const DOCUMENT_THEN_TO = /\b(cv|resume|résumé|curriculum vitae|cover letter)\b[^@]{0,60}\b(to|at)\s*[:\-]?\s*$/i;
 
 function normalizeDomain(value: string | null | undefined) {
   if (!value) return null;
@@ -25,6 +35,27 @@ function companyTokens(name: string) {
   return name.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length >= 4 && !["limited", "company", "group", "solutions", "services", "global", "international"].includes(token));
 }
 
+export function isBlockedApplicationMailbox(email: string) {
+  const [local, domain] = email.toLowerCase().split("@");
+  if (!local || !domain) return true;
+  if (BLOCKED_LOCAL_EXACT.has(local)) return true;
+  if (BLOCKED_LOCAL_PART.test(local)) return true;
+  return BLOCKED_DOMAIN.test(domain) || NOT_A_MAILBOX_SUFFIX.test(domain);
+}
+
+function sentencesOf(description: string) {
+  const sentences: string[] = [];
+  for (const line of description.split(/\r?\n+/)) {
+    const clean = line.replace(/\s+/g, " ").trim();
+    if (!clean) continue;
+    for (const part of clean.split(/(?<=[.!?])\s+(?=[A-Z0-9])/)) {
+      const sentence = part.trim();
+      if (sentence) sentences.push(sentence);
+    }
+  }
+  return sentences;
+}
+
 export function findApplicationEmail(input: {
   description: string;
   companyName: string;
@@ -32,7 +63,6 @@ export function findApplicationEmail(input: {
   applicationUrl?: string | null;
   sourceUrl?: string | null;
 }): EmailRoute {
-  const text = input.description.replace(/\s+/g, " ");
   const employerDomains = new Set<string>();
   const known = normalizeDomain(input.companyDomain);
   if (known) employerDomains.add(known);
@@ -47,23 +77,27 @@ export function findApplicationEmail(input: {
   const tokens = companyTokens(input.companyName);
 
   const accepted = new Map<string, { ownership: "EMPLOYER_DOMAIN" | "POSTING_DESIGNATED"; excerpt: string }>();
-  for (const match of text.matchAll(EMAIL)) {
-    const email = match[0].toLowerCase().replace(/[.,;:]+$/, "");
-    const [local, domain] = email.split("@");
-    if (!local || !domain || NOT_A_MAILBOX_SUFFIX.test(domain)) continue;
-    if (BLOCKED_LOCAL.test(local) || BLOCKED_DOMAIN.test(domain)) continue;
-    const index = match.index ?? 0;
-    const before = text.slice(Math.max(0, index - 160), index);
-    const after = text.slice(index + email.length, index + email.length + 100);
-    const nearby = `${before} ${after}`;
-    if (!INSTRUCTION.test(nearby)) continue;
-    const designated = STRONG_INSTRUCTION.test(before) || /\b(apply|applications?)\b/i.test(after);
-    const domainMatchesEmployer = [...employerDomains].some((employer) => domain === employer || domain.endsWith(`.${employer}`) || employer.endsWith(`.${domain}`))
-      || tokens.some((token) => domain.split(".").slice(0, -1).join(".").includes(token));
-    if (FREE_MAIL.test(domain) && !designated) continue;
-    if (!domainMatchesEmployer && !designated) continue;
-    if (!accepted.has(email)) {
-      accepted.set(email, { ownership: domainMatchesEmployer ? "EMPLOYER_DOMAIN" : "POSTING_DESIGNATED", excerpt: nearby.trim().slice(0, 220) });
+  const sentences = sentencesOf(input.description);
+  for (const sentence of sentences) {
+    for (const match of sentence.matchAll(EMAIL)) {
+      const email = match[0].toLowerCase().replace(/[.,;:]+$/, "");
+      const [local, domain] = email.split("@");
+      if (!local || !domain) continue;
+      if (isBlockedApplicationMailbox(email)) continue;
+
+      // The sentence that holds the address decides. A neighbouring sentence cannot designate or clear it.
+      if (BLOCKED_CONTEXT.test(sentence)) continue;
+
+      const index = match.index ?? 0;
+      const before = sentence.slice(0, index);
+      const designated = APPLY_SENTENCE.test(sentence) || SEND_DOCUMENT_BEFORE.test(before) || DOCUMENT_THEN_TO.test(before);
+      if (!designated) continue;
+
+      const domainMatchesEmployer = [...employerDomains].some((employer) => domain === employer || domain.endsWith(`.${employer}`) || employer.endsWith(`.${domain}`))
+        || tokens.some((token) => domain.split(".").slice(0, -1).join(".").includes(token));
+      if (!accepted.has(email)) {
+        accepted.set(email, { ownership: domainMatchesEmployer ? "EMPLOYER_DOMAIN" : "POSTING_DESIGNATED", excerpt: sentence.slice(0, 220) });
+      }
     }
   }
   if (accepted.size === 0) return { found: false, reason: "The posting does not name an application email address." };

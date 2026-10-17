@@ -22,3 +22,18 @@ export function titleMatchesQuery(title: string, query: string): boolean {
   const lower = title.toLowerCase();
   return needed.every((token) => lower.includes(token));
 }
+
+// Used before an application email goes out. The vacancy title must match a role the candidate configured.
+// No configured roles means nothing matches. Short roles such as "cto" match whole words only.
+export function titleMatchesTargetRoles(title: string, roles: readonly string[] | null | undefined): boolean {
+  const wanted = explicitTargetRoles(roles);
+  if (wanted.length === 0) return false;
+  const lower = title.toLowerCase();
+  return wanted.some((role) => {
+    const tokens = role.split(/[^a-z0-9+#]+/).filter((token) => token.length >= 2);
+    const subject = tokens.filter((token) => !GENERIC_WORDS.has(token));
+    const needed = subject.length > 0 ? subject : tokens;
+    if (needed.length === 0) return false;
+    return needed.every((token) => (token.length <= 3 ? new RegExp(`(^|[^a-z0-9])${token.replace(/[+#]/g, "\\$&")}([^a-z0-9]|$)`).test(lower) : lower.includes(token)));
+  });
+}

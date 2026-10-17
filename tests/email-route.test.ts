@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applicationBody, applicationSubject, findApplicationEmail } from "@/lib/applications/email-route";
+import { applicationBody, applicationSubject, findApplicationEmail, isBlockedApplicationMailbox } from "@/lib/applications/email-route";
 
 const base = { companyName: "Northwind Digital", companyDomain: "northwind.io" };
 
@@ -35,6 +35,68 @@ describe("findApplicationEmail", () => {
   it("refuses when two unrelated addresses are named", () => {
     const route = findApplicationEmail({ ...base, description: "Send your CV to a@firm-one.com or send your CV to b@firm-two.com to apply." });
     expect(route.found).toBe(false);
+  });
+});
+
+describe("recipient safety", () => {
+  const refused = [
+    "accessibility@northwind.io",
+    "accommodations@northwind.io",
+    "accommodation.requests@northwind.io",
+    "reasonable-adjustments@northwind.io",
+    "verification@northwind.io",
+    "verify.candidates@northwind.io",
+    "fraud@northwind.io",
+    "report-scam@northwind.io",
+    "privacy@northwind.io",
+    "dataprotection@northwind.io",
+    "dpo@northwind.io",
+    "info@northwind.io",
+    "hello@northwind.io",
+  ];
+  for (const address of refused) {
+    it(`refuses ${address} even when the posting says apply`, () => {
+      expect(isBlockedApplicationMailbox(address)).toBe(true);
+      expect(findApplicationEmail({ ...base, description: `To apply, send your CV to ${address}.` }).found).toBe(false);
+    });
+  }
+
+  it("refuses an accommodation address placed in the same sentence as apply", () => {
+    const text = "If you need accommodation during the application process, email people-access@northwind.io.";
+    expect(findApplicationEmail({ ...base, description: text }).found).toBe(false);
+  });
+
+  it("refuses an address in a questions or verification sentence", () => {
+    expect(findApplicationEmail({ ...base, description: "Questions about the application? Email hr@northwind.io." }).found).toBe(false);
+    expect(findApplicationEmail({ ...base, description: "To verify this vacancy is real, email hr@northwind.io." }).found).toBe(false);
+  });
+
+  it("refuses a loose mention of email without an application instruction", () => {
+    expect(findApplicationEmail({ ...base, description: "Email us at hr@northwind.io about anything. We are a friendly team." }).found).toBe(false);
+  });
+
+  it("accepts the address in the sentence that tells candidates to apply", () => {
+    const text = "Accessibility: we support reasonable adjustments.\nTo apply, email your CV to careers@northwind.io.";
+    const route = findApplicationEmail({ ...base, description: text });
+    expect(route.found).toBe(true);
+    if (route.found) expect(route.email).toBe("careers@northwind.io");
+  });
+
+  it("accepts a send-your-CV instruction without the word apply", () => {
+    const route = findApplicationEmail({ ...base, description: "Please send your CV and cover letter to hiring@northwind.io." });
+    expect(route.found).toBe(true);
+  });
+
+  it("accepts a designated address on a free mail domain", () => {
+    const route = findApplicationEmail({ ...base, description: "Interested candidates should apply by sending a CV to bright.hr.recruit@gmail.com" });
+    expect(route.found).toBe(true);
+  });
+
+  it("does not let a safe address in one sentence hide a refused one in another", () => {
+    const text = "Send your CV to careers@northwind.io. Report fraud to fraud@northwind.io.";
+    const route = findApplicationEmail({ ...base, description: text });
+    expect(route.found).toBe(true);
+    if (route.found) expect(route.email).toBe("careers@northwind.io");
   });
 });
 

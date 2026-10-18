@@ -45,3 +45,18 @@ describe("runGmailSendCheck", () => {
     expect(m.sendEmail).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("failure detail", () => {
+  it("passes Google's status and reason through to the check result", async () => {
+    const error = Object.assign(new Error("The email provider rejected the message."), { providerDetail: "HTTP 400 invalidArgument: Invalid To header" });
+    const result = await runGmailSendCheck(mailer({ sendEmail: vi.fn(async () => { throw error; }) }), account);
+    expect(result).toMatchObject({ ok: false, step: "send" });
+    if (!result.ok) expect(result.detail).toContain("HTTP 400 invalidArgument");
+  });
+
+  it("builds a safe detail from a Google error body", async () => {
+    const { safeProviderDetail } = await import("@/lib/email/gmail");
+    expect(safeProviderDetail(400, JSON.stringify({ error: { status: "INVALID_ARGUMENT", message: "Invalid To header", errors: [{ reason: "invalidArgument" }] } }))).toBe("HTTP 400 invalidArgument: Invalid To header");
+    expect(safeProviderDetail(502, "<html>bad gateway</html>")).toBe("HTTP 502");
+  });
+});

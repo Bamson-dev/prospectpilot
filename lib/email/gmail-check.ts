@@ -31,7 +31,9 @@ export async function runGmailSendCheck(
     });
     messageId = sent.providerMessageId;
   } catch (error) {
-    return { ok: false, step: "send", detail: error instanceof Error ? error.message : "Gmail refused the send." };
+    const extra = (error as { providerDetail?: string }).providerDetail;
+    const base = error instanceof Error ? error.message : "Gmail refused the send.";
+    return { ok: false, step: "send", detail: extra ? `${base} ${extra}` : base };
   }
   try {
     if (!(await mailer.confirmSent(messageId))) return { ok: false, step: "labelled_sent", detail: "Gmail accepted the message but did not label it SENT." };

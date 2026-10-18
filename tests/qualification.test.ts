@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { selectEvidence } from "@/lib/applications/evidence-selection";
-import { assessVacancy, explainQualification } from "@/lib/applications/job-pipeline";
+// These tests exercise the fit engine on its own. The marketing scope has its own tests in marketing-scope*.test.ts.
+import { assessFit as assessVacancy, explainQualification } from "@/lib/applications/job-pipeline";
 import { extractRequirements } from "@/lib/applications/requirements";
 import { seedCandidateRecord } from "@/lib/applications/seed-data";
 import { canonicalTechnology, sameTechnology } from "@/lib/applications/technologies";

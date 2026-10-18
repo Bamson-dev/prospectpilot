@@ -17,6 +17,9 @@ import { sourceValidity } from "@/lib/applications/source-validity";
 import { preparationDecision } from "@/lib/applications/package-version";
 import { checksum } from "@/lib/applications/documents";
 import type { ApplicationStatus } from "@/lib/applications/types";
+import { classifyMarketingRole, isMarketingQuery } from "@/lib/applications/marketing-scope";
+import { auditMarketingScope } from "@/lib/applications/scope-enforce";
+import { recordActivity } from "@/lib/jobs";
 
 export async function saveCandidateProfile(formData: FormData) {
   const { organization } = await requireOrganization("MEMBER");
@@ -188,6 +191,7 @@ export async function enqueueJobSearch(formData: FormData) {
   if (!jobDiscoveryEnabled()) redirect("/jobs/discover?error=Job+discovery+is+disabled.");
   const query = String(formData.get("query") ?? "").trim().slice(0, 180);
   if (query.length < 3) redirect("/jobs/discover?error=Enter+a+search.");
+  if (!isMarketingQuery(query)) redirect("/jobs/discover?error=ProspectPilot+searches+marketing+roles+only.+Enter+a+marketing+job+title.");
   const candidate = await ensureCandidate(organization.id);
   const active = await prisma.backgroundJob.findMany({
     where: { organizationId: organization.id, queue: "job-discovery", state: { in: ["QUEUED", "ACTIVE"] } },
@@ -235,9 +239,12 @@ export async function enqueueApplicationPreparation(formData: FormData) {
   const vacancyId = String(formData.get("vacancyId") ?? "");
   const vacancy = await prisma.jobVacancy.findFirst({
     where: { id: vacancyId, organizationId: organization.id },
-    select: { id: true, title: true, applicationUrl: true, source: true, status: true },
+    select: { id: true, title: true, description: true, applicationUrl: true, source: true, status: true },
   });
   if (!vacancy) redirect("/jobs?error=Vacancy+not+found.");
+  if (!classifyMarketingRole({ title: vacancy.title, description: vacancy.description }).inScope) {
+    redirect("/jobs?error=That+vacancy+is+not+a+marketing+role.+ProspectPilot+applies+to+marketing+roles+only.");
+  }
   if (vacancy.status === "ARCHIVED" || sourceValidity({ title: vacancy.title, url: vacancy.applicationUrl, source: vacancy.source }) === "INVALID_SOURCE") {
     redirect("/jobs?error=That+page+is+not+a+vacancy.");
   }
@@ -271,6 +278,9 @@ export async function addReviewToQueue(formData: FormData) {
   const decision = storedFitDecision(vacancy.fit?.analysis);
   if (sourceValidity({ title: vacancy.title, url: vacancy.applicationUrl, source: vacancy.source }) === "INVALID_SOURCE") {
     redirect("/jobs/applications/queue?error=That+page+is+not+a+vacancy.");
+  }
+  if (!classifyMarketingRole({ title: vacancy.title, description: vacancy.description }).inScope) {
+    redirect("/jobs/applications/queue?error=That+vacancy+is+not+a+marketing+role+and+cannot+enter+the+queue.");
   }
   if (decision === "NOT_A_FIT") redirect("/jobs/applications/queue?error=A+not-a-fit+vacancy+cannot+enter+the+queue.");
   if (decision === "APPLY") redirect("/jobs/applications/queue?notice=Apply+vacancies+are+already+in+the+queue.");
@@ -307,6 +317,7 @@ export async function enqueueApplicationBatch(formData: FormData) {
     const decision = storedFitDecision(vacancy.fit?.analysis);
     const manuallyQueued = vacancy.applications.some((application) => application.blockedReason === MANUAL_QUEUE_REASON);
     if (sourceValidity({ title: vacancy.title, url: vacancy.applicationUrl, source: vacancy.source }) === "INVALID_SOURCE") return [];
+    if (!classifyMarketingRole({ title: vacancy.title, description: vacancy.description }).inScope) return [];
     return queueAdmission({ decision, manuallyQueued }) === "excluded" ? [] : [vacancy.id];
   }));
   const selected = selectBulkPrepare(requested, eligible);
@@ -690,4 +701,19 @@ export async function resumeBlockedApplication(formData: FormData) {
   });
 
   redirect(`/jobs/applications/${id}?notice=Application+recovery+started.+Check+the+browser+window.`);
+}
+
+// Owner action. Re-evaluates every saved vacancy against the marketing scope. Preview counts only. Apply marks
+// out-of-scope vacancies REJECTED, withdraws their unsent applications and cancels their pending work. Nothing is deleted.
+export async function runMarketingScopeAudit(formData: FormData) {
+  const { organization } = await requireOrganization("ADMIN");
+  const apply = String(formData.get("mode") ?? "") === "apply";
+  const result = await auditMarketingScope(organization.id, { apply });
+  await recordActivity({
+    organizationId: organization.id,
+    action: apply ? "jobs.marketing_scope_applied" : "jobs.marketing_scope_preview",
+    detail: JSON.stringify(result).slice(0, 1900),
+  });
+  const notice = `${apply ? "Applied" : "Preview"}: ${result.vacancies} vacancies, ${result.inScope} marketing, ${result.outOfScope} excluded, ${result.applicationsExcluded} unsent applications ${apply ? "withdrawn" : "would be withdrawn"}.`;
+  redirect(`/jobs?notice=${encodeURIComponent(notice)}`);
 }

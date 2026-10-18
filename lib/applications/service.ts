@@ -25,6 +25,8 @@ import { normalizeVacancy, type NormalizedVacancy } from "@/lib/applications/job
 import type { DiscoveredJob } from "@/lib/applications/providers";
 import { cvGenerationEnabled, coverLetterGenerationEnabled } from "@/lib/applications/config";
 import { queueJob } from "@/lib/jobs";
+import { classifyMarketingRole, marketingBlockedReason, withTimestamp } from "@/lib/applications/marketing-scope";
+import { excludeVacancy, mergeMarketingVerdict } from "@/lib/applications/scope-enforce";
 
 export async function ensureCandidate(organizationId: string) {
   const seed = seedCandidateRecord();
@@ -216,19 +218,23 @@ export async function storeDiscoveredJobs(organizationId: string, jobs: Discover
 export async function persistNormalizedVacancies(organizationId: string, jobs: NormalizedVacancy[]) {
   const ids: string[] = [];
   const duplicateReasons: string[] = [];
+  const outOfScopeTitles: string[] = [];
   const existing = await prisma.jobVacancy.findMany({
     where: { organizationId },
     select: { id: true, companyName: true, title: true, applicationUrl: true, sourceUrl: true, location: true, externalId: true, status: true },
     orderBy: { createdAt: "desc" },
     take: 500,
   });
-  for (const job of jobs) {
+  for (const rawJob of jobs) {
+    // The marketing check runs here too, so no source or entry point can save an unrelated role as a candidate for qualification.
+    const marketing = rawJob.marketing ?? withTimestamp(classifyMarketingRole({ title: rawJob.title, description: rawJob.description }));
+    const job = { ...rawJob, marketing };
     const match = existing.find((row) => duplicateDecision(row, job).merge);
     if (match) {
       duplicateReasons.push(duplicateDecision(match, job).reason ?? "duplicate");
       // Update freshness for discovered jobs
       const updateData: { lastCheckedAt: Date; status?: "DISCOVERED" } = { lastCheckedAt: new Date() };
-      if (match.status === "ARCHIVED") {
+      if (match.status === "ARCHIVED" && marketing.inScope) {
         updateData.status = "DISCOVERED"; // Reactivate the vacancy if it was previously archived
       }
       await prisma.jobVacancy.update({ where: { id: match.id }, data: updateData }).catch(() => {});
@@ -255,17 +261,20 @@ export async function persistNormalizedVacancies(organizationId: string, jobs: N
           salaryCurrency: job.salaryCurrency,
           description: job.description,
           postedAt: job.postedAt ? new Date(job.postedAt) : null,
-          status: "DISCOVERED",
+          // An out-of-scope role is kept as a REJECTED record with its reason. It is never queued.
+          status: marketing.inScope ? "DISCOVERED" : "REJECTED",
           rawData: {
             originalSourceUrl: job.originalSourceUrl,
             originalApplicationUrl: job.originalApplicationUrl,
             originalDescription: job.originalDescription,
             technologies: job.technologies,
+            marketing,
           },
         },
       });
-      ids.push(created.id);
-      existing.push({ ...job, id: created.id, sourceUrl: job.originalSourceUrl, status: "DISCOVERED" });
+      if (marketing.inScope) ids.push(created.id);
+      else outOfScopeTitles.push(job.title);
+      existing.push({ ...job, id: created.id, sourceUrl: job.originalSourceUrl, status: marketing.inScope ? "DISCOVERED" : "REJECTED" });
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
         duplicateReasons.push("canonical application URL");
@@ -274,7 +283,7 @@ export async function persistNormalizedVacancies(organizationId: string, jobs: N
       throw error;
     }
   }
-  return { ids, duplicateReasons };
+  return { ids, duplicateReasons, outOfScopeTitles };
 }
 
 export async function analyzeVacancy(organizationId: string, vacancyId: string) {
@@ -302,9 +311,14 @@ export async function analyzeVacancy(organizationId: string, vacancyId: string) 
     update: fitData(candidateRow.id, assessed.fit, assessed.explanation),
     create: { vacancyId, ...fitData(candidateRow.id, assessed.fit, assessed.explanation) },
   });
+  if (!assessed.marketing.inScope) {
+    // Not a marketing role. Keep the record, store the reason, cancel any queued work and prepare nothing.
+    await excludeVacancy(organizationId, vacancy, assessed.marketing);
+    return assessed;
+  }
   await prisma.jobVacancy.update({
     where: { id: vacancyId },
-    data: { status: assessed.state === "APPLY" ? "QUALIFIED" : "ANALYZED" },
+    data: { status: assessed.state === "APPLY" ? "QUALIFIED" : "ANALYZED", rawData: mergeMarketingVerdict(vacancy.rawData, assessed.marketing) },
   });
   
   if (assessed.state === "APPLY") {
@@ -329,6 +343,12 @@ export async function prepareApplication(organizationId: string, vacancyId: stri
   const started = Date.now();
   const vacancy = await prisma.jobVacancy.findFirst({ where: { id: vacancyId, organizationId } });
   if (!vacancy) throw new AppError("Vacancy not found.");
+  // Marketing only. No package is created for any other role, whatever queued this work.
+  const marketingVerdict = withTimestamp(classifyMarketingRole({ title: vacancy.title, description: vacancy.description }));
+  if (!marketingVerdict.inScope) {
+    await excludeVacancy(organizationId, vacancy, marketingVerdict);
+    throw new AppError(marketingBlockedReason(marketingVerdict));
+  }
   const candidateRow = await ensureCandidate(organizationId);
 
   const previousApp = await prisma.jobApplication.findUnique({
@@ -528,7 +548,7 @@ export async function applicationStats(organizationId: string) {
   const since = new Date();
   since.setHours(0, 0, 0, 0);
   const [discovered, qualified, prepared, submitted, verified, failed, blocked, manual, cvs] = await Promise.all([
-    prisma.jobVacancy.count({ where: { organizationId, createdAt: { gte: since } } }),
+    prisma.jobVacancy.count({ where: { organizationId, createdAt: { gte: since }, status: { not: "REJECTED" } } }),
     prisma.jobVacancy.count({ where: { organizationId, status: "QUALIFIED", createdAt: { gte: since } } }),
     prisma.jobApplication.count({ where: { organizationId, createdAt: { gte: since } } }),
     prisma.jobApplication.count({ where: { organizationId, status: "SUBMITTED", submittedAt: { gte: since } } }),

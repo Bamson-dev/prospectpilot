@@ -134,11 +134,11 @@ describe("source validity", () => {
         sourceUrl: "https://boards.greenhouse.io/gitlab/jobs/8815140002",
         applicationUrl: "https://boards.greenhouse.io/gitlab/jobs/8815140002",
         companyName: "GitLab",
-        title: "Staff Product Security Architect",
-        description: posting,
+        title: "Product Marketing Manager",
+        description: "Own product positioning and messaging, launch plans, competitive intelligence and go-to-market campaigns for each release.",
       },
     ], "product");
     expect(prepared.invalidSources).toEqual(["Now Hiring: 18,000 Product Manager Jobs | Indeed"]);
-    expect(prepared.kept.map((job) => job.title)).toEqual(["Staff Product Security Architect"]);
+    expect(prepared.kept.map((job) => job.title)).toEqual(["Product Marketing Manager"]);
   });
 });

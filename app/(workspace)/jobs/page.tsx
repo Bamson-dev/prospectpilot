@@ -1,4 +1,4 @@
-import { enqueueApplicationPreparation } from "@/actions/job-applications";
+import { enqueueApplicationPreparation, runMarketingScopeAudit } from "@/actions/job-applications";
 import { JobsNav } from "@/components/jobs-nav";
 import { Empty, Flash, PageHeader, Panel, Pill } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -14,7 +14,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   const query = await searchParams;
   const [stats, jobs, applications] = await Promise.all([
     applicationStats(organization.id),
-    prisma.jobVacancy.findMany({ where: { organizationId: organization.id, status: { notIn: ["ARCHIVED", "DUPLICATE"] } }, orderBy: { createdAt: "desc" }, take: 8, include: { fit: true, applications: { select: { id: true, status: true } } } }),
+    prisma.jobVacancy.findMany({ where: { organizationId: organization.id, status: { notIn: ["ARCHIVED", "DUPLICATE", "REJECTED"] } }, orderBy: { createdAt: "desc" }, take: 8, include: { fit: true, applications: { select: { id: true, status: true } } } }),
     prisma.jobApplication.findMany({ where: { organizationId: organization.id }, orderBy: { createdAt: "desc" }, take: 8, include: { vacancy: true } }),
   ]);
   const target = applicationDailyTarget();
@@ -33,6 +33,14 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
         <Panel><p className="text-sm text-muted">Verified today</p><p className="font-display text-3xl">{stats.verified}</p></Panel>
         <Panel><p className="text-sm text-muted">Failed / blocked / manual</p><p className="font-display text-3xl">{stats.failed} / {stats.blocked} / {stats.manual}</p></Panel>
       </div>
+      <Panel className="mb-4">
+        <h2 className="font-display text-2xl">Marketing scope</h2>
+        <p className="mt-2 text-sm text-muted">ProspectPilot searches for and applies to marketing roles only. Preview counts the saved vacancies that are outside that scope. Apply marks them excluded and withdraws their unsent applications. Nothing is deleted and nothing is sent.</p>
+        <div className="mt-3 flex gap-2">
+          <form action={runMarketingScopeAudit}><input type="hidden" name="mode" value="preview" /><SubmitButton pendingLabel="Checking">Preview scope audit</SubmitButton></form>
+          <form action={runMarketingScopeAudit}><input type="hidden" name="mode" value="apply" /><SubmitButton pendingLabel="Applying">Apply scope audit</SubmitButton></form>
+        </div>
+      </Panel>
       <Panel className="mb-4">
         <h2 className="font-display text-2xl">Throughput</h2>
         <p className="mt-2 text-sm text-muted">The target is {target} application attempts in a day. That number has not been benchmarked. CPU, memory, Redis latency, PostgreSQL latency, and per-hour rates are not measured here. Submitted today is {stats.submitted}.</p>

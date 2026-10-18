@@ -49,7 +49,7 @@ export function claimAfterIndependentHeartbeats(input: {
   });
 }
 
-const PERMANENT_JOB_ERROR = /not configured|stopped|blocked|denied|private network|not a public|quota|rate limit|limit has been reached|turned off|policy|restricted|credentials|did not return|malformed|no company results|not approved/i;
+const PERMANENT_JOB_ERROR = /not configured|stopped|blocked|denied|private network|not a public|quota|rate limit|limit has been reached|turned off|policy|restricted|credentials|did not return|malformed|no company results|not approved|not a marketing role/i;
 
 export function isPermanentJobError(message: string) {
   return PERMANENT_JOB_ERROR.test(message);

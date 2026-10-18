@@ -85,7 +85,7 @@ describe("sendEmailApplication safety", () => {
   });
 
   it("does not send when the title is outside the configured target roles", async () => {
-    db.application = application({ title: "Renewals Manager" });
+    db.application = application({ title: "Brand Marketing Manager", description: "Own brand strategy and positioning campaigns. To apply, email your CV and cover letter to careers@northwind.io." });
     const m = mailer();
     const result = await sendEmailApplication("app-1", { mailer: m, from: "x@y.co" });
     expect(result.outcome).toBe("BLOCKED");

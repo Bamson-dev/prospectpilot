@@ -1,5 +1,6 @@
 import { canonicalApplicationUrl, normalizeWorkMode } from "@/lib/applications/normalize";
 import { plainText, technologiesInText } from "@/lib/applications/requirements";
+import type { StoredMarketingVerdict } from "@/lib/applications/marketing-scope";
 
 export type RawDiscoveredVacancy = {
   source: string;
@@ -35,6 +36,8 @@ export type NormalizedVacancy = {
   salaryMax: number | null;
   salaryCurrency: string | null;
   postedAt: string | null;
+  // Set by the marketing scope check during discovery. Persisted with the vacancy.
+  marketing?: StoredMarketingVerdict;
 };
 
 export function normalizeVacancy(input: RawDiscoveredVacancy): NormalizedVacancy | null {

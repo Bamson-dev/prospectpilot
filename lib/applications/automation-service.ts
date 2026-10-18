@@ -16,6 +16,8 @@ import {
 import { safeAuditDetail } from "@/lib/applications/package-version";
 import { canTransition, statusAfterBlock } from "@/lib/applications/state";
 import type { ApplicationStatus } from "@/lib/applications/types";
+import { classifyMarketingRole } from "@/lib/applications/marketing-scope";
+import { excludeApplication } from "@/lib/applications/scope-enforce";
 
 export async function recordInspectionRun(input: {
   applicationId: string;
@@ -121,6 +123,12 @@ export async function runApplicationAutomation(applicationId: string) {
   });
   if (!application?.package) return { skipped: "missing" as const, packageVersion: application?.package?.version ?? null };
   const packageVersion = application.package.version;
+  // Marketing only. A form is never filled or submitted for any other role.
+  const scope = classifyMarketingRole({ title: application.vacancy.title, description: application.vacancy.description });
+  if (!scope.inScope) {
+    await excludeApplication(application.id, scope);
+    return { skipped: "held" as const, packageVersion };
+  }
   if (legacyAutomationHold(application.status as ApplicationStatus)) return { skipped: "held" as const, packageVersion };
   const now = Date.now();
   const active = await prisma.applicationAutomationRun.findFirst({

@@ -190,3 +190,25 @@ describe("vacancy title against configured target roles", () => {
     expect(titleMatchesTargetRoles("Growth Marketing Manager", ["  "])).toBe(false);
   });
 });
+
+describe("hourly requeue scan", () => {
+  it("does nothing unless live submission, automation, auto mode and the email switch are all on", async () => {
+    const { queueDueEmailApplications, emailApplicationsMayRun } = await import("@/lib/applications/email-apply");
+    const keys = ["JOB_APPLICATION_EMAIL_ENABLED", "APPLICATION_AUTOMATION_ENABLED", "APPLICATION_LIVE_SUBMIT", "APPLICATION_MODE"] as const;
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    try {
+      process.env.JOB_APPLICATION_EMAIL_ENABLED = "true";
+      process.env.APPLICATION_AUTOMATION_ENABLED = "true";
+      process.env.APPLICATION_MODE = "AUTO_SUBMIT";
+      process.env.APPLICATION_LIVE_SUBMIT = "false";
+      expect(emailApplicationsMayRun()).toBe(false);
+      expect(await queueDueEmailApplications()).toBe(0);
+      process.env.APPLICATION_LIVE_SUBMIT = "true";
+      expect(emailApplicationsMayRun()).toBe(true);
+      process.env.APPLICATION_MODE = "AUTO_PREPARE";
+      expect(emailApplicationsMayRun()).toBe(false);
+    } finally {
+      for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    }
+  });
+});

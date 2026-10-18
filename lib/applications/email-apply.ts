@@ -4,7 +4,7 @@ import { logInfo } from "@/lib/logger";
 import { queueJob } from "@/lib/jobs";
 import { GmailProvider } from "@/lib/email/gmail";
 import type { OutboundEmail } from "@/lib/email/types";
-import { jobApplicationEmailEnabled, jobEmailDailyLimit, jobEmailPerEmployerWeeklyLimit } from "@/lib/applications/config";
+import { applicationAutomationEnabled, applicationLiveSubmitEnabled, applicationMode, jobApplicationEmailEnabled, jobEmailDailyLimit, jobEmailPerEmployerWeeklyLimit } from "@/lib/applications/config";
 import { applicationBody, applicationSubject, findApplicationEmail } from "@/lib/applications/email-route";
 import { titleMatchesTargetRoles } from "@/lib/applications/job-queries";
 import { classifyCandidateEmail } from "@/lib/applications/seed-data";
@@ -183,8 +183,12 @@ export async function sendEmailApplication(applicationId: string, deps: { mailer
 }
 
 // Re-queues applications that were held back by a limit. Runs from the existing hourly application scan.
+export function emailApplicationsMayRun() {
+  return jobApplicationEmailEnabled() && applicationAutomationEnabled() && applicationLiveSubmitEnabled() && applicationMode() === "AUTO_SUBMIT";
+}
+
 export async function queueDueEmailApplications(limit = 25) {
-  if (!jobApplicationEmailEnabled()) return 0;
+  if (!emailApplicationsMayRun()) return 0;
   const due = await prisma.jobApplication.findMany({
     where: { status: "READY_TO_SUBMIT", emailSentAt: null, applyEmail: { not: null } },
     orderBy: { createdAt: "asc" },

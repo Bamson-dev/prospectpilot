@@ -6,8 +6,10 @@ import { SignJWT } from "jose";
 import { PageHeader, Panel, Pill } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { disconnectGmail } from "@/actions/outreach";
+import { runGmailCheck } from "@/actions/gmail-check";
 
-export default async function GmailIntegrationPage() {
+export default async function GmailIntegrationPage({ searchParams }: { searchParams: Promise<{ check?: string; step?: string }> }) {
+  const { check, step } = await searchParams;
   const { organization } = await requireOrganization();
 
   const emailAccounts = await prisma.emailAccount.findMany({
@@ -84,6 +86,18 @@ export default async function GmailIntegrationPage() {
                   </span>
                 </div>
               </div>
+            </div>
+          )}
+          {isConnected && (
+            <div className="mt-4 p-4 rounded border border-line">
+              <h3 className="font-medium text-ink mb-2">Send check</h3>
+              <p className="text-xs mb-3">Sends one labelled test message to your own connected address and confirms it in Gmail Sent. No employer receives it.</p>
+              <form action={runGmailCheck}>
+                <SubmitButton pendingLabel="Checking...">Run send check</SubmitButton>
+              </form>
+              {check === "PASS" && <p className="mt-3 text-green-600 font-medium">Send check passed. Gmail sent the message and listed it in Sent.</p>}
+              {check === "FAIL" && <p className="mt-3 text-red-600 font-medium">Send check failed at step: {step ?? "unknown"}. See the activity log for detail.</p>}
+              {check === "NO_ACCOUNT" && <p className="mt-3 text-red-600 font-medium">No active Gmail account with a stored token.</p>}
             </div>
           )}
           <p className="font-medium text-wine mt-4">

@@ -296,7 +296,8 @@ export async function processApplicationSubmit(organizationId: string, applicati
   if (!applicationAutomationEnabled() || !applicationLiveSubmitEnabled() || applicationMode() !== "AUTO_SUBMIT") {
     await prisma.jobApplication.update({
       where: { id: application.id },
-      data: { status: "READY_FOR_REVIEW", blockedReason: "Automatic submission is disabled." },
+      // Stays READY_TO_SUBMIT so the hourly scan sends it once live submission is enabled. Nothing is sent while the flag is off.
+      data: { status: "READY_TO_SUBMIT", blockedReason: "Automatic submission is disabled." },
     });
     await prisma.applicationEvent.create({
       data: { applicationId: application.id, type: "MANUAL_ACTION_REQUIRED", detail: "Automatic submission is disabled." },

@@ -7,6 +7,8 @@ import type { OutboundEmail } from "@/lib/email/types";
 import { applicationAutomationEnabled, applicationLiveSubmitEnabled, applicationMode, jobApplicationEmailEnabled, jobEmailDailyLimit, jobEmailPerEmployerWeeklyLimit } from "@/lib/applications/config";
 import { applicationBody, applicationSubject, findApplicationEmail } from "@/lib/applications/email-route";
 import { titleMatchesTargetRoles } from "@/lib/applications/job-queries";
+import { classifyMarketingRole } from "@/lib/applications/marketing-scope";
+import { excludeApplication } from "@/lib/applications/scope-enforce";
 import { classifyCandidateEmail } from "@/lib/applications/seed-data";
 import { safeAuditDetail } from "@/lib/applications/package-version";
 
@@ -63,6 +65,12 @@ export async function sendEmailApplication(applicationId: string, deps: { mailer
   if (!application) return { outcome: "BLOCKED", detail: "Application not found." };
   if (application.emailSentAt || application.status === "SUBMITTED" || application.status === "VERIFIED" || application.status === "WITHDRAWN") {
     return { outcome: "ALREADY_SENT", detail: "This application already has a send record." };
+  }
+  // Marketing only. This check comes before any recipient lookup or send.
+  const scope = classifyMarketingRole({ title: application.vacancy.title, description: application.vacancy.description });
+  if (!scope.inScope) {
+    await excludeApplication(application.id, scope);
+    return { outcome: "BLOCKED", detail: `Not a marketing role. ${scope.reason}` };
   }
   const route = findApplicationEmail({
     description: application.vacancy.description,

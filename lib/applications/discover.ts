@@ -1,24 +1,18 @@
 import { searxngEnabled, searxngSearch, parseSearxngResults } from "@/lib/discovery/searxng";
 import { AppError } from "@/lib/errors";
+import { classifyMarketingRole } from "@/lib/applications/marketing-scope";
 import { parseJobPage, type DiscoveredJob } from "@/lib/applications/providers";
 
+// Marketing roles only.
 export const DISCOVERY_QUERIES = [
-  "Software Engineer",
-  "Full Stack Developer",
-  "Frontend Developer",
-  "Backend Developer",
-  "Web Developer",
-  "Web Designer",
-  "Product Engineer",
-  "SaaS Engineer",
-  "Technical Product Manager",
-  "Growth Engineer",
-  "Growth Marketer",
+  "Growth Marketing Manager",
   "Performance Marketing Manager",
   "Digital Marketing Manager",
-  "Marketing Manager",
-  "GTM Manager",
-  "Acquisition Manager",
+  "Demand Generation Manager",
+  "Product Marketing Manager",
+  "Marketing Operations Manager",
+  "Head of Marketing",
+  "Go-To-Market Manager",
 ];
 
 export async function searchPublicJobs(query: string): Promise<DiscoveredJob[]> {
@@ -26,5 +20,6 @@ export async function searchPublicJobs(query: string): Promise<DiscoveredJob[]> 
   const payload = await searxngSearch({ query, limit: 10, language: "en" });
   return parseSearxngResults(payload, query, 10)
     .map((hit) => parseJobPage({ url: hit.url, title: hit.title, text: `${hit.title}. ${hit.snippet}`.padEnd(40, ".") }))
-    .filter((job): job is DiscoveredJob => job !== null);
+    .filter((job): job is DiscoveredJob => job !== null)
+    .filter((job) => classifyMarketingRole({ title: job.title, description: job.description }).inScope);
 }

@@ -3,7 +3,9 @@ import { logInfo } from "@/lib/logger";
 import { queueJob, recordActivity } from "@/lib/jobs";
 import { enqueue } from "@/lib/queues";
 import { applicationAutomationEnabled, applicationLiveSubmitEnabled, applicationMode, jobApplicationEmailEnabled, jobDiscoveryEnabled } from "@/lib/applications/config";
-import { explicitTargetRoles, titleMatchesTargetRoles } from "@/lib/applications/job-queries";
+import { titleMatchesTargetRoles } from "@/lib/applications/job-queries";
+import { classifyMarketingRole, isMarketingQuery, marketingSearchQueries, withTimestamp } from "@/lib/applications/marketing-scope";
+import { excludeApplication, excludeVacancy } from "@/lib/applications/scope-enforce";
 import { emailFitAllowed, emailPackageBlockers, sendEmailApplication } from "@/lib/applications/email-apply";
 import { findApplicationEmail } from "@/lib/applications/email-route";
 import { collectPublicVacancies } from "@/lib/applications/job-sources";
@@ -79,47 +81,22 @@ export async function processJobDiscovery(organizationId: string, runId: string,
   });
 
   const pref = run.candidate.preference;
-  const locations = pref?.remoteOnly ? ["remote"] : (pref?.locations?.length ? pref.locations : ["remote", "hybrid", "New York", "London", "international", "global"]);
+  const locations = pref?.remoteOnly ? ["remote"] : (pref?.locations?.length ? pref.locations : ["Lagos", "Nigeria", "remote", "international"]);
   const dailyTarget = pref?.dailyTarget ?? 500;
   
   const expandedQueries = new Set<string>();
 
-  const targetRoles = explicitTargetRoles(run.candidate.targetRoles);
+  // Marketing only. Queries come from the candidate's saved marketing titles, or the approved marketing list.
+  // A manual query that is not a marketing title is refused.
   if (manualQuery) {
-    expandedQueries.add(manualQuery);
-  } else if (targetRoles.length > 0) {
-    for (const role of targetRoles) expandedQueries.add(role);
+    if (isMarketingQuery(manualQuery)) expandedQueries.add(manualQuery.toLowerCase().trim());
+    else logInfo("job_discovery.query_refused", { organizationId, query: manualQuery.slice(0, 80), reason: "not a marketing title" });
   } else {
-    const queries = new Set<string>();
-    for (const profile of run.candidate.profiles) {
-      const baseTitle = profile.title.toLowerCase().trim();
-      queries.add(baseTitle);
-      
-      if (baseTitle.includes("software") || baseTitle.includes("engineer") || baseTitle.includes("developer")) {
-        queries.add("software engineer");
-        queries.add("backend engineer");
-        queries.add("full stack engineer");
-        queries.add("product engineer");
-        queries.add("frontend engineer");
-      }
-      if (baseTitle.includes("product manager")) {
-        queries.add("product manager");
-        queries.add("senior product manager");
-        queries.add("technical product manager");
-      }
-      if (baseTitle.includes("marketing")) {
-        queries.add("growth marketing manager");
-        queries.add("performance marketing manager");
-        queries.add("product marketing manager");
-        queries.add("demand generation");
-      }
-      if (baseTitle.includes("founder")) {
-        queries.add("founder");
-        queries.add("technical product");
-        queries.add("strategy and operations");
-      }
-    }
-    for (const query of queries) expandedQueries.add(query);
+    for (const query of marketingSearchQueries(run.candidate.targetRoles)) expandedQueries.add(query);
+  }
+  if (expandedQueries.size === 0) {
+    await prisma.jobDiscoveryRun.update({ where: { id: run.id }, data: { status: "COMPLETED", completedAt: new Date(), queries: 0 } });
+    return emptySummary();
   }
 
   const limitPerQuery = manualLimit || Math.min(50, Math.ceil(dailyTarget / expandedQueries.size));
@@ -130,6 +107,8 @@ export async function processJobDiscovery(organizationId: string, runId: string,
   let totalDuplicates = 0;
   let totalNewVacancies = 0;
   let totalRejectedVacancies = 0;
+  let totalOutOfScope = 0;
+  const outOfScopeSamples: string[] = [];
   let totalProviderErrors = 0;
   let totalRateLimits = 0;
   let totalQualificationJobsQueued = 0;
@@ -168,9 +147,12 @@ export async function processJobDiscovery(organizationId: string, runId: string,
         }
         
         const capped = accessibleJobs.slice(0, limitPerQuery);
-        totalRejectedVacancies += prepared.invalidSources.length;
+        totalRejectedVacancies += prepared.invalidSources.length + prepared.outOfScope.length;
+        totalOutOfScope += prepared.outOfScope.length;
+        for (const item of prepared.outOfScope) if (outOfScopeSamples.length < 5) outOfScopeSamples.push(`${item.job.title}: ${item.verdict.reason}`.slice(0, 140));
         
-        const saved = await persistNormalizedVacancies(organizationId, capped);
+        // Rejected roles are saved too, as REJECTED records with their reason. They are never queued.
+        const saved = await persistNormalizedVacancies(organizationId, [...capped, ...prepared.outOfScope.map((item) => item.job)]);
         
         totalValidVacancies += capped.length;
         totalDuplicates += prepared.duplicateReasons.length + saved.duplicateReasons.length;
@@ -212,9 +194,15 @@ export async function processJobDiscovery(organizationId: string, runId: string,
     detail: JSON.stringify({
       runId: run.id,
       queries: totalQueries,
+      retrieved: totalRawResults,
+      acceptedMarketing: totalValidVacancies,
+      rejectedNotMarketing: totalOutOfScope,
+      duplicates: totalDuplicates,
       newVacancies: totalNewVacancies,
       qualificationJobsQueued: totalQualificationJobsQueued,
       rateLimitHit,
+      scopeVersion: 1,
+      rejectedSamples: outOfScopeSamples,
     }).slice(0, 2000),
   });
 
@@ -238,6 +226,18 @@ export async function queueVacancyAnalysis(organizationId: string, vacancyId: st
 }
 
 export async function processApplicationPreparation(organizationId: string, vacancyId: string, forceRegenerate = false) {
+  // Marketing only. Old queue jobs and legacy records stop here without creating a package.
+  const target = await prisma.jobVacancy.findFirst({ where: { id: vacancyId, organizationId }, select: { id: true, title: true, description: true, rawData: true } });
+  if (target) {
+    const verdict = withTimestamp(classifyMarketingRole({ title: target.title, description: target.description }));
+    if (!verdict.inScope) {
+      await excludeVacancy(organizationId, target, verdict);
+      const stale = await prisma.jobApplication.findMany({ where: { organizationId, vacancyId }, select: { id: true } });
+      for (const item of stale) await excludeApplication(item.id, verdict);
+      logInfo("application.not_marketing", { vacancyId, reason: verdict.reason });
+      return;
+    }
+  }
   const applicationId = await prepareApplication(organizationId, vacancyId, forceRegenerate);
   await attachBrowserInspection(applicationId);
   const submitted = await prisma.jobApplication.findFirst({
@@ -291,8 +291,15 @@ export async function processApplicationPreparation(organizationId: string, vaca
 }
 
 export async function processApplicationSubmit(organizationId: string, applicationId: string) {
-  const application = await prisma.jobApplication.findUnique({ where: { id: applicationId } });
+  const application = await prisma.jobApplication.findUnique({ where: { id: applicationId }, include: { vacancy: { select: { title: true, description: true } } } });
   if (!application || application.organizationId !== organizationId) return;
+  // Final gate. Nothing that is not a marketing role is sent, whatever put it in the queue.
+  const scope = classifyMarketingRole({ title: application.vacancy.title, description: application.vacancy.description });
+  if (!scope.inScope) {
+    await excludeApplication(application.id, scope);
+    logInfo("application.submit_blocked_not_marketing", { applicationId, reason: scope.reason });
+    return;
+  }
   if (!applicationAutomationEnabled() || !applicationLiveSubmitEnabled() || applicationMode() !== "AUTO_SUBMIT") {
     await prisma.jobApplication.update({
       where: { id: application.id },

@@ -18,6 +18,8 @@ const greenhouse = {
   first_published: "2026-05-22T09:16:29-04:00",
 };
 
+const marketingContent = "<p>Own paid media campaigns, SEO and lifecycle email marketing. Report on CAC and funnel conversion across acquisition channels.</p>";
+
 describe("job discovery", () => {
   it("normalizes a public vacancy without inventing missing fields", () => {
     const job = normalizeVacancy({
@@ -49,17 +51,17 @@ describe("job discovery", () => {
   });
 
   it("merges the same job and keeps different URLs apart", () => {
-    const left = { companyName: "GitLab", title: "Software Engineer", applicationUrl: "https://job-boards.greenhouse.io/gitlab/jobs/10/", location: "Remote", externalId: "10" };
-    const right = { companyName: "gitlab", title: "Software Engineer", applicationUrl: "https://job-boards.greenhouse.io/gitlab/jobs/10", location: "Remote, Canada", externalId: "10" };
+    const left = { companyName: "GitLab", title: "Growth Marketing Manager", applicationUrl: "https://job-boards.greenhouse.io/gitlab/jobs/10/", location: "Remote", externalId: "10" };
+    const right = { companyName: "gitlab", title: "Growth Marketing Manager", applicationUrl: "https://job-boards.greenhouse.io/gitlab/jobs/10", location: "Remote, Canada", externalId: "10" };
     expect(duplicateDecision(left, right)).toMatchObject({ merge: true, reason: "canonical application URL" });
     expect(sameVacancy(
-      { companyName: "GitLab", title: "Software Engineer", applicationUrl: "https://jobs.example/a", location: "Remote" },
-      { companyName: "GitLab", title: "Software Engineer", applicationUrl: "https://jobs.example/b", location: "Remote" },
+      { companyName: "GitLab", title: "Growth Marketing Manager", applicationUrl: "https://jobs.example/a", location: "Remote" },
+      { companyName: "GitLab", title: "Growth Marketing Manager", applicationUrl: "https://jobs.example/b", location: "Remote" },
     )).toBe(false);
     const prepared = prepareDiscoveredVacancies([
-      { source: "greenhouse", sourceUrl: left.applicationUrl, applicationUrl: left.applicationUrl, externalId: "10", companyName: "GitLab", title: "Software Engineer", location: "Remote", description: greenhouse.content },
-      { source: "greenhouse", sourceUrl: right.applicationUrl, applicationUrl: right.applicationUrl, externalId: "10", companyName: "GitLab", title: "Software Engineer", location: "Remote", description: greenhouse.content },
-    ], "engineer");
+      { source: "greenhouse", sourceUrl: left.applicationUrl, applicationUrl: left.applicationUrl, externalId: "10", companyName: "GitLab", title: "Growth Marketing Manager", location: "Remote", description: marketingContent },
+      { source: "greenhouse", sourceUrl: right.applicationUrl, applicationUrl: right.applicationUrl, externalId: "10", companyName: "GitLab", title: "Growth Marketing Manager", location: "Remote", description: marketingContent },
+    ], "growth marketing");
     expect(prepared.kept).toHaveLength(1);
     expect(prepared.duplicateReasons).toEqual(["canonical application URL"]);
   });

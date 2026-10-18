@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildCvDraft } from "@/lib/applications/cv";
 import { scoreJobFit } from "@/lib/applications/fit";
-import { assessVacancy } from "@/lib/applications/job-pipeline";
+// These tests exercise the fit engine on its own. The marketing scope has its own tests in marketing-scope*.test.ts.
+import { assessFit as assessVacancy } from "@/lib/applications/job-pipeline";
 import {
   applicationQueueDecision,
   classifyLanes,

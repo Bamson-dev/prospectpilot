@@ -35,7 +35,7 @@ describe("job discovery contract", () => {
 
     // 2. Trigger the manual discovery via the producer
     const formData = new FormData();
-    formData.append("query", "software engineer typescript");
+    formData.append("query", "growth marketing manager");
     formData.append("limit", "1");
 
     let redirectedTo = "";
@@ -66,7 +66,7 @@ describe("job discovery contract", () => {
     
     const payload = job?.payload as Record<string, unknown>;
     expect(payload.runId).toBe(run?.id);
-    expect(payload.query).toBe("software engineer typescript");
+    expect(payload.query).toBe("growth marketing manager");
     expect(payload.limit).toBe("1");
 
     // 5. Test the consumer contract (hand-off)

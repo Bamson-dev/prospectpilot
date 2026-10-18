@@ -5,6 +5,7 @@ import { matchesQuery, normalizeVacancy, type NormalizedVacancy, type RawDiscove
 import { scoreJobFit, type FitResult } from "@/lib/applications/fit";
 import { extractRequirements } from "@/lib/applications/requirements";
 import { evaluateOpportunity, type OpportunityReport } from "@/lib/applications/opportunity";
+import { classifyMarketingRole, withTimestamp, type StoredMarketingVerdict } from "@/lib/applications/marketing-scope";
 import type { CandidateRecord, ExtractedRequirement, JobInput, RequirementRole } from "@/lib/applications/types";
 
 export type FitState = "APPLY" | "REVIEW" | "NOT_A_FIT";
@@ -18,6 +19,7 @@ export type QualificationExplanation = {
   preferred: Array<{ requirement: string; match: string; evidence: string | null; reason: string }>;
   responsibilities: string[];
   opportunity?: OpportunityReport;
+  marketing?: StoredMarketingVerdict;
 };
 
 export type DiscoverySummary = {
@@ -60,9 +62,17 @@ export function prepareDiscoveredVacancies(jobs: RawDiscoveredVacancy[], query: 
     }
     eligible.push(job);
   }
+  // Marketing scope. A vacancy that is not a marketing role is never kept for qualification.
+  const inScope: NormalizedVacancy[] = [];
+  const outOfScope: Array<{ job: NormalizedVacancy; verdict: StoredMarketingVerdict }> = [];
+  for (const job of eligible) {
+    const verdict = withTimestamp(classifyMarketingRole({ title: job.title, description: job.description }));
+    if (verdict.inScope) inScope.push({ ...job, marketing: verdict });
+    else outOfScope.push({ job: { ...job, marketing: verdict }, verdict });
+  }
   const kept: NormalizedVacancy[] = [];
   const duplicateReasons: string[] = [];
-  for (const job of eligible) {
+  for (const job of inScope) {
     const match = kept.find((existing) => duplicateDecision(identity(existing), identity(job)).merge);
     if (!match) {
       kept.push(job);
@@ -70,10 +80,11 @@ export function prepareDiscoveredVacancies(jobs: RawDiscoveredVacancy[], query: 
     }
     duplicateReasons.push(duplicateDecision(identity(match), identity(job)).reason ?? "duplicate");
   }
-  return { normalized, kept, duplicateReasons, failed, invalidSources };
+  return { normalized, kept, duplicateReasons, failed, invalidSources, outOfScope };
 }
 
-export function assessVacancy(job: JobInput, candidate: CandidateRecord) {
+// Fit scoring alone. It does not know about the marketing scope. Production code calls assessVacancy.
+export function assessFit(job: JobInput, candidate: CandidateRecord) {
   const requirements = extractRequirements(job.description);
   const fit = scoreJobFit(job, candidate, requirements);
   const opportunity = evaluateOpportunity({ job, candidate, requirements });
@@ -81,6 +92,20 @@ export function assessVacancy(job: JobInput, candidate: CandidateRecord) {
   explanation.state = opportunity.decision;
   explanation.opportunity = opportunity;
   return { requirements, fit, explanation, state: opportunity.decision, opportunity };
+}
+
+// Qualification entry point. Marketing only: whatever the fit scorer says, a role outside marketing is
+// NOT_A_FIT and never reaches preparation.
+export function assessVacancy(job: JobInput, candidate: CandidateRecord) {
+  const { requirements, fit, explanation, opportunity } = assessFit(job, candidate);
+  const marketing = withTimestamp(classifyMarketingRole({ title: job.title, description: job.description }));
+  explanation.marketing = marketing;
+  if (!marketing.inScope) {
+    explanation.state = "NOT_A_FIT";
+    explanation.opportunity = { ...opportunity, decision: "NOT_A_FIT", queue: "hold", reason: `Not a marketing role. ${marketing.reason}` };
+    return { requirements, fit, explanation, state: "NOT_A_FIT" as const, opportunity: explanation.opportunity, marketing };
+  }
+  return { requirements, fit, explanation, state: opportunity.decision, opportunity, marketing };
 }
 
 export function explainQualification(requirements: ExtractedRequirement[], selections: EvidenceSelection[]): QualificationExplanation {

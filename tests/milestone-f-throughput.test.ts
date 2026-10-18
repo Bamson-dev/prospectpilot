@@ -7,7 +7,7 @@ import type { CandidateRecord } from "@/lib/applications/types";
 describe("Milestone F: High-Volume Throughput", () => {
   function generateMockJobs(count: number): RawDiscoveredVacancy[] {
     const jobs: RawDiscoveredVacancy[] = [];
-    const roles = ["Software Engineer", "Backend Engineer", "Frontend Developer", "Product Manager"];
+    const roles = ["Growth Marketing Manager", "Performance Marketing Manager", "Product Marketing Manager", "Demand Generation Manager"];
     for (let i = 0; i < count; i++) {
       const role = roles[i % roles.length];
       const duplicateSeed = i % 10 === 0 ? Math.floor(i / 10) : i; // Add 10% duplicates
@@ -21,7 +21,7 @@ describe("Milestone F: High-Volume Throughput", () => {
         location: "Remote",
         employmentType: "Full-Time",
         workplaceType: "Remote",
-        description: `We are looking for a ${role} with 3 years of experience. You should know Node.js, React, and TypeScript. Remote friendly.`,
+        description: `We are looking for a ${role} with 3 years of experience. You will own paid media campaigns, SEO, lifecycle email marketing and funnel conversion, and report on CAC. Remote friendly.`,
         originalDescription: `We are looking for a ${role}...`,
         postedAt: new Date().toISOString(),
       });
@@ -36,7 +36,7 @@ describe("Milestone F: High-Volume Throughput", () => {
   it("can normalize and deduplicate 500 records in under 2 seconds", () => {
     const jobs = generateMockJobs(500);
     const start = Date.now();
-    const prepared = prepareDiscoveredVacancies(jobs, "software engineer developer manager");
+    const prepared = prepareDiscoveredVacancies(jobs, "marketing manager growth demand");
     const duration = Date.now() - start;
 
     expect(duration).toBeLessThan(2000);
@@ -47,7 +47,7 @@ describe("Milestone F: High-Volume Throughput", () => {
 
   it("can qualify 100 jobs efficiently", () => {
     const jobs = generateMockJobs(100);
-    const prepared = prepareDiscoveredVacancies(jobs, "engineer");
+    const prepared = prepareDiscoveredVacancies(jobs, "marketing");
     const person = candidate();
 
     const start = Date.now();

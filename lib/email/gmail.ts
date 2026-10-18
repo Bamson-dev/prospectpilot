@@ -3,6 +3,17 @@ import { classifyProviderFailure, isPermanentProviderFailure, providerFailureMes
 import { buildMimeWithAttachments } from "@/lib/email/mime";
 import { listUnsubscribeHeaders, sanitizeOutbound, type EmailProvider, type OutboundEmail } from "@/lib/email/types";
 
+// HTTP status and Google's own error reason and message. Google error bodies hold no tokens. Capped in length.
+export function safeProviderDetail(status: number, body: string) {
+  try {
+    const parsed = JSON.parse(body) as { error?: { status?: string; message?: string; errors?: Array<{ reason?: string }> } };
+    const reason = parsed.error?.errors?.[0]?.reason ?? parsed.error?.status ?? "unknown";
+    return `HTTP ${status} ${reason}: ${(parsed.error?.message ?? "").slice(0, 160)}`.trim();
+  } catch {
+    return `HTTP ${status}`;
+  }
+}
+
 export class GmailProvider implements EmailProvider {
   readonly name = "gmail" as const;
 
@@ -63,6 +74,7 @@ export class GmailProvider implements EmailProvider {
       const kind = classifyProviderFailure(response.status, body);
       const error = new AppError(providerFailureMessage(kind));
       error.name = isPermanentProviderFailure(kind) ? "PermanentProviderError" : "TransientProviderError";
+      (error as Error & { providerDetail?: string }).providerDetail = safeProviderDetail(response.status, body);
       throw error;
     }
     const payload = JSON.parse(body) as { id?: string };

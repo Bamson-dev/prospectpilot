@@ -14,6 +14,16 @@ export function safeProviderDetail(status: number, body: string) {
   }
 }
 
+// Google's OAuth token error: HTTP status, error code and description. Holds no secrets.
+export function safeTokenDetail(status: number, body: string) {
+  try {
+    const parsed = JSON.parse(body) as { error?: string; error_description?: string };
+    return `HTTP ${status} ${parsed.error ?? "unknown"}: ${(parsed.error_description ?? "").slice(0, 160)}`.trim();
+  } catch {
+    return `HTTP ${status}`;
+  }
+}
+
 export class GmailProvider implements EmailProvider {
   readonly name = "gmail" as const;
 
@@ -148,7 +158,9 @@ export class GmailProvider implements EmailProvider {
     const body = await response.text();
     if (!response.ok) {
       const kind = classifyProviderFailure(response.status, body);
-      throw new AppError(providerFailureMessage(kind));
+      const error = new AppError(providerFailureMessage(kind));
+      (error as Error & { providerDetail?: string }).providerDetail = `token refresh ${safeTokenDetail(response.status, body)}`;
+      throw error;
     }
     const payload = JSON.parse(body) as { access_token?: string };
     if (!payload.access_token) throw new AppError("Gmail did not return an access token.");

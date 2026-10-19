@@ -32,7 +32,7 @@ export default async function DiscoverJobsPage({ searchParams }: { searchParams:
       <Panel className="mb-3">
         <p className="text-sm text-muted">{jobDiscoveryEnabled() ? "Discovery is enabled." : "JOB_DISCOVERY_ENABLED is off, so a search will not run."}</p>
         <form action={enqueueJobSearch} className="mt-3 grid gap-2">
-          <input name="query" placeholder="software engineer" required />
+          <input name="query" placeholder="growth marketing manager" required />
           <input name="limit" type="number" min={1} max={20} defaultValue={15} />
           <SubmitButton pendingLabel="Queuing">Start discovery</SubmitButton>
         </form>
